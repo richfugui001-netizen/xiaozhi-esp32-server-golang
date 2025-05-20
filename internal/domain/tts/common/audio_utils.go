@@ -199,8 +199,7 @@ func (d *MP3Decoder) Run(startTs int64) error {
 			// 从MP3读取PCM数据
 			n, ok := d.streamer.Stream(mp3Buffer)
 			if !firstFrame {
-				firstFrame = true
-				log.Infof("tts首帧耗时: %d ms", time.Now().UnixMilli()-startTs)
+				log.Infof("tts云端首帧耗时: %d ms", time.Now().UnixMilli()-startTs)
 			}
 			//fmt.Printf("for loop, n: %d\n", n)
 			if !ok {
@@ -268,6 +267,11 @@ func (d *MP3Decoder) Run(startTs int64) error {
 						log.Debugf("mp3Decoder context done, exit")
 						return nil
 					default:
+						if !firstFrame {
+							firstFrame = true
+							log.Infof("tts云端->首帧解码完成耗时: %d ms", time.Now().UnixMilli()-startTs)
+						}
+
 						d.outputOpusChan <- frameData
 					}
 

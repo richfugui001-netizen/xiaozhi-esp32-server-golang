@@ -83,7 +83,7 @@ func HandleLLMWithContext(ctx context.Context, llmProvider LLMProvider, dialogue
 							if sentence != "" {
 								if !firstFrame {
 									firstFrame = true
-									log.Infof("llm首句耗时: %d ms", time.Now().UnixMilli()-startTs)
+									log.Infof("耗时统计: llm首句: %d ms", time.Now().UnixMilli()-startTs)
 								}
 								log.Infof("处理完整句子: %s", sentence)
 								// 发送完整句子给客户端

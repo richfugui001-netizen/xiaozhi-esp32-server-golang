@@ -531,7 +531,7 @@ func (p *XiaozhiProvider) handleTTSConnection(ctx context.Context, text string, 
 				receivedFrames = true
 				if !firstFrameTs {
 					firstFrameTs = true
-					log.Debugf("xiaozhi服务端消息tts 第一个音频帧时间: %d", time.Now().UnixMilli()-startTs)
+					log.Debugf("tts耗时统计: xiaozhi服务tts 第一个音频帧时间: %d", time.Now().UnixMilli()-startTs)
 				}
 				outputChan <- msg
 				if i%20 == 0 {

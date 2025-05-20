@@ -5,10 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	log "xiaozhi-esp32-server-golang/logger"
 	"strings"
 	"time"
 	"unicode"
+	log "xiaozhi-esp32-server-golang/logger"
 
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
@@ -107,7 +107,7 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, llmResponseChann
 
 			if llmResponse.IsEnd {
 				//延迟50ms毫秒再发stop
-				time.Sleep(50 * time.Millisecond)
+				//time.Sleep(50 * time.Millisecond)
 				//写到redis中
 				llm_memory.Get().AddMessage(ctx, state.DeviceID, "assistant", fullText.String())
 				// 发送结束消息
