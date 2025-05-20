@@ -1,0 +1,16 @@
+{
+  "mqtt": {
+    "port": 2883,
+    "host": ""
+  },
+  "log": {
+    "level": "info",
+    "filename": "logs/mqtt_server.log"
+  },
+  "tls": {
+    "enable": true,
+    "port": 8883,
+    "pem": "config/server.pem",
+    "key": "config/server.key"
+  }
+}
