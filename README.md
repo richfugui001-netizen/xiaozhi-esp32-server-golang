@@ -22,21 +22,22 @@
 - cosyvoice
 
 # 快速开始
-## 安装onnx running依赖
-## 部署funasr的服务
+
+### 安装onnx running依赖
+### 部署funasr的服务
 https://github.com/modelscope/FunASR/blob/main/runtime/docs/SDK_advanced_guide_online_zh.md
-## 编译mqtt服务
+### 编译mqtt服务
 go build cmd/mqtt/*.go
-## 配置文件 config.json
-## 编译xiaozhi-esp32-server-golang
-## 启动
+### 配置文件 config.json
+### 编译xiaozhi-esp32-server-golang
+### 启动
 
 # TODO
-## 用户认证
-## 接入更多云厂商asr服务
-## 用户界面
-## llm记忆体
-## docker化部署
+### 用户认证
+### 接入更多云厂商asr服务
+### 用户界面
+### llm记忆体
+### docker化部署
 
 
 
