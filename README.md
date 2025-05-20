@@ -39,7 +39,6 @@ go build cmd/mqtt/*.go
 ### llm记忆体
 ### docker化部署
 
-加群
 ![微信图片_20250520133639](https://github.com/user-attachments/assets/241dfd5c-185b-445c-b75b-0a07c76ecf06)
 
 
