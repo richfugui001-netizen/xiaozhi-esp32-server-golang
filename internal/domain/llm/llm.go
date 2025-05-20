@@ -3,11 +3,11 @@ package llm
 import (
 	"bytes"
 	"context"
-	"xiaozhi-esp32-server-golang/internal/domain/llm/common"
-	log "xiaozhi-esp32-server-golang/logger"
 	"strings"
 	"time"
 	"unicode"
+	"xiaozhi-esp32-server-golang/internal/domain/llm/common"
+	log "xiaozhi-esp32-server-golang/logger"
 )
 
 // 句子结束的标点符号
@@ -36,72 +36,6 @@ func isSentencePausePunctuation(r rune) bool {
 	return false
 }
 
-// 处理流式LLM响应
-func HandleLLM(llmProvider LLMProvider, dialogue []interface{}, sessionID string, sentenceChannel chan common.LLMResponseStruct, Done chan struct{}) ([]string, error) {
-	// 将对话历史转换为接口切片
-	llmResponse := llmProvider.Response(sessionID, dialogue)
-
-	// 处理 LLM 响应
-	messageSlice := make([]string, 0)
-	var buffer bytes.Buffer // 用于累积接收到的内容
-
-	for {
-		select {
-		case response, ok := <-llmResponse:
-			if !ok {
-				// llmResponse通道已关闭，处理剩余内容
-				remaining := buffer.String()
-				if remaining != "" {
-					log.Infof("处理剩余内容: %s", remaining)
-					messageSlice = append(messageSlice, remaining)
-
-					sentenceChannel <- common.LLMResponseStruct{
-						Text:  remaining,
-						IsEnd: true,
-					}
-				}
-				return messageSlice, nil
-			}
-
-			log.Infof("LLM 响应片段: %s", response)
-
-			// 将响应片段添加到累积缓冲区
-			buffer.WriteString(response)
-
-			// 检查缓冲区中是否包含完整的句子
-			sentences, remaining := extractSmartSentences(buffer.String(), 5, 20)
-
-			// 如果有完整的句子，处理它们
-			if len(sentences) > 0 {
-				for _, sentence := range sentences {
-					if sentence != "" {
-						log.Infof("处理完整句子: %s", sentence)
-						messageSlice = append(messageSlice, sentence)
-
-						// 发送完整句子给客户端
-						sentenceChannel <- common.LLMResponseStruct{
-							Text:  sentence,
-							IsEnd: false,
-						}
-					}
-				}
-			}
-
-			// 更新缓冲区为剩余内容
-			buffer.Reset()
-			buffer.WriteString(remaining)
-
-		case <-Done:
-			// Done通道被触发，立即停止处理并返回
-			log.Infof("收到Done信号，停止LLM响应处理")
-
-			// 通知调用者LLM响应已结束
-			close(sentenceChannel)
-			return messageSlice, nil
-		}
-	}
-}
-
 // HandleLLMWithContext 使用上下文控制来处理LLM响应
 func HandleLLMWithContext(ctx context.Context, llmProvider LLMProvider, dialogue []interface{}, sessionID string) (chan common.LLMResponseStruct, error) {
 	// 使用支持上下文的响应方法
@@ -123,8 +57,6 @@ func HandleLLMWithContext(ctx context.Context, llmProvider LLMProvider, dialogue
 		for {
 			select {
 			case response, ok := <-llmResponse:
-
-				//log.Infof("LLM 响应片段: %s, ok: %v", response, ok)
 				if !ok {
 					// llmResponse通道已关闭，处理剩余内容
 					remaining := buffer.String()
@@ -141,34 +73,36 @@ func HandleLLMWithContext(ctx context.Context, llmProvider LLMProvider, dialogue
 				// 将响应片段添加到累积缓冲区
 				buffer.WriteString(response)
 
-				// 检查缓冲区中是否包含完整的句子
-				sentences, remaining := extractSmartSentences(buffer.String(), 5, 100)
+				if containsSentenceSeparator(response, isFirst) {
+					// 检查缓冲区中是否包含完整的句子
+					sentences, remaining := extractSmartSentences(buffer.String(), 5, 100, isFirst)
 
-				// 如果有完整的句子，处理它们
-				if len(sentences) > 0 {
-					for _, sentence := range sentences {
-						if sentence != "" {
-							if !firstFrame {
-								firstFrame = true
-								log.Infof("llm首句耗时: %d ms", time.Now().UnixMilli()-startTs)
-							}
-							log.Infof("处理完整句子: %s", sentence)
-							// 发送完整句子给客户端
-							sentenceChannel <- common.LLMResponseStruct{
-								Text:    sentence,
-								IsStart: isFirst,
-								IsEnd:   false,
-							}
-							if isFirst {
-								isFirst = false
+					// 如果有完整的句子，处理它们
+					if len(sentences) > 0 {
+						for _, sentence := range sentences {
+							if sentence != "" {
+								if !firstFrame {
+									firstFrame = true
+									log.Infof("llm首句耗时: %d ms", time.Now().UnixMilli()-startTs)
+								}
+								log.Infof("处理完整句子: %s", sentence)
+								// 发送完整句子给客户端
+								sentenceChannel <- common.LLMResponseStruct{
+									Text:    sentence,
+									IsStart: isFirst,
+									IsEnd:   false,
+								}
+								if isFirst {
+									isFirst = false
+								}
 							}
 						}
 					}
-				}
 
-				// 更新缓冲区为剩余内容
-				buffer.Reset()
-				buffer.WriteString(remaining)
+					// 更新缓冲区为剩余内容
+					buffer.Reset()
+					buffer.WriteString(remaining)
+				}
 
 			case <-ctx.Done():
 				// 上下文已取消，立即停止处理并返回

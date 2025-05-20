@@ -31,8 +31,9 @@ type Config struct {
 		Filename string `json:"filename"`
 	} `json:"log"`
 	TLS struct {
-		Pem string `json:"pem"`
-		Key string `json:"key"`
+		Enable bool   `json:"enable"`
+		Pem    string `json:"pem"`
+		Key    string `json:"key"`
 	} `json:"tls"`
 }
 
@@ -172,27 +173,29 @@ func startMqttServer() {
 
 	// 启动周期性打印订阅主题的任务（每10秒打印一次）
 	//deviceHook.StartPeriodicSubscriptionPrinter(10 * time.Second)
-	pemFile := config.TLS.Pem
-	keyFile := config.TLS.Key
-	cert, err := tls.LoadX509KeyPair(pemFile, keyFile)
+	if config.TLS.Enable {
+		pemFile := config.TLS.Pem
+		keyFile := config.TLS.Key
+		cert, err := tls.LoadX509KeyPair(pemFile, keyFile)
 
-	if err != nil {
-		log.Fatalf("加载证书失败: %v", err)
-		os.Exit(1)
-		return
-	}
+		if err != nil {
+			log.Fatalf("加载证书失败: %v", err)
+			os.Exit(1)
+			return
+		}
 
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-	}
-	ssltcp := listeners.NewTCP(listeners.Config{
-		ID:        "ssl",
-		Address:   ":8883",
-		TLSConfig: tlsConfig,
-	})
-	err = Server.AddListener(ssltcp)
-	if err != nil {
-		log.Fatal(err)
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+		ssltcp := listeners.NewTCP(listeners.Config{
+			ID:        "ssl",
+			Address:   ":8883",
+			TLSConfig: tlsConfig,
+		})
+		err = Server.AddListener(ssltcp)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	// 使用配置中的端口号

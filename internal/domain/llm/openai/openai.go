@@ -135,6 +135,15 @@ func (p *OpenAIProvider) ResponseWithContext(ctx context.Context, sessionID stri
 			return
 		}
 
+		// 添加 httptrace 追踪，打印连接池复用信息
+		trace := &httptrace.ClientTrace{
+			GotConn: func(info httptrace.GotConnInfo) {
+				log.Infof("[httptrace] GotConn: reused=%v, wasIdle=%v, remoteAddr=%v", info.Reused, info.WasIdle, info.Conn.RemoteAddr())
+			},
+		}
+
+		ctx = httptrace.WithClientTrace(ctx, trace)
+
 		req, err := http.NewRequestWithContext(ctx, "POST", p.BaseURL+"/chat/completions", bytes.NewBuffer(jsonData))
 		if err != nil {
 			log.Errorf("创建请求失败: %v", err)

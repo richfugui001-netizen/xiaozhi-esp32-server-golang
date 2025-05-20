@@ -201,7 +201,7 @@ func connectMQTT(config *ServerResponse) (mqtt.Client, bool) {
 		//InsecureSkipVerify: true, // 跳过证书验证，仅用于测试环境
 	}
 	opts.SetTLSConfig(tlsConfig)
-	opts.AddBroker(fmt.Sprintf("ssl://%s:8883", config.MQTT.Endpoint))
+	opts.AddBroker(fmt.Sprintf("tcp://%s:2883", config.MQTT.Endpoint))
 	opts.SetClientID(config.MQTT.ClientID)
 	opts.SetUsername(config.MQTT.Username)
 	opts.SetPassword(config.MQTT.Password)

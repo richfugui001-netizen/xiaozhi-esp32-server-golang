@@ -104,6 +104,7 @@ func main() {
 }
 
 var OpusData [][]byte
+var firstRecvFrame bool
 
 // runClient 运行小智客户端
 func runClient(serverAddr, deviceID, audioFile string) error {
@@ -137,7 +138,6 @@ func runClient(serverAddr, deviceID, audioFile string) error {
 	// 启动一个协程来处理从服务器接收的消息
 	go func() {
 		defer close(done)
-		var firstRecvFrame bool
 		//var recvInterval int64
 		for {
 			messageType, message, err := conn.ReadMessage()
@@ -194,7 +194,6 @@ func runClient(serverAddr, deviceID, audioFile string) error {
 
 	fmt.Println("开始发送音频数据...")
 
-	voiceStartTs := time.Now().UnixMilli()
 	// 读取并发送音频文件（使用Opus编码）
 	/*if err := sendWavFileWithOpusEncoding(conn, audioFile); err != nil {
 		return fmt.Errorf("发送音频数据失败: %v\n", err)
@@ -215,11 +214,6 @@ func runClient(serverAddr, deviceID, audioFile string) error {
 		saveOpusData()
 		OpusToWav(OpusData, 24000, 1, "ws_output_24000.wav")
 	*/
-	endTs := time.Now().UnixMilli()
-
-	fmt.Printf("发送音频数据耗时: %d 毫秒\n", endTs-voiceStartTs)
-
-	startTs = time.Now().UnixMilli()
 
 	time.Sleep(100 * time.Millisecond)
 	// 发送listen stop消息
@@ -284,6 +278,9 @@ func sendListenStop(conn *websocket.Conn, deviceID string) error {
 	if err := sendJSONMessage(conn, listenStartMsg); err != nil {
 		return fmt.Errorf("发送listen stop消息失败: %v", err)
 	}
+
+	detectStartTs = time.Now().UnixMilli()
+	firstRecvFrame = false
 	return nil
 }
 
@@ -461,22 +458,10 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 	}
 
 	sendListenStart(conn, deviceID)
-	genAndSendAudio("你好", 10)
+	genAndSendAudio(speectText, 20)
 	sendListenStop(conn, deviceID)
 
 	time.Sleep(20 * time.Second)
-
-	sendListenStart(conn, deviceID)
-	genAndSendAudio("讲个笑话", 10)
-	sendListenStop(conn, deviceID)
-
-	time.Sleep(20 * time.Second)
-
-	sendListenStart(conn, deviceID)
-	genAndSendAudio("今天天气怎么样", 10)
-	sendListenStop(conn, deviceID)
-
-	time.Sleep(30 * time.Second)
 
 	return nil
 }
