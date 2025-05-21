@@ -14,7 +14,9 @@
 挂载config目录和端口(http/websocket:8989, 其它端口按需映射)
 
 >docker run -itd --name xiaozhi_server -v config:/workspace/config -p 8989:8989 hackers365/xiaozhi_server:0.1
->国内连不上的话，使用如下源
+
+国内连不上的话，使用如下源
+
 >docker run -itd --name xiaozhi_server -v config:/workspace/config -p 8989:8989 docker.jsdelivr.fyi/hackers365/xiaozhi_server:0.1
 
 现在应该可以连上 
