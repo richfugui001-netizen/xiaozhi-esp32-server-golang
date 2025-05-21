@@ -23,12 +23,26 @@
     "port": 8989
   },
   "mqtt": {
-    "broker": "192.168.208.214",
+    "broker": "127.0.0.1",
     "type": "tcp",
     "port": 2883,
     "client_id": "xiaozhi_server",
     "username": "admin",
     "password": "test!@#"
+  },
+  "mqtt_server": {
+    "enable": true,
+    "listen_host": "0.0.0.0",
+    "listen_port": 2883,
+    "client_id": "xiaozhi_server",
+    "username": "admin",
+    "password": "test!@#",
+    "tls": {
+      "enable": false,
+      "port": 8883,
+      "pem": "config/server.pem",
+      "key": "config/server.key"
+    }
   },
   "udp": {
     "external_host": "127.0.0.1",

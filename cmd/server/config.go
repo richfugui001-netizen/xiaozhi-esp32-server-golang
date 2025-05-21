@@ -2,14 +2,14 @@ package main
 
 import (
 	"fmt"
-	"xiaozhi-esp32-server-golang/internal/app/server/auth"
-	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
-	"xiaozhi-esp32-server-golang/internal/domain/vad"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+	"xiaozhi-esp32-server-golang/internal/app/server/auth"
+	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
+	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
+	"xiaozhi-esp32-server-golang/internal/domain/vad"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	"github.com/redis/go-redis/v9"
@@ -132,14 +132,12 @@ func initRedis() error {
 	err := llm_memory.Init(redisOptions, viper.GetString("redis.key_prefix"))
 	if err != nil {
 		fmt.Printf("init redis error: %v\n", err)
-		os.Exit(1)
 		return err
 	}
 
 	err = userconfig.InitUserConfig(redisOptions, viper.GetString("redis.key_prefix"))
 	if err != nil {
 		fmt.Printf("init userconfig error: %v\n", err)
-		os.Exit(1)
 		return err
 	}
 

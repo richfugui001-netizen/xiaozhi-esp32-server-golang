@@ -1,4 +1,4 @@
-package main
+package mqtt_server
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 
 	mqttServer "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/packets"
+	"github.com/spf13/viper"
 )
 
 // AuthHook 实现自定义鉴权逻辑
@@ -29,7 +30,9 @@ func (h *AuthHook) OnConnectAuthenticate(cl *mqttServer.Client, pk packets.Packe
 	username := string(pk.Connect.Username)
 	password := string(pk.Connect.Password)
 
-	if username == "admin" && password == "test!@#" {
+	adminUsername := viper.GetString("mqtt_server.username")
+	adminPassword := viper.GetString("mqtt_server.password")
+	if username == adminUsername && password == adminPassword {
 		return true
 	}
 

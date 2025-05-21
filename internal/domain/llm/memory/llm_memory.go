@@ -58,7 +58,7 @@ func Init(redisOptions *redis.Options, keyPrefix string) error {
 // Get 获取记忆体实例
 func Get() *Memory {
 	if memoryInstance == nil {
-		return nil
+		return &Memory{}
 	}
 	return memoryInstance
 }
@@ -82,6 +82,11 @@ func (m *Memory) getSystemPromptKey(deviceID string) string {
 
 // AddMessage 添加一条新的对话消息到记忆体
 func (m *Memory) AddMessage(ctx context.Context, deviceID string, role string, content string) error {
+	if m.redisClient == nil {
+		log.Log().Warn("redis client is nil")
+		return nil
+	}
+
 	msg := MemoryMessage{
 		Message: common.Message{
 			Role:    role,
@@ -110,6 +115,11 @@ func (m *Memory) AddMessage(ctx context.Context, deviceID string, role string, c
 
 // GetMessages 获取设备的所有对话记忆
 func (m *Memory) GetMessages(ctx context.Context, deviceID string, count int) ([]MemoryMessage, error) {
+	if m.redisClient == nil {
+		log.Log().Warn("redis client is nil")
+		return []MemoryMessage{}, nil
+	}
+
 	key := m.getMemoryKey(deviceID)
 
 	if count == 0 {
@@ -138,6 +148,11 @@ func (m *Memory) GetMessages(ctx context.Context, deviceID string, count int) ([
 
 // GetMessagesForLLM 获取适用于 LLM 的消息格式
 func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count int) ([]common.Message, error) {
+	if m.redisClient == nil {
+		log.Log().Warn("redis client is nil")
+		return []common.Message{}, nil
+	}
+
 	// 首先获取系统 prompt
 	sysPrompt, err := m.GetSystemPrompt(ctx, deviceID)
 	if err != nil {
@@ -168,12 +183,22 @@ func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count i
 
 // SetSystemPrompt 设置或更新设备的系统 prompt
 func (m *Memory) SetSystemPrompt(ctx context.Context, deviceID string, prompt string) error {
+	if m.redisClient == nil {
+		log.Log().Warn("redis client is nil")
+		return nil
+	}
+
 	key := m.getSystemPromptKey(deviceID)
 	return m.redisClient.Set(ctx, key, prompt, 0).Err()
 }
 
 // GetSystemPrompt 获取设备的系统 prompt
 func (m *Memory) GetSystemPrompt(ctx context.Context, deviceID string) (common.Message, error) {
+	if m.redisClient == nil {
+		log.Log().Warn("redis client is nil")
+		return common.Message{}, nil
+	}
+
 	key := m.getSystemPromptKey(deviceID)
 
 	result, err := m.redisClient.Get(ctx, key).Result()
@@ -192,6 +217,11 @@ func (m *Memory) GetSystemPrompt(ctx context.Context, deviceID string) (common.M
 
 // ResetMemory 重置设备的对话记忆（包括系统 prompt）
 func (m *Memory) ResetMemory(ctx context.Context, deviceID string) error {
+	if m.redisClient == nil {
+		log.Log().Warn("redis client is nil")
+		return nil
+	}
+
 	// 删除对话历史
 	historyKey := m.getMemoryKey(deviceID)
 	if err := m.redisClient.Del(ctx, historyKey).Err(); err != nil {
@@ -209,6 +239,11 @@ func (m *Memory) ResetMemory(ctx context.Context, deviceID string) error {
 
 // GetLastNMessages 获取最近的 N 条消息
 func (m *Memory) GetLastNMessages(ctx context.Context, deviceID string, n int64) ([]MemoryMessage, error) {
+	if m.redisClient == nil {
+		log.Log().Warn("redis client is nil")
+		return []MemoryMessage{}, nil
+	}
+
 	key := m.getMemoryKey(deviceID)
 
 	// 获取最后 N 条消息
@@ -231,6 +266,11 @@ func (m *Memory) GetLastNMessages(ctx context.Context, deviceID string, n int64)
 
 // RemoveOldMessages 删除指定时间之前的消息
 func (m *Memory) RemoveOldMessages(ctx context.Context, deviceID string, before time.Time) error {
+	if m.redisClient == nil {
+		log.Log().Warn("redis client is nil")
+		return nil
+	}
+
 	key := m.getMemoryKey(deviceID)
 	score := float64(before.UnixNano())
 

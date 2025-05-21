@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	log "xiaozhi-esp32-server-golang/logger"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -44,6 +46,9 @@ func InitUserConfig(redisOptions *redis.Options, prefix string) error {
 }
 
 func U() *UserConfig {
+	if userConfigInstance == nil {
+		return &UserConfig{}
+	}
 	return userConfigInstance
 }
 
@@ -75,6 +80,10 @@ func (u *UConfig) getTTsType() string {
 }
 
 func (u *UserConfig) GetUserConfig(ctx context.Context, userID string) (UConfig, error) {
+	if u.redisInstance == nil {
+		log.Log().Warn("redis instance is nil")
+		return UConfig{}, nil
+	}
 	key := u.GetUserConfigKey(userID)
 	//hgetall 拿到所有的
 	userConfig, err := u.redisInstance.HGetAll(ctx, key).Result()

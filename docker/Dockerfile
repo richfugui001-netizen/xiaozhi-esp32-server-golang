@@ -12,7 +12,7 @@ RUN apt-get install -y git tree || true
 RUN apt-get install -y net-tools telnet netcat || true
 RUN apt-get install -y unzip vim iptables iputils-ping || true
 
-COPY lib/onnxruntime-linux-x64-1.21.0.tgz /tmp/
+COPY docker/lib/onnxruntime-linux-x64-1.21.0.tgz /tmp/
 
 RUN cd /tmp && \
     tar -xzf onnxruntime-linux-x64-1.21.0.tgz && \
@@ -73,8 +73,11 @@ RUN sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so
 RUN ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime || true
 
 # 复制启动脚本
-COPY start-service.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/start-service.sh
+#COPY start-service.sh /usr/local/bin/
+#RUN chmod +x /usr/local/bin/start-service.sh
+
+#COPY . .
+#RUN go build -o /workspace/xiaozhi_server /workspace/xiaozhi/cmd/server/  # 编译生成二进制文件
 
 # 创建启动脚本
 RUN echo '#!/bin/bash' > /start.sh && \

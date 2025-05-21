@@ -1,2 +1,5 @@
 *.exe
 *.log
+*.pem
+*.key
+config_shijingbo.json
