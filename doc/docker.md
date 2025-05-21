@@ -1,6 +1,9 @@
 
 # 运行环境
 
+部署funasr
+参见 [funasr docker部署文档](https://github.com/modelscope/FunASR/blob/main/runtime/docs/SDK_advanced_guide_online_zh.md)
+
 克隆代码
 >git clone 'https://github.com/hackers365/xiaozhi-esp32-server-golang'
 
