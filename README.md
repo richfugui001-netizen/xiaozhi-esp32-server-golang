@@ -8,6 +8,9 @@
 - 实现了mqtt和udp服务器
 - 外部资源连接池复用，减少耗时
 
+# 快速开始
+[docker 快速开始](doc/docker.md)
+
 # 模块简介
 ## VAD
 实现了silvero vad声音检测
@@ -18,9 +21,9 @@
 ## TTS
 已实现
 - doubao websocket
-- edgetts
+- edgetts   
 - cosyvoice
-
+    
 # 快速开始
 
 ### 安装onnx running依赖
