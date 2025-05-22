@@ -15,12 +15,13 @@ type Message struct {
 
 // LLMRequest 通用的大语言模型请求体
 type LLMRequest struct {
-	Model       string        `json:"model"`
-	Messages    []interface{} `json:"messages"`
-	Stream      bool          `json:"stream"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
-	Tools       []interface{} `json:"tools,omitempty"`
-	Temperature float64       `json:"temperature,omitempty"`
+	Model          string        `json:"model"`
+	Messages       []interface{} `json:"messages"`
+	Stream         bool          `json:"stream"`
+	MaxTokens      int           `json:"max_tokens,omitempty"`
+	Tools          []interface{} `json:"tools,omitempty"`
+	Temperature    float64       `json:"temperature,omitempty"`
+	EnableThinking bool          `json:"enable_thinking,omitempty"`
 }
 
 // LLMResponse 通用的大语言模型响应体

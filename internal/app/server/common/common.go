@@ -88,7 +88,7 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, llmResponseChann
 			fullText.WriteString(llmResponse.Text)
 
 			// 发送音频帧
-			if err := state.SendTTSAudio(outputChan); err != nil {
+			if err := state.SendTTSAudio(outputChan, llmResponse.IsStart); err != nil {
 				log.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
 				return true, fmt.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
 			}
@@ -223,6 +223,8 @@ func ProcessVadAudio(state *ClientState) {
 						state.Asr.Stop()
 						//释放vad
 						state.Vad.Reset()
+						//asr统计
+						state.SetStartAsrTs()
 						continue
 					}
 				}
@@ -478,6 +480,7 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 		if err != nil {
 			cancel()
 		}
+
 		_ = ok
 		/*
 			if ok {

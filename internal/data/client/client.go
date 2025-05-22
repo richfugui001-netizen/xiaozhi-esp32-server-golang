@@ -283,8 +283,9 @@ type ClientState struct {
 	VoiceStatus
 	SessionCtx Ctx
 
-	UdpInfo  *UdpSession //客户端udp地址
-	MqttInfo *MqttConn   //mqtt连接
+	UdpInfo   *UdpSession //客户端udp地址
+	MqttInfo  *MqttConn   //mqtt连接
+	Statistic Statistic   //耗时统计
 }
 
 func (c *ClientState) IsMqttUdp() bool {
@@ -411,17 +412,22 @@ func (state *ClientState) actionSendAudioData(audioData []byte) error {
 	return state.Conn.WriteMessage(websocket.BinaryMessage, audioData)
 }
 
-func (state *ClientState) SendTTSAudio(audioChan chan []byte) error {
+func (state *ClientState) SendTTSAudio(audioChan chan []byte, isStart bool) error {
 	// 步骤1: 收集前三帧（或更少）
 	preBuffer := make([][]byte, 0, 3)
 	preBufferCount := 0
 
 	totalFrames := preBufferCount // 跟踪已发送的总帧数
 
+	isStatistic := true
 	// 收集前三帧
 	for totalFrames < 3 {
 		select {
 		case frame, ok := <-audioChan:
+			if isStart && isStatistic {
+				log.Debugf("从接收音频结束 asr->llm->tts首帧 整体 耗时: %d ms", state.GetAsrLlmTtsDuration())
+				isStatistic = false
+			}
 			if !ok {
 				// 通道已关闭，发送已收集的帧并返回
 				for _, f := range preBuffer {

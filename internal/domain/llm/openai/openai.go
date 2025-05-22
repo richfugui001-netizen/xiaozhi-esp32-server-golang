@@ -123,10 +123,11 @@ func (p *OpenAIProvider) ResponseWithContext(ctx context.Context, sessionID stri
 		defer close(responseChan)
 
 		reqBody := common.LLMRequest{
-			Model:     p.ModelName,
-			Messages:  dialogue,
-			Stream:    true,
-			MaxTokens: p.MaxTokens,
+			Model:          p.ModelName,
+			Messages:       dialogue,
+			Stream:         true,
+			MaxTokens:      p.MaxTokens,
+			EnableThinking: false,
 		}
 
 		jsonData, err := json.Marshal(reqBody)
@@ -150,13 +151,12 @@ func (p *OpenAIProvider) ResponseWithContext(ctx context.Context, sessionID stri
 			return
 		}
 
-		log.Infof("开始处理OpenAI请求 url: %s, sessionID: %s, req body: %v", p.BaseURL, sessionID, string(jsonData))
-
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+p.APIKey)
-
 		// 添加追踪标识
 		req.Header.Set("X-Session-ID", sessionID)
+
+		log.Infof("开始处理OpenAI请求 url: %s, sessionID: %s, header: %+v, req body: %v", p.BaseURL, sessionID, req.Header, string(jsonData))
 
 		// 创建请求上下文以支持可取消的请求
 		startTime := time.Now()

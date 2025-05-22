@@ -187,7 +187,7 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 
 	pipeReader, pipeWriter := io.Pipe()
 
-	outputOpusChan = make(chan []byte, 10)
+	outputOpusChan = make(chan []byte, 1000)
 
 	go func() {
 		mp3Decoder, err := common.CreateMP3Decoder(pipeReader, outputOpusChan, frameDuration, ctx)
@@ -280,6 +280,7 @@ func (p *DoubaoWSProvider) getWSConnection() (*websocket.Conn, error) {
 		if err == nil && !isTimeout {
 			// 更新最后活跃时间
 			wrapper.LastActiveAt = time.Now()
+			log.Debugf("doubao websocket复用现有连接")
 			return wrapper.Conn, nil
 		}
 

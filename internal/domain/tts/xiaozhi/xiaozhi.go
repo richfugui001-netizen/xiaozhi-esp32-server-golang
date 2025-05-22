@@ -545,7 +545,7 @@ func (p *XiaozhiProvider) handleTTSConnection(ctx context.Context, text string, 
 
 // TextToSpeechStream 实现流式TTS，返回opus音频帧chan
 func (p *XiaozhiProvider) TextToSpeechStream(ctx context.Context, text string, sampleRate int, channels int, frameDuration int) (chan []byte, error) {
-	outputChan := make(chan []byte, 10)
+	outputChan := make(chan []byte, 1000)
 
 	// 尝试处理TTS连接，支持重试
 	go func() {

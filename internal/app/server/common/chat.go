@@ -3,10 +3,10 @@ package common
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	log "xiaozhi-esp32-server-golang/logger"
-	"runtime/debug"
 )
 
 func handleListenStart(state *ClientState, msg *ClientMessage) error {
@@ -24,6 +24,7 @@ func handleListenStop(state *ClientState) error {
 	state.SetClientVoiceStop(true)
 	state.SetClientHaveVoiceLastTime(0)
 	state.Destroy()
+	state.SetStartAsrTs()
 	return nil
 }
 
@@ -70,7 +71,8 @@ func Restart(state *ClientState) error {
 			log.Errorf("处理asr结果失败: %v", err)
 			return
 		}
-		log.Debugf("处理asr结果: %s", text)
+		//统计asr耗时
+		log.Debugf("处理asr结果: %s, 耗时: %d ms", text, state.GetAsrDuration())
 		if text != "" {
 			//发送asr消息
 			response := ServerMessage{

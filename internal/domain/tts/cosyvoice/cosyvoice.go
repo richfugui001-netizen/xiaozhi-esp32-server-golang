@@ -165,7 +165,7 @@ func (p *CosyVoiceTTSProvider) TextToSpeech(ctx context.Context, text string, sa
 		// 创建一个管道
 		pipeReader, pipeWriter := io.Pipe()
 		doneChan := make(chan struct{})
-		outputChan := make(chan []byte, 10)
+		outputChan := make(chan []byte, 1000)
 
 		// 创建MP3解码器
 		mp3Decoder, err := common.CreateMP3Decoder(pipeReader, outputChan, frameDuration, ctx)

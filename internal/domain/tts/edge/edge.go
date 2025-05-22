@@ -92,7 +92,7 @@ func (p *EdgeTTSProvider) TextToSpeech(ctx context.Context, text string, sampleR
 	}
 	defer f.Close()
 	pipeReader, pipeWriter := io.Pipe()
-	outputChan := make(chan []byte, 10)
+	outputChan := make(chan []byte, 1000)
 	// 写入MP3数据到pipe
 	go func() {
 		_, _ = io.Copy(pipeWriter, f)
