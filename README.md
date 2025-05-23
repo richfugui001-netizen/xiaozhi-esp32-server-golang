@@ -11,6 +11,8 @@
 # 快速开始
 [docker 快速开始](doc/docker.md)
 
+# 延迟测试
+[延迟测试结果](doc/delay_test.md)
 # 模块简介
 ## VAD
 实现了silvero vad声音检测
