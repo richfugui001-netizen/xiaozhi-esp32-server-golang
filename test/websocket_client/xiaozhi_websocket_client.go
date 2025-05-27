@@ -73,7 +73,7 @@ type AudioFormat struct {
 }
 
 // Opus编码常量
-const (
+var (
 	// Opus编码的采样率
 	SampleRate = 16000
 	// 音频通道数
@@ -82,6 +82,8 @@ const (
 	FrameDurationMs = 20
 	// PCM缓冲区大小 = 采样率 * 通道数 * 帧持续时间(秒)
 	PCMBufferSize = SampleRate * Channels * FrameDurationMs / 1000
+
+	mode = "auto"
 )
 
 var speectText = "你好测试"
@@ -94,12 +96,20 @@ func main() {
 	deviceID := flag.String("device", "test-device-001", "设备ID")
 	audioFile := flag.String("audio", "../test.wav", "音频文件路径")
 	text := flag.String("text", "你好测试", "文本")
+	modeFlag := flag.String("mode", "auto", "模式")
+	sampleRate := flag.Int("sample_rate", 16000, "sampleRate")
+	frameDurationsMs := flag.Int("frame_ms", 20, "frame duration ms")
+
 	flag.Parse()
 
 	fmt.Printf("运行小智客户端\n服务器: %s\n设备ID: %s\n音频文件: %s\n",
 		*serverAddr, *deviceID, *audioFile)
 
 	speectText = *text
+	SampleRate = *sampleRate
+	FrameDurationMs = *frameDurationsMs
+	mode = *modeFlag
+
 	// 运行客户端
 	if err := runClient(*serverAddr, *deviceID, *audioFile); err != nil {
 		log.Fatalf("客户端运行失败: %v", err)
@@ -255,13 +265,13 @@ func saveOpusData() error {
 	return nil
 }
 
-func sendListenStart(conn *websocket.Conn, deviceID string) error {
+func sendListenStart(conn *websocket.Conn, deviceID string, mode string) error {
 	// 发送listen start消息
 	listenStartMsg := ClientMessage{
 		Type:     MessageTypeListen,
 		DeviceID: deviceID,
 		State:    MessageStateStart,
-		Mode:     "manual",
+		Mode:     mode,
 	}
 
 	if err := sendJSONMessage(conn, listenStartMsg); err != nil {
@@ -283,8 +293,6 @@ func sendListenStop(conn *websocket.Conn, deviceID string) error {
 		return fmt.Errorf("发送listen stop消息失败: %v", err)
 	}
 
-	detectStartTs = time.Now().UnixMilli()
-	firstRecvFrame = false
 	return nil
 }
 
@@ -426,7 +434,7 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 	}
 	_ = edgeConfig
 	//调用tts服务生成语音
-	ttsProvider, err := tts.GetTTSProvider("edge", edgeConfig)
+	ttsProvider, err := tts.GetTTSProvider("cosyvoice", cosyVoiceConfig)
 	if err != nil {
 		return fmt.Errorf("获取tts服务失败: %v", err)
 	}
@@ -447,17 +455,19 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 		}
 
 		for audioData := range audioChan {
-			//fmt.Printf("生成语音数据长度: %d\n", len(audioData))
+			fmt.Printf("发送语音数据长度: %d\n", len(audioData))
 			conn.WriteMessage(websocket.BinaryMessage, audioData)
 			time.Sleep(time.Duration(FrameDurationMs) * time.Millisecond)
 		}
 
-		/*
-			emptyFrame := make([]byte, 50)
-			for i := 0; i <= count; i++ {
-				conn.WriteMessage(websocket.BinaryMessage, emptyFrame)
-				time.Sleep(time.Duration(FrameDurationMs) * time.Millisecond)
-			}*/
+		emptyFrame := make([]byte, 50)
+		for i := 0; i <= count; i++ {
+			conn.WriteMessage(websocket.BinaryMessage, emptyFrame)
+			time.Sleep(time.Duration(FrameDurationMs) * time.Millisecond)
+		}
+
+		detectStartTs = time.Now().UnixMilli()
+		firstRecvFrame = false
 		return nil
 	}
 
@@ -479,9 +489,11 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 				waitInput <- struct{}{}
 				continue
 			}
-			sendListenStart(conn, deviceID)
+			sendListenStart(conn, deviceID, mode)
 			genAndSendAudio(input, 20)
-			sendListenStop(conn, deviceID)
+			if mode != "auto" {
+				sendListenStop(conn, deviceID)
+			}
 		}
 	}
 

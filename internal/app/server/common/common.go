@@ -142,6 +142,9 @@ func ProcessVadAudio(state *ClientState) {
 		}
 		pcmFrame := make([]float32, state.AsrAudioBuffer.PcmFrameSize)
 
+		vadNeedGetCount := 60 / audioFormat.FrameDuration
+
+		var skipVad bool
 		for {
 			sessionCtx := state.GetSessionCtx()
 			select {
@@ -156,13 +159,12 @@ func ProcessVadAudio(state *ClientState) {
 					return
 				}
 				log.Debugf("clientVoiceStop: %+v, asrDataSize: %d\n", state.GetClientVoiceStop(), state.AsrAudioBuffer.GetAsrDataSize())
-				if state.VadProvider == nil {
-					// 初始化vad
-					err = state.Vad.Init()
-					if err != nil {
-						log.Errorf("初始化vad失败: %v", err)
-						continue
-					}
+				clientHaveVoice := state.GetClientHaveVoice()
+				var haveVoice bool
+				if state.ListenMode != "auto" {
+					haveVoice = true
+					clientHaveVoice = true
+					skipVad = true
 				}
 
 				n, err := audioProcesser.DecoderFloat32(opusFrame, pcmFrame)
@@ -170,33 +172,41 @@ func ProcessVadAudio(state *ClientState) {
 					log.Errorf("解码失败: %v", err)
 					continue
 				}
-				//decode opus to pcm
-				state.AsrAudioBuffer.AddAsrAudioData(pcmFrame[:n])
 
-				if state.AsrAudioBuffer.GetAsrDataSize() < 512*2 {
-					log.Debugf("processAsrAudio 音频数据太少, skip")
-					continue
-				}
-				//进行vad
-				pcmData := state.AsrAudioBuffer.GetAsrData(1)
-				var haveVoice bool
-				clientHaveVoice := state.GetClientHaveVoice()
-				if state.ListenMode == "auto" {
-					haveVoice, err = state.VadProvider.IsVAD(pcmData)
-					if err != nil {
-						log.Errorf("processAsrAudio VAD检测失败: %v", err)
-						continue
+				var vadPcmData []float32
+				pcmData := pcmFrame[:n]
+				if !skipVad {
+					//如果已经检测到语音, 则不进行vad检测, 直接将pcmData传给asr
+					if state.VadProvider == nil {
+						// 初始化vad
+						err = state.Vad.Init()
+						if err != nil {
+							log.Errorf("初始化vad失败: %v", err)
+							continue
+						}
+					}
+					//decode opus to pcm
+					state.AsrAudioBuffer.AddAsrAudioData(pcmData)
+
+					if state.AsrAudioBuffer.GetAsrDataSize() >= vadNeedGetCount*state.AsrAudioBuffer.PcmFrameSize {
+						//如果要进行vad, 至少要取60ms的音频数据
+						vadPcmData = state.AsrAudioBuffer.GetAsrData(vadNeedGetCount)
+
+						haveVoice, err = state.VadProvider.IsVAD(vadPcmData)
+						if err != nil {
+							log.Errorf("processAsrAudio VAD检测失败: %v", err)
+							//删除
+							continue
+						}
+						//首次触发识别到语音时,为了语音数据完整性 将vadPcmData赋值给pcmData, 之后的音频数据全部进入asr
+						if haveVoice && !clientHaveVoice {
+							//首次获取全部pcm数据送入asr
+							pcmData = state.AsrAudioBuffer.GetAndClearAllData()
+						}
 					}
 					log.Debugf("isVad pcmData len: %d, haveVoice: %v", len(pcmData), haveVoice)
-				} else {
-					haveVoice = clientHaveVoice
 				}
 
-				if clientHaveVoice {
-					//vad识别成功, 往asr音频通道里发送数据
-					log.Infof("vad识别成功, 往asr音频通道里发送数据, len: %d", len(pcmData))
-					state.AsrAudioChannel <- pcmData
-				}
 				if haveVoice {
 					log.Infof("检测到语音, len: %d", len(pcmData))
 					state.SetClientHaveVoice(true)
@@ -205,11 +215,17 @@ func ProcessVadAudio(state *ClientState) {
 					//如果之前没有语音, 本次也没有语音, 则从缓存中删除
 					if !clientHaveVoice {
 						//保留近10帧
-						if state.AsrAudioBuffer.GetFrameCount() > 10 {
+						if state.AsrAudioBuffer.GetFrameCount() > vadNeedGetCount*3 {
 							state.AsrAudioBuffer.RemoveAsrAudioData(1)
 						}
 						continue
 					}
+				}
+
+				if clientHaveVoice {
+					//vad识别成功, 往asr音频通道里发送数据
+					log.Infof("vad识别成功, 往asr音频通道里发送数据, len: %d", len(pcmData))
+					state.AsrAudioChannel <- pcmData
 				}
 
 				//已经有语音了, 但本次没有检测到语音, 则需要判断是否已经停止说话

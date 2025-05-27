@@ -589,14 +589,26 @@ func (a *AsrAudioBuffer) GetFrameCount() int {
 	return len(a.PcmData) / a.PcmFrameSize
 }
 
-// 副本
+func (a *AsrAudioBuffer) GetAndClearAllData() []float32 {
+	a.AudioBufferMutex.Lock()
+	defer a.AudioBufferMutex.Unlock()
+	pcmData := make([]float32, len(a.PcmData))
+	copy(pcmData, a.PcmData)
+	a.PcmData = []float32{}
+	return pcmData
+}
+
+// 滑动窗口进行取数据
 func (a *AsrAudioBuffer) GetAsrData(frameCount int) []float32 {
 	a.AudioBufferMutex.Lock()
 	defer a.AudioBufferMutex.Unlock()
+	pcmDataLen := len(a.PcmData)
 	retSize := frameCount * a.PcmFrameSize
+	if pcmDataLen < retSize {
+		retSize = pcmDataLen
+	}
 	pcmData := make([]float32, retSize)
-	copy(pcmData, a.PcmData[:retSize])
-	a.PcmData = a.PcmData[retSize:]
+	copy(pcmData, a.PcmData[pcmDataLen-retSize:])
 	return pcmData
 }
 
