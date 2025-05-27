@@ -44,7 +44,8 @@ go build cmd/mqtt/*.go
 ### llm记忆体
 ### docker化部署
 
-![微信图片_20250520133639](https://github.com/user-attachments/assets/241dfd5c-185b-445c-b75b-0a07c76ecf06)
+![进群二维码_min](https://github.com/user-attachments/assets/ecdb7abb-d723-4ada-969e-6082f693fc9f)
+
 
 
 微信：hackers365
