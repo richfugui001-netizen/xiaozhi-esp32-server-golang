@@ -1,8 +1,6 @@
 module xiaozhi-esp32-server-golang
 
-go 1.22.6
-
-toolchain go1.23.8
+go 1.24.3
 
 require (
 	github.com/antonfisher/nested-logrus-formatter v1.3.1
@@ -10,6 +8,7 @@ require (
 	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
+	github.com/google/uuid v1.6.0
 	github.com/gopxl/beep v1.4.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/hraban/opus v0.0.0-20220302220929-eeacdbcb92d0
@@ -31,7 +30,6 @@ require (
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/go-audio/riff v1.0.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/lestrrat-go/strftime v1.1.0 // indirect

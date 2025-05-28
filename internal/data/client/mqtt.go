@@ -17,6 +17,10 @@ const (
 	ServerPubTopicPrefix     = msg.MServerPubTopicPrefix
 )
 
+const (
+	ClientActiveTs = 20
+)
+
 type MqttConn struct {
 	Conn     mqtt.Client
 	PubTopic string

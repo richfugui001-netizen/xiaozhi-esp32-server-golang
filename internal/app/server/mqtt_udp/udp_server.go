@@ -63,7 +63,7 @@ func (s *UdpServer) Start() error {
 	Infof("UDP服务器启动在 %s:%d", "0.0.0.0", s.udpPort)
 
 	// 启动会话清理
-	go s.cleanupSessions()
+	//go s.cleanupSessions()
 
 	// 启动数据包处理
 	go s.handlePackets()

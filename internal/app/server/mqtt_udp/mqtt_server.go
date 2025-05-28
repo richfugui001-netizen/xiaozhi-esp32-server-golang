@@ -79,6 +79,39 @@ func (s *MqttServer) Start() error {
 		return fmt.Errorf("连接MQTT服务器失败: %v", token.Error())
 	}
 
+	err := s.checkClientActive()
+	if err != nil {
+		Errorf("检查客户端活跃失败: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (s *MqttServer) checkClientActive() error {
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.deviceId2ClientState.Range(func(key, value interface{}) bool {
+					clientState := value.(*ClientState)
+					if !clientState.IsActive() {
+						Infof("clientState is not active, clear deviceId: %s", clientState.DeviceID)
+						//解除udp会话
+						s.udpServer.CloseSession(clientState.UdpInfo.ID)
+						//删除mqtt关联关系
+						s.deviceId2ClientState.Delete(key)
+						//销毁clientState
+						clientState.Cancel()
+						clientState.Destroy()
+					}
+					return true
+				})
+			}
+		}
+	}()
 	return nil
 }
 
@@ -109,6 +142,10 @@ func (s *MqttServer) handleMessage(client mqtt.Client, msg mqtt.Message) {
 	}
 
 	clientState := s.getClient(deviceId)
+
+	if clientState != nil {
+		clientState.UpdateLastActiveTs()
+	}
 
 	switch clientMsg.Type {
 	case MessageTypeHello:
