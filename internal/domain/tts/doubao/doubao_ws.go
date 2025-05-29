@@ -70,6 +70,12 @@ var defaultHeader = []byte{0x11, 0x10, 0x11, 0x00}
 var (
 	wsClientMap     = make(map[string]*WSConnWrapper)
 	wsClientMapLock sync.Mutex
+	// 全局WebSocket Dialer，配置更大的缓冲区以避免slice bounds out of range错误
+	wsDialer = websocket.Dialer{
+		ReadBufferSize:   16384, // 16KB 读取缓冲区
+		WriteBufferSize:  16384, // 16KB 写入缓冲区
+		HandshakeTimeout: 45 * time.Second,
+	}
 )
 
 // WSConnWrapper WebSocket连接包装器，带有最后活跃时间
@@ -294,11 +300,14 @@ func (p *DoubaoWSProvider) getWSConnection() (*websocket.Conn, error) {
 		delete(wsClientMap, connKey)
 	}
 
-	// 创建新连接
-	conn, _, err := websocket.DefaultDialer.Dial(p.WSURL.String(), p.Header)
+	// 使用全局配置的Dialer创建新连接
+	conn, _, err := wsDialer.Dial(p.WSURL.String(), p.Header)
 	if err != nil {
 		return nil, err
 	}
+
+	// 设置消息读取限制，防止过大的消息
+	conn.SetReadLimit(1024 * 1024) // 1MB 最大消息大小
 
 	// 设置保持连接
 	conn.SetPingHandler(func(appData string) error {
@@ -310,6 +319,8 @@ func (p *DoubaoWSProvider) getWSConnection() (*websocket.Conn, error) {
 		Conn:         conn,
 		LastActiveAt: time.Now(),
 	}
+
+	log.Debugf("创建新的doubao WebSocket连接，使用全局Dialer配置(读取缓冲区: 16KB，最大消息: 1MB)")
 	return conn, nil
 }
 

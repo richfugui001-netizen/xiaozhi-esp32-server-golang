@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -190,6 +192,42 @@ type StreamingResult struct {
 	IsFinal bool   // 是否为最终结果
 }
 
+// isTimeoutError 判断是否为超时错误
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// 检查是否为网络超时错误
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return true
+	}
+
+	// 检查错误消息中是否包含超时关键词
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "i/o timeout")
+}
+
+// isConnectionClosedError 判断是否为连接关闭错误
+func isConnectionClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// 检查是否为 WebSocket 关闭错误
+	if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway,
+		websocket.CloseAbnormalClosure, websocket.CloseNoStatusReceived) {
+		return true
+	}
+
+	// 检查错误消息中是否包含连接关闭关键词
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "connection closed") ||
+		strings.Contains(errMsg, "broken pipe") ||
+		strings.Contains(errMsg, "connection reset") ||
+		strings.Contains(errMsg, "use of closed network connection")
+}
+
 // writeMessage 安全地向 WebSocket 连接写入消息
 func (f *Funasr) writeMessage(conn *websocket.Conn, messageType int, data []byte) error {
 	if connInfo, ok := f.pool[conn]; ok {
@@ -268,6 +306,17 @@ func (f *Funasr) recvResult(ctx context.Context, conn *websocket.Conn, resultCha
 
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			/*if isTimeoutError(err) {
+				log.Debugf("funasr recvResult 读取识别结果超时: %v", err)
+				//f.removeConnection(conn) // 读取超时，移除连接
+				continue
+			}
+
+			if isConnectionClosedError(err) {
+				log.Debugf("funasr recvResult 读取识别结果连接已关闭: %v", err)
+				f.removeConnection(conn) // 连接已关闭，移除连接
+				return
+			}*/
 			log.Debugf("funasr recvResult 读取识别结果失败: %v", err)
 			f.removeConnection(conn) // 读取失败时移除连接
 			return
@@ -306,6 +355,22 @@ func (f *Funasr) recvResult(ctx context.Context, conn *websocket.Conn, resultCha
 }
 
 func (f *Funasr) forwardStreamAudio(ctx context.Context, cancelFunc context.CancelFunc, conn *websocket.Conn, audioStream <-chan []float32) {
+	sendEndMsg := func() {
+		// 发送终止消息
+		endMessage := FunasrRequest{
+			Mode:          f.config.Mode,
+			ChunkInterval: f.config.ChunkInterval,
+			ChunkSize:     []int{5, 10, 5},
+			WavName:       "stream",
+			IsSpeaking:    false,
+		}
+		endMessageBytes, _ := json.Marshal(endMessage)
+		err := f.writeMessage(conn, websocket.TextMessage, endMessageBytes)
+		if err != nil {
+			log.Debugf("funasr forwardStreamAudio 发送结束消息失败: %v", err)
+		}
+		return
+	}
 	// 处理输入音频流
 	for {
 		select {
@@ -317,19 +382,7 @@ func (f *Funasr) forwardStreamAudio(ctx context.Context, cancelFunc context.Canc
 		case pcmChunk, ok := <-audioStream:
 			if !ok {
 				// 通道已关闭，结束输入
-				// 发送终止消息
-				endMessage := FunasrRequest{
-					Mode:          f.config.Mode,
-					ChunkInterval: f.config.ChunkInterval,
-					ChunkSize:     []int{5, 10, 5},
-					WavName:       "stream",
-					IsSpeaking:    false,
-				}
-				endMessageBytes, _ := json.Marshal(endMessage)
-				err := f.writeMessage(conn, websocket.TextMessage, endMessageBytes)
-				if err != nil {
-					log.Debugf("funasr forwardStreamAudio 发送结束消息失败: %v", err)
-				}
+				sendEndMsg()
 				return
 			}
 
@@ -415,6 +468,16 @@ func (f *Funasr) Process(pcmData []float32) (string, error) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			if isTimeoutError(err) {
+				log.Debugf("funasr Process 读取结果超时: %v", err)
+				f.removeConnection(conn) // 读取超时，移除连接
+				return "", fmt.Errorf("读取结果超时: %v", err)
+			}
+			if isConnectionClosedError(err) {
+				log.Debugf("funasr Process 读取结果连接已关闭: %v", err)
+				f.removeConnection(conn) // 连接已关闭，移除连接
+				return "", fmt.Errorf("连接已关闭: %v", err)
+			}
 			f.removeConnection(conn) // 读取失败时移除连接
 			return "", fmt.Errorf("读取结果失败: %v", err)
 		}
@@ -454,3 +517,39 @@ func Float32SliceToBytes(samples []float32) []byte {
 	}
 	return data
 }
+
+/*
+错误类型判断使用示例：
+
+1. 超时错误判断：
+   if isTimeoutError(err) {
+       // 处理超时情况，可能需要重试或调整超时时间
+       log.Warnf("操作超时: %v", err)
+   }
+
+2. 连接关闭错误判断：
+   if isConnectionClosedError(err) {
+       // 处理连接关闭情况，可能需要重新建立连接
+       log.Warnf("连接已关闭: %v", err)
+   }
+
+3. 综合错误处理：
+   _, message, err := conn.ReadMessage()
+   if err != nil {
+       if isTimeoutError(err) {
+           // 超时：可能是网络延迟或服务器响应慢
+           // 建议：调整超时时间或重试
+       } else if isConnectionClosedError(err) {
+           // 连接关闭：可能是服务器主动断开或网络中断
+           // 建议：重新建立连接
+       } else {
+           // 其他错误：可能是协议错误或数据格式错误
+           // 建议：检查数据格式或协议实现
+       }
+   }
+
+常见错误类型：
+- 超时错误：i/o timeout, context deadline exceeded
+- 连接关闭：connection closed, broken pipe, connection reset
+- WebSocket关闭：close 1000 (normal), close 1001 (going away)
+*/

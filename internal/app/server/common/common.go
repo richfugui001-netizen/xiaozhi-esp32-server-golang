@@ -88,7 +88,7 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, llmResponseChann
 			fullText.WriteString(llmResponse.Text)
 
 			// 发送音频帧
-			if err := state.SendTTSAudio(outputChan, llmResponse.IsStart); err != nil {
+			if err := state.SendTTSAudio(ctx, outputChan, llmResponse.IsStart); err != nil {
 				log.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
 				return true, fmt.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
 			}
@@ -146,7 +146,7 @@ func ProcessVadAudio(state *ClientState) {
 
 		var skipVad bool
 		for {
-			sessionCtx := state.GetSessionCtx()
+			//sessionCtx := state.GetSessionCtx()
 			select {
 			case opusFrame, ok := <-state.OpusAudioBuffer:
 				if state.GetClientVoiceStop() { //已停止 说话 则不接收音频数据
@@ -245,7 +245,7 @@ func ProcessVadAudio(state *ClientState) {
 					}
 				}
 
-			case <-sessionCtx.Done():
+			case <-state.Ctx.Done():
 				return
 			}
 		}
@@ -400,15 +400,12 @@ func isWakeupWord(text string) bool {
 func handleAbortMessage(clientState *ClientState, msg *ClientMessage) error {
 	sessionID := clientState.SessionID
 
-	// 验证设备ID
-	if _, err := auth.A().GetSession(msg.DeviceID); err != nil {
-		return fmt.Errorf("会话验证失败: %v", err)
-	}
-
 	// 设置打断状态
 	clientState.Abort = true
 	clientState.Dialogue.Messages = nil // 清空对话历史
-	clientState.Cancel()
+	clientState.CancelSessionCtx()
+
+	Restart(clientState)
 
 	// 发送中止响应
 	response := ServerMessage{

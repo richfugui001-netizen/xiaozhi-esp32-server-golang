@@ -47,52 +47,89 @@ func Restart(state *ClientState) error {
 	ctx := state.GetSessionCtx()
 
 	//初始化asr相关
-	state.VoiceStatus.Reset()
-	state.AsrAudioBuffer.ClearAsrAudioData()
-
 	if state.ListenMode != "auto" {
 		state.VoiceStatus.SetClientHaveVoice(true)
 	}
 
-	// 启动asr流式识别
-	state.Asr.Ctx, state.Asr.Cancel = context.WithCancel(ctx)
-	state.Asr.AsrAudioChannel = make(chan []float32, 100)
-	asrResultChannel, err := state.AsrProvider.StreamingRecognize(state.Asr.Ctx, state.Asr.AsrAudioChannel)
+	// 启动asr流式识别，复用 restartAsrRecognition 函数
+	err := restartAsrRecognition(ctx, state)
 	if err != nil {
-		log.Errorf("启动asr流式识别失败: %v", err)
-		return fmt.Errorf("启动asr流式识别失败: %v", err)
+		return err
 	}
-	state.AsrResultChannel = asrResultChannel
 
 	// 启动一个goroutine处理asr结果
 	go func() {
-		text, err := state.RetireAsrResult(ctx)
-		if err != nil {
-			log.Errorf("处理asr结果失败: %v", err)
-			return
-		}
-		//统计asr耗时
-		log.Debugf("处理asr结果: %s, 耗时: %d ms", text, state.GetAsrDuration())
-		if text != "" {
-			//发送asr消息
-			response := ServerMessage{
-				Type:      ServerMessageTypeStt,
-				SessionID: state.SessionID,
-				Text:      text,
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("asr结果处理goroutine panic: %v, stack: %s", r, string(debug.Stack()))
 			}
-			if err := state.Conn.WriteJSON(response); err != nil {
-				log.Errorf("发送asr消息失败: %v", err)
+		}()
+
+		maxEmptyRetries := 3 // 最大空结果重试次数
+		emptyRetryCount := 0
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Debugf("asr ctx done")
+				return
+			default:
 			}
-			err = startChat(ctx, state, text)
+
+			text, err := state.RetireAsrResult(ctx)
 			if err != nil {
-				log.Errorf("开始对话失败: %v", err)
+				log.Errorf("处理asr结果失败: %v", err)
+				// 如果是连接错误，尝试重启ASR
+				if emptyRetryCount < maxEmptyRetries {
+					log.Warnf("ASR处理出错，尝试重启ASR识别 (重试 %d/%d)", emptyRetryCount+1, maxEmptyRetries)
+					emptyRetryCount++
+					if restartErr := restartAsrRecognition(ctx, state); restartErr != nil {
+						log.Errorf("重启ASR识别失败: %v", restartErr)
+						return
+					}
+					continue
+				}
 				return
 			}
-		} else {
-			//如果asr结果为空，则继续对话
-			//handleContinueChat(state)
-		}
 
+			//统计asr耗时
+			log.Debugf("处理asr结果: %s, 耗时: %d ms", text, state.GetAsrDuration())
+
+			if text != "" {
+				// 重置重试计数器
+				emptyRetryCount = 0
+
+				//发送asr消息
+				response := ServerMessage{
+					Type:      ServerMessageTypeStt,
+					SessionID: state.SessionID,
+					Text:      text,
+				}
+				if err := state.Conn.WriteJSON(response); err != nil {
+					log.Errorf("发送asr消息失败: %v", err)
+				}
+				err = startChat(ctx, state, text)
+				if err != nil {
+					log.Errorf("开始对话失败: %v", err)
+					return
+				}
+				return
+			} else {
+				// text 为空，检查是否需要重新启动ASR
+				if emptyRetryCount < maxEmptyRetries {
+					log.Warnf("ASR识别结果为空，尝试重启ASR识别 (重试 %d/%d)", emptyRetryCount+1, maxEmptyRetries)
+					emptyRetryCount++
+					if restartErr := restartAsrRecognition(ctx, state); restartErr != nil {
+						log.Errorf("重启ASR识别失败: %v", restartErr)
+						return
+					}
+					continue
+				} else {
+					log.Warnf("ASR识别结果为空，已达到最大重试次数 (%d)，停止重试", maxEmptyRetries)
+					return
+				}
+			}
+		}
 	}()
 	return nil
 }
@@ -108,4 +145,39 @@ func handleContinueChat(state *ClientState) error {
 	default:
 	}
 	return Restart(state)
+}
+
+// restartAsrRecognition 重启ASR识别
+func restartAsrRecognition(ctx context.Context, state *ClientState) error {
+	log.Debugf("重启ASR识别开始")
+
+	// 取消当前ASR上下文
+	if state.Asr.Cancel != nil {
+		state.Asr.Cancel()
+	}
+
+	state.VoiceStatus.Reset()
+	state.AsrAudioBuffer.ClearAsrAudioData()
+
+	// 等待一小段时间让资源清理
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// 重新创建ASR上下文和通道
+	state.Asr.Ctx, state.Asr.Cancel = context.WithCancel(ctx)
+	state.Asr.AsrAudioChannel = make(chan []float32, 100)
+
+	// 重新启动流式识别
+	asrResultChannel, err := state.AsrProvider.StreamingRecognize(state.Asr.Ctx, state.Asr.AsrAudioChannel)
+	if err != nil {
+		log.Errorf("重启ASR流式识别失败: %v", err)
+		return fmt.Errorf("重启ASR流式识别失败: %v", err)
+	}
+
+	state.AsrResultChannel = asrResultChannel
+	log.Debugf("重启ASR识别成功")
+	return nil
 }

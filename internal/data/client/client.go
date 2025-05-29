@@ -371,6 +371,7 @@ func (s *ClientState) InitAsr() {
 		Cancel:          cancel,
 		AsrProvider:     asrProvider,
 		AsrAudioChannel: make(chan []float32, 100),
+		AsrEnd:          make(chan bool, 1),
 		AsrResult:       bytes.Buffer{},
 	}
 }
@@ -384,6 +385,11 @@ func (c *ClientState) Init() {
 func (c *ClientState) Destroy() {
 	c.Asr.Stop()
 	c.Vad.Reset()
+
+	c.VoiceStatus.Reset()
+	c.AsrAudioBuffer.ClearAsrAudioData()
+
+	c.ResetSessionCtx()
 }
 
 func (c *ClientState) SetAsrPcmFrameSize(sampleRate int, channels int, perFrameDuration int) {
@@ -412,7 +418,7 @@ func (state *ClientState) actionSendAudioData(audioData []byte) error {
 	return state.Conn.WriteMessage(websocket.BinaryMessage, audioData)
 }
 
-func (state *ClientState) SendTTSAudio(audioChan chan []byte, isStart bool) error {
+func (state *ClientState) SendTTSAudio(ctx context.Context, audioChan chan []byte, isStart bool) error {
 	// 步骤1: 收集前三帧（或更少）
 	preBuffer := make([][]byte, 0, 3)
 	preBufferCount := 0
@@ -442,7 +448,7 @@ func (state *ClientState) SendTTSAudio(audioChan chan []byte, isStart bool) erro
 			}
 			log.Debugf("发送 TTS 音频: %d 帧, len: %d", totalFrames, len(frame))
 			totalFrames++
-		case <-state.Ctx.Done():
+		case <-ctx.Done():
 			// 上下文已取消
 			log.Infof("连接已关闭，终止音频发送，已发送 %d 帧", totalFrames)
 			return nil
@@ -476,7 +482,7 @@ func (state *ClientState) SendTTSAudio(audioChan chan []byte, isStart bool) erro
 				// 没有帧可获取，等待下一个周期
 			}
 
-		case <-state.Ctx.Done():
+		case <-ctx.Done():
 			// 上下文已取消
 			log.Infof("连接已关闭，终止音频发送，已发送 %d 帧", totalFrames)
 			return nil
@@ -521,15 +527,23 @@ type Llm struct {
 	LLmRecvChannel chan llm_common.LLMResponseStruct
 }
 
+const (
+	AsrStatueInit  = 0
+	AsrStatusDoing = 1
+	AsrStatusDone  = 2
+)
+
 type Asr struct {
 	lock sync.RWMutex
 	// ASR 提供者
 	Ctx              context.Context
 	Cancel           context.CancelFunc
 	AsrProvider      asr.AsrProvider
+	AsrEnd           chan bool
 	AsrAudioChannel  chan []float32                 //流式音频输入的channel
 	AsrResultChannel chan asr_types.StreamingResult //流式输出asr识别到的结果片断
 	AsrResult        bytes.Buffer                   //保存此次识别到的最终文本
+	Statue           int                            //0:初始化 1:识别中 2:识别结束
 }
 
 func (a *Asr) Reset() {
@@ -543,12 +557,17 @@ func (a *Asr) RetireAsrResult(ctx context.Context) (string, error) {
 			a.Reset()
 			return "", fmt.Errorf("RetireAsrResult ctx Done")
 		case result, ok := <-a.AsrResultChannel:
-			log.Debugf("asr result: %s", result.Text)
+			log.Debugf("asr result: %s, ok: %+v", result.Text, ok)
 			a.AsrResult.WriteString(result.Text)
-			if result.IsFinal || !ok {
+			if result.IsFinal {
 				text := a.AsrResult.String()
+				log.Debugf("asr result is final: %s", text)
 				a.Reset()
 				return text, nil
+			}
+			if !ok {
+				log.Debugf("asr result channel closed")
+				return "", nil
 			}
 		}
 	}
