@@ -15,6 +15,10 @@ func handleListenStart(state *ClientState, msg *ClientMessage) error {
 		state.ListenMode = msg.Mode
 		log.Infof("设备 %s 拾音模式: %s", msg.DeviceID, msg.Mode)
 	}
+
+	state.CancelSessionCtx()
+	state.SetStatus(ClientStatusListening)
+
 	return Restart(state)
 }
 
@@ -39,11 +43,11 @@ func Restart(state *ClientState) error {
 	default:
 	}
 
-	log.Debugf("Restart start: %+s", debug.Stack())
+	log.Debugf("Restart start")
 	defer log.Debugf("Restart end")
 
 	state.Destroy()
-	state.ResetSessionCtx()
+
 	ctx := state.GetSessionCtx()
 
 	//初始化asr相关

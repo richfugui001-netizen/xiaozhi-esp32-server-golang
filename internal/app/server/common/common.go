@@ -85,6 +85,8 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, llmResponseChann
 				return true, fmt.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
 			}
 
+			state.SetStatus(ClientStatusTTSStart)
+
 			fullText.WriteString(llmResponse.Text)
 
 			// 发送音频帧
@@ -162,9 +164,9 @@ func ProcessVadAudio(state *ClientState) {
 				clientHaveVoice := state.GetClientHaveVoice()
 				var haveVoice bool
 				if state.ListenMode != "auto" {
-					haveVoice = true
-					clientHaveVoice = true
-					skipVad = true
+					haveVoice = true       //如果是manual, 本次音频入asr
+					clientHaveVoice = true //之前有声音
+					skipVad = true         //跳过vad
 				}
 
 				n, err := audioProcesser.DecoderFloat32(opusFrame, pcmFrame)
@@ -233,14 +235,8 @@ func ProcessVadAudio(state *ClientState) {
 
 				if clientHaveVoice && lastHaveVoiceTime > 0 && !haveVoice {
 					diffMilli := time.Now().UnixMilli() - lastHaveVoiceTime
-					if state.IsSilence(diffMilli) {
-						state.SetClientVoiceStop(true)
-						//客户端停止说话
-						state.Asr.Stop()
-						//释放vad
-						state.Vad.Reset()
-						//asr统计
-						state.SetStartAsrTs()
+					if state.IsSilence(diffMilli) { //从有声音到 静默的判断
+						state.OnVoiceSilence()
 						continue
 					}
 				}
@@ -335,6 +331,8 @@ func handleListenMessage(clientState *ClientState, msg *ClientMessage) error {
 	case MessageStateDetect:
 		// 唤醒词检测
 		clientState.SetClientHaveVoice(false)
+
+		clientState.CancelSessionCtx()
 
 		// 如果有文本，处理唤醒词
 		if msg.Text != "" {
@@ -476,6 +474,7 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 	ctx, cancel := context.WithCancel(ctx)
 	_ = cancel
 
+	clientState.SetStatus(ClientStatusLLMStart)
 	// 发送 LLM 请求
 	responseSentences, err := llm.HandleLLMWithContext(
 		ctx,
