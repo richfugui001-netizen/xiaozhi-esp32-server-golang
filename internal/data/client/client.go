@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"time"
@@ -41,8 +42,8 @@ type Conn struct {
 }
 
 func (c *Conn) WriteJSON(message interface{}) error {
-
-	log.Debugf("WriteJSON 发送消息: %+v", message)
+	strMsg, _ := json.Marshal(message)
+	log.Debugf("WriteJSON 发送消息: %+v", string(strMsg))
 	if c.connType == 0 {
 		c.lock.Lock()
 		defer c.lock.Unlock()
@@ -283,9 +284,18 @@ type ClientState struct {
 	VoiceStatus
 	SessionCtx Ctx
 
-	UdpInfo   *UdpSession //客户端udp地址
-	MqttInfo  *MqttConn   //mqtt连接
-	Statistic Statistic   //耗时统计
+	UdpInfo      *UdpSession //客户端udp地址
+	MqttInfo     *MqttConn   //mqtt连接
+	Statistic    Statistic   //耗时统计
+	LastActiveTs int64       //最后活跃时间
+}
+
+func (c *ClientState) UpdateLastActiveTs() {
+	c.LastActiveTs = time.Now().Unix()
+}
+
+func (c *ClientState) IsActive() bool {
+	return time.Now().Unix()-c.LastActiveTs < ClientActiveTs
 }
 
 func (c *ClientState) IsMqttUdp() bool {
