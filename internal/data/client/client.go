@@ -284,18 +284,19 @@ type ClientState struct {
 	VoiceStatus
 	SessionCtx Ctx
 
-	UdpInfo      *UdpSession //客户端udp地址
-	MqttInfo     *MqttConn   //mqtt连接
-	Statistic    Statistic   //耗时统计
-	LastActiveTs int64       //最后活跃时间
+	UdpInfo          *UdpSession //客户端udp地址
+	MqttInfo         *MqttConn   //mqtt连接
+	Statistic        Statistic   //耗时统计
+	MqttLastActiveTs int64       //最后活跃时间
+	VadLastActiveTs  int64       //vad最后活跃时间, 超过 60s && 没有在tts则断开连接
 }
 
 func (c *ClientState) UpdateLastActiveTs() {
-	c.LastActiveTs = time.Now().Unix()
+	c.MqttLastActiveTs = time.Now().Unix()
 }
 
 func (c *ClientState) IsActive() bool {
-	return time.Now().Unix()-c.LastActiveTs < ClientActiveTs
+	return time.Now().Unix()-c.MqttLastActiveTs < ClientActiveTs
 }
 
 func (c *ClientState) IsMqttUdp() bool {
