@@ -3,9 +3,9 @@ package vad
 import (
 	"errors"
 	"fmt"
-	log "xiaozhi-esp32-server-golang/logger"
 	"sync"
 	"time"
+	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/spf13/viper"
 	"github.com/streamer45/silero-vad-go/speech"
@@ -198,7 +198,7 @@ func NewSileroVAD(config map[string]interface{}) (*SileroVAD, error) {
 
 	silenceMs, ok := config["min_silence_duration_ms"].(int64)
 	if !ok {
-		silenceMs = 100 // 默认500毫秒
+		silenceMs = 800 // 默认500毫秒
 	}
 
 	sampleRate, ok := config["sample_rate"].(int)
