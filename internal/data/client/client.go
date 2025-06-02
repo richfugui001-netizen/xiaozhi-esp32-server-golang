@@ -125,7 +125,7 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 			HaveVoice:            false,
 			HaveVoiceLastTime:    0,
 			VoiceStop:            false,
-			SilenceThresholdTime: 500,
+			SilenceThresholdTime: 200,
 		},
 		SessionCtx: Ctx{},
 	}
@@ -191,7 +191,7 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 			HaveVoice:            false,
 			HaveVoiceLastTime:    0,
 			VoiceStop:            false,
-			SilenceThresholdTime: 500,
+			SilenceThresholdTime: 200,
 		},
 		SessionCtx: Ctx{},
 		UdpInfo:    udpSession,

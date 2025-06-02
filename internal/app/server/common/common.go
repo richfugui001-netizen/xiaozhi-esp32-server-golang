@@ -193,7 +193,7 @@ func ProcessVadAudio(state *ClientState) {
 					if state.AsrAudioBuffer.GetAsrDataSize() >= vadNeedGetCount*state.AsrAudioBuffer.PcmFrameSize {
 						//如果要进行vad, 至少要取60ms的音频数据
 						vadPcmData = state.AsrAudioBuffer.GetAsrData(vadNeedGetCount)
-
+						state.VadProvider.Reset()
 						haveVoice, err = state.VadProvider.IsVAD(vadPcmData)
 						if err != nil {
 							log.Errorf("processAsrAudio VAD检测失败: %v", err)
@@ -206,7 +206,7 @@ func ProcessVadAudio(state *ClientState) {
 							pcmData = state.AsrAudioBuffer.GetAndClearAllData()
 						}
 					}
-					log.Debugf("isVad pcmData len: %d, haveVoice: %v", len(pcmData), haveVoice)
+					log.Debugf("isVad, pcmData len: %d, vadPcmData len: %d, haveVoice: %v", len(pcmData), len(vadPcmData), haveVoice)
 				}
 
 				if haveVoice {
