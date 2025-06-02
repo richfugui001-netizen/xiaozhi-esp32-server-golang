@@ -98,6 +98,11 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 	// 创建带取消功能的上下文
 	ctx, cancel := context.WithCancel(context.Background())
 
+	maxSilenceDuration := viper.GetInt64("chat.chat_max_silence_duration")
+	if maxSilenceDuration == 0 {
+		maxSilenceDuration = 200
+	}
+
 	systemPrompt, _ := llm_memory.Get().GetSystemPrompt(ctx, deviceID)
 	clientState := &ClientState{
 		Dialogue:     &Dialogue{},
@@ -125,7 +130,7 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 			HaveVoice:            false,
 			HaveVoiceLastTime:    0,
 			VoiceStop:            false,
-			SilenceThresholdTime: 200,
+			SilenceThresholdTime: maxSilenceDuration,
 		},
 		SessionCtx: Ctx{},
 	}
@@ -165,6 +170,12 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 	}
 
 	systemPrompt, _ := llm_memory.Get().GetSystemPrompt(ctx, deviceID)
+
+	maxSilenceDuration := viper.GetInt64("chat.chat_max_silence_duration")
+	if maxSilenceDuration == 0 {
+		maxSilenceDuration = 200
+	}
+
 	clientState := &ClientState{
 		Dialogue:     &Dialogue{},
 		Abort:        false,
@@ -191,7 +202,7 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 			HaveVoice:            false,
 			HaveVoiceLastTime:    0,
 			VoiceStop:            false,
-			SilenceThresholdTime: 200,
+			SilenceThresholdTime: maxSilenceDuration,
 		},
 		SessionCtx: Ctx{},
 		UdpInfo:    udpSession,
@@ -300,6 +311,14 @@ type ClientState struct {
 	VadLastActiveTs  int64       //vad最后活跃时间, 超过 60s && 没有在tts则断开连接
 
 	Status string //状态 listening, llmStart, ttsStart
+}
+
+func (c *ClientState) GetMaxIdleDuration() int64 {
+	maxIdleDuration := viper.GetInt64("chat.max_idle_duration")
+	if maxIdleDuration == 0 {
+		maxIdleDuration = 20000
+	}
+	return maxIdleDuration
 }
 
 func (c *ClientState) UpdateLastActiveTs() {

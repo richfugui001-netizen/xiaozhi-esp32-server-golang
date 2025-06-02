@@ -216,6 +216,14 @@ func ProcessVadAudio(state *ClientState) {
 					state.Vad.ResetIdleDuration()
 				} else {
 					state.Vad.AddIdleDuration(int64(audioFormat.FrameDuration))
+					idleDuration := state.Vad.GetIdleDuration()
+					log.Infof("空闲时间: %dms", idleDuration)
+					if idleDuration > state.GetMaxIdleDuration() {
+						log.Infof("超出空闲时长: %dms, 断开连接", idleDuration)
+						//断开连接
+						state.Conn.Close()
+						return
+					}
 					//如果之前没有语音, 本次也没有语音, 则从缓存中删除
 					if !clientHaveVoice {
 						//保留近10帧
@@ -236,19 +244,11 @@ func ProcessVadAudio(state *ClientState) {
 				lastHaveVoiceTime := state.GetClientHaveVoiceLastTime()
 
 				if clientHaveVoice && lastHaveVoiceTime > 0 && !haveVoice {
-					diffMilli := time.Now().UnixMilli() - lastHaveVoiceTime
-					if state.IsSilence(diffMilli) { //从有声音到 静默的判断
+					idleDuration := state.Vad.GetIdleDuration()
+					if state.IsSilence(idleDuration) { //从有声音到 静默的判断
 						state.OnVoiceSilence()
 						continue
 					}
-				}
-
-				idleDuration := state.Vad.GetIdleDuration()
-				if idleDuration > 10000 {
-					log.Infof("空闲时间: %dms", idleDuration)
-					//断开连接
-					state.Conn.Close()
-					return
 				}
 
 			case <-state.Ctx.Done():
