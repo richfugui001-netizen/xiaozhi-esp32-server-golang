@@ -213,7 +213,9 @@ func ProcessVadAudio(state *ClientState) {
 					log.Infof("检测到语音, len: %d", len(pcmData))
 					state.SetClientHaveVoice(true)
 					state.SetClientHaveVoiceLastTime(time.Now().UnixMilli())
+					state.Vad.ResetIdleDuration()
 				} else {
+					state.Vad.AddIdleDuration(int64(audioFormat.FrameDuration))
 					//如果之前没有语音, 本次也没有语音, 则从缓存中删除
 					if !clientHaveVoice {
 						//保留近10帧
@@ -239,6 +241,14 @@ func ProcessVadAudio(state *ClientState) {
 						state.OnVoiceSilence()
 						continue
 					}
+				}
+
+				idleDuration := state.Vad.GetIdleDuration()
+				if idleDuration > 10000 {
+					log.Infof("空闲时间: %dms", idleDuration)
+					//断开连接
+					state.Conn.Close()
+					return
 				}
 
 			case <-state.Ctx.Done():

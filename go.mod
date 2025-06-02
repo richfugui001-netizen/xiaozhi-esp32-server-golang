@@ -1,6 +1,6 @@
 module xiaozhi-esp32-server-golang
 
-go 1.24.3
+go 1.23.9
 
 require (
 	github.com/antonfisher/nested-logrus-formatter v1.3.1

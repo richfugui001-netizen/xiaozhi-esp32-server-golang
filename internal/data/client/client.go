@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"sync"
@@ -536,8 +537,21 @@ func (state *ClientState) OnVoiceSilence() {
 type Vad struct {
 	lock sync.RWMutex
 	// VAD 提供者
-	VadProvider  vad.VAD
-	LastActiveTs int64
+	VadProvider vad.VAD
+
+	IdleDuration int64 // 空闲时间, 单位: ms
+}
+
+func (v *Vad) AddIdleDuration(idleDuration int64) int64 {
+	return atomic.AddInt64(&v.IdleDuration, idleDuration)
+}
+
+func (v *Vad) GetIdleDuration() int64 {
+	return atomic.LoadInt64(&v.IdleDuration)
+}
+
+func (v *Vad) ResetIdleDuration() {
+	atomic.StoreInt64(&v.IdleDuration, 0)
 }
 
 func (v *Vad) Init() error {
@@ -558,8 +572,8 @@ func (v *Vad) Reset() error {
 	if v.VadProvider != nil {
 		vad.ReleaseVAD(v.VadProvider) //释放vad实例资源
 		v.VadProvider = nil           //置nil
-		v.LastActiveTs = 0
 	}
+	v.ResetIdleDuration()
 	return nil
 }
 
