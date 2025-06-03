@@ -58,6 +58,8 @@ func Restart(state *ClientState) error {
 	// 启动asr流式识别，复用 restartAsrRecognition 函数
 	err := restartAsrRecognition(ctx, state)
 	if err != nil {
+		log.Errorf("asr流式识别失败: %v", err)
+		state.Conn.Close()
 		return err
 	}
 

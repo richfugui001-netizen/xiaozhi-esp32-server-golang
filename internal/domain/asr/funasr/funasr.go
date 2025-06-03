@@ -306,17 +306,11 @@ func (f *Funasr) recvResult(ctx context.Context, conn *websocket.Conn, resultCha
 
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			/*if isTimeoutError(err) {
+			if isTimeoutError(err) {
 				log.Debugf("funasr recvResult 读取识别结果超时: %v", err)
 				//f.removeConnection(conn) // 读取超时，移除连接
 				continue
 			}
-
-			if isConnectionClosedError(err) {
-				log.Debugf("funasr recvResult 读取识别结果连接已关闭: %v", err)
-				f.removeConnection(conn) // 连接已关闭，移除连接
-				return
-			}*/
 			log.Debugf("funasr recvResult 读取识别结果失败: %v", err)
 			f.removeConnection(conn) // 读取失败时移除连接
 			return
