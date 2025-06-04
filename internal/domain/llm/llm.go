@@ -7,7 +7,10 @@ import (
 	"time"
 	"unicode"
 	"xiaozhi-esp32-server-golang/internal/domain/llm/common"
+
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // 句子结束的标点符号
@@ -37,8 +40,8 @@ func isSentencePausePunctuation(r rune) bool {
 }
 
 // HandleLLMWithContext 使用上下文控制来处理LLM响应
-func HandleLLMWithContext(ctx context.Context, llmProvider LLMProvider, dialogue []interface{}, sessionID string) (chan common.LLMResponseStruct, error) {
-	// 使用支持上下文的响应方法
+func HandleLLMWithContext(ctx context.Context, llmProvider LLMProvider, dialogue []*schema.Message, sessionID string) (chan common.LLMResponseStruct, error) {
+	// 直接使用Eino原生消息类型
 	llmResponse := llmProvider.ResponseWithContext(ctx, sessionID, dialogue)
 
 	sentenceChannel := make(chan common.LLMResponseStruct, 2)

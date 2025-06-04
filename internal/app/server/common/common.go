@@ -21,6 +21,7 @@ import (
 
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
 )
@@ -109,7 +110,7 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, llmResponseChann
 				//延迟50ms毫秒再发stop
 				//time.Sleep(50 * time.Millisecond)
 				//写到redis中
-				llm_memory.Get().AddMessage(ctx, state.DeviceID, "assistant", fullText.String())
+				llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.Assistant, fullText.String())
 				// 发送结束消息
 				response := ServerMessage{
 					Type:      ServerMessageTypeTts,
@@ -465,22 +466,30 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 		log.Errorf("获取对话历史失败: %v", err)
 	}
 
-	requestMessages = append(requestMessages, llm_common.Message{
-		Role:    "user",
+	// 直接创建Eino原生消息
+	userMessage := &schema.Message{
+		Role:    schema.User,
 		Content: text,
-	})
+	}
+	requestMessages = append(requestMessages, *userMessage)
 
 	// 添加用户消息到对话历史
-	llm_memory.Get().AddMessage(ctx, clientState.DeviceID, "user", text)
+	llm_memory.Get().AddMessage(ctx, clientState.DeviceID, schema.User, text)
 
 	ctx, cancel := context.WithCancel(ctx)
 	_ = cancel
+
+	// 直接传递Eino原生消息，无需转换
+	requestEinoMessages := make([]*schema.Message, len(requestMessages))
+	for i, msg := range requestMessages {
+		requestEinoMessages[i] = &msg
+	}
 
 	// 发送 LLM 请求
 	responseSentences, err := llm.HandleLLMWithContext(
 		ctx,
 		clientState.LLMProvider,
-		messagesToInterfaces(requestMessages),
+		requestEinoMessages,
 		sessionID,
 	)
 	if err != nil {
@@ -502,13 +511,4 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 	}()
 
 	return nil
-}
-
-// 添加一个转换函数
-func messagesToInterfaces(msgs []llm_common.Message) []interface{} {
-	result := make([]interface{}, len(msgs))
-	for i, msg := range msgs {
-		result[i] = msg
-	}
-	return result
 }
