@@ -12,22 +12,11 @@ import (
 // LLMProvider 大语言模型提供者接口
 // 所有LLM实现必须遵循此接口，使用Eino原生类型
 type LLMProvider interface {
-	// Response 生成文本响应，返回一个字符串通道
-	// sessionID: 会话标识符，用于跟踪请求
-	// dialogue: 对话历史，使用Eino原生消息类型
-	Response(sessionID string, dialogue []*schema.Message) chan string
-
-	// ResponseWithFunctions 生成带工具调用的响应，返回一个接口通道
-	// sessionID: 会话标识符，用于跟踪请求
-	// dialogue: 对话历史，使用Eino原生消息类型
-	// functions: 可用的工具/函数定义，使用Eino原生工具类型
-	ResponseWithFunctions(sessionID string, dialogue []*schema.Message, functions []*schema.ToolInfo) chan interface{}
-
 	// ResponseWithContext 带有上下文控制的响应，支持取消操作
 	// ctx: 上下文，可用于取消长时间运行的请求
 	// sessionID: 会话标识符
 	// dialogue: 对话历史，使用Eino原生消息类型
-	ResponseWithContext(ctx context.Context, sessionID string, dialogue []*schema.Message) chan string
+	ResponseWithContext(ctx context.Context, sessionID string, dialogue []*schema.Message, functions []*schema.ToolInfo) chan *schema.Message
 
 	// GetModelInfo 获取模型信息
 	// 返回模型名称和其他元数据

@@ -68,16 +68,26 @@ func ExampleUsage() {
 
 	// 5. 基本对话
 	fmt.Println("=== OpenAI 基本对话 ===")
-	responseChan := openaiProvider.Response("example_session", messages)
-	for content := range responseChan {
-		fmt.Print(content)
+	responseChan := openaiProvider.ResponseWithContext(context.Background(), "example_session", messages, nil)
+	for resp := range responseChan {
+		if resp.Content != "" {
+			fmt.Print(resp.Content)
+		}
+		if len(resp.ToolCalls) > 0 {
+			fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
+		}
 	}
 	fmt.Println()
 
 	fmt.Println("=== Ollama 基本对话 ===")
-	responseChan = ollamaProvider.Response("example_session", messages)
-	for content := range responseChan {
-		fmt.Print(content)
+	responseChan = ollamaProvider.ResponseWithContext(context.Background(), "example_session", messages, nil)
+	for resp := range responseChan {
+		if resp.Content != "" {
+			fmt.Print(resp.Content)
+		}
+		if len(resp.ToolCalls) > 0 {
+			fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
+		}
 	}
 	fmt.Println()
 
@@ -92,17 +102,13 @@ func ExampleUsage() {
 	}
 
 	fmt.Println("=== 带工具调用的对话 ===")
-	toolResponseChan := openaiProvider.ResponseWithFunctions("example_session", messages, tools)
-	for response := range toolResponseChan {
-		switch resp := response.(type) {
-		case map[string]string:
-			if resp["type"] == "content" {
-				fmt.Print(resp["content"])
-			}
-		case map[string]interface{}:
-			if resp["type"] == "tool_calls" {
-				fmt.Printf("工具调用: %+v\n", resp["tool_calls"])
-			}
+	toolResponseChan := openaiProvider.ResponseWithContext(context.Background(), "example_session", messages, tools)
+	for resp := range toolResponseChan {
+		if resp.Content != "" {
+			fmt.Print(resp.Content)
+		}
+		if len(resp.ToolCalls) > 0 {
+			fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
 		}
 	}
 	fmt.Println()
@@ -143,9 +149,14 @@ func ExampleAdvancedUsage() {
 	}
 
 	fmt.Println("=== 带上下文控制的对话 ===")
-	responseChan := provider.ResponseWithContext(ctx, "advanced_session", messages)
-	for content := range responseChan {
-		fmt.Print(content)
+	responseChan := provider.ResponseWithContext(ctx, "advanced_session", messages, nil)
+	for resp := range responseChan {
+		if resp.Content != "" {
+			fmt.Print(resp.Content)
+		}
+		if len(resp.ToolCalls) > 0 {
+			fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
+		}
 	}
 	fmt.Println()
 
@@ -197,9 +208,14 @@ func ExampleMultiProvider() {
 
 	for name, provider := range providers {
 		fmt.Printf("=== %s 提供者响应 ===\n", name)
-		responseChan := provider.Response("multi_session", messages)
-		for content := range responseChan {
-			fmt.Print(content)
+		responseChan := provider.ResponseWithContext(context.Background(), "multi_session", messages, nil)
+		for resp := range responseChan {
+			if resp.Content != "" {
+				fmt.Print(resp.Content)
+			}
+			if len(resp.ToolCalls) > 0 {
+				fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
+			}
 		}
 		fmt.Println()
 	}
@@ -236,9 +252,9 @@ func ExampleWithTools() {
 
 	// 使用Eino原生工具调用接口
 	fmt.Println("--- Eino原生工具调用 ---")
-	responseChan := provider.ResponseWithFunctions("tool_session", messages, tools)
-	for response := range responseChan {
-		fmt.Printf("响应: %+v\n", response)
+	responseChan := provider.ResponseWithContext(context.Background(), "tool_session", messages, tools)
+	for resp := range responseChan {
+		fmt.Printf("响应: %+v\n", resp)
 	}
 }
 
@@ -292,15 +308,25 @@ func MultiProviderExample() {
 	defer cancel()
 
 	fmt.Println("\n--- OpenAI 响应 ---")
-	openaiResponse := openaiProvider.ResponseWithContext(ctx, "openai_session", messages)
-	for content := range openaiResponse {
-		fmt.Print(content)
+	openaiResponse := openaiProvider.ResponseWithContext(ctx, "openai_session", messages, nil)
+	for resp := range openaiResponse {
+		if resp.Content != "" {
+			fmt.Print(resp.Content)
+		}
+		if len(resp.ToolCalls) > 0 {
+			fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
+		}
 	}
 
 	fmt.Println("\n--- Ollama 响应 ---")
-	ollamaResponse := ollamaProvider.ResponseWithContext(ctx, "ollama_session", messages)
-	for content := range ollamaResponse {
-		fmt.Print(content)
+	ollamaResponse := ollamaProvider.ResponseWithContext(ctx, "ollama_session", messages, nil)
+	for resp := range ollamaResponse {
+		if resp.Content != "" {
+			fmt.Print(resp.Content)
+		}
+		if len(resp.ToolCalls) > 0 {
+			fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
+		}
 	}
 	fmt.Println()
 }
@@ -406,10 +432,15 @@ func BasicUsageExample() {
 	}
 
 	// 使用增强配置进行调用
-	responseChan := enhancedProvider.ResponseWithContext(ctx, "basic_example", messages)
+	responseChan := enhancedProvider.ResponseWithContext(ctx, "basic_example", messages, nil)
 	fmt.Printf("架构设计响应:\n")
-	for content := range responseChan {
-		fmt.Print(content)
+	for resp := range responseChan {
+		if resp.Content != "" {
+			fmt.Print(resp.Content)
+		}
+		if len(resp.ToolCalls) > 0 {
+			fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
+		}
 	}
 	fmt.Println()
 }
@@ -441,9 +472,14 @@ func EinoNativeExample() {
 
 	// 1. 使用EinoResponse
 	fmt.Println("--- EinoResponse ---")
-	responseChan := provider.EinoResponse(ctx, "eino_session", messages)
-	for content := range responseChan {
-		fmt.Print(content)
+	responseChan := provider.ResponseWithContext(ctx, "eino_session", messages, nil)
+	for resp := range responseChan {
+		if resp.Content != "" {
+			fmt.Print(resp.Content)
+		}
+		if len(resp.ToolCalls) > 0 {
+			fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
+		}
 	}
 	fmt.Println()
 
@@ -458,13 +494,13 @@ func EinoNativeExample() {
 		},
 	}
 
-	toolResponseChan := provider.EinoResponseWithTools(ctx, "eino_tools_session", messages, tools)
-	for message := range toolResponseChan {
-		if message.Content != "" {
-			fmt.Printf("内容: %s\n", message.Content)
+	toolResponseChan := provider.ResponseWithContext(ctx, "eino_tools_session", messages, tools)
+	for resp := range toolResponseChan {
+		if resp.Content != "" {
+			fmt.Printf("内容: %s\n", resp.Content)
 		}
-		if len(message.ToolCalls) > 0 {
-			fmt.Printf("工具调用: %+v\n", message.ToolCalls)
+		if len(resp.ToolCalls) > 0 {
+			fmt.Printf("工具调用: %+v\n", resp.ToolCalls)
 		}
 	}
 }

@@ -23,6 +23,7 @@ import (
 
 	log "xiaozhi-esp32-server-golang/logger"
 
+	"github.com/cloudwego/eino/schema"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
@@ -30,7 +31,7 @@ import (
 
 // Dialogue 表示对话历史
 type Dialogue struct {
-	Messages []llm_common.Message
+	Messages []schema.Message
 }
 
 // *websocket.Conn  读: 不允许多个协程同时读   写: 不允许多个协程同时写   读写: 允许同时读写

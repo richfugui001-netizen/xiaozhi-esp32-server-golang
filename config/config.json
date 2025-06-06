@@ -163,5 +163,29 @@
     }
   },
   "wakeup_words": ["小智", "小知", "你好小智"],
+  "mcp": {
+    "global": {
+      "enabled": true,
+      "servers": [
+        {
+          "name": "filesystem",
+          "sse_url": "http://localhost:3001/sse",
+          "enabled": true
+        },
+        {
+          "name": "memory",
+          "sse_url": "http://localhost:3002/sse",
+          "enabled": false
+        }
+      ],
+      "reconnect_interval": 5,
+      "max_reconnect_attempts": 10
+    },
+    "device": {
+      "enabled": true,
+      "websocket_path": "/xiaozhi/mcp/",
+      "max_connections_per_device": 5
+    }
+  },
   "enable_greeting": true
 }
