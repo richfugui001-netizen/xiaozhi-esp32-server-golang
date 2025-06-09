@@ -123,12 +123,13 @@ func WavToOpus(wavData []byte, sampleRate int, channels int, bitRate int) ([][]b
 	return opusFrames, nil
 }
 
-type MP3Decoder struct {
+type AudioDecoder struct {
 	streamer           beep.StreamSeekCloser
 	format             beep.Format
 	enc                *opus.Encoder
-	pipeReader         *io.PipeReader
+	pipeReader         io.ReadCloser
 	perFrameDurationMs int
+	AudioFormat        string
 
 	outputOpusChan chan []byte     //opus一帧一帧的输出
 	ctx            context.Context // 新增：上下文控制
@@ -136,16 +137,147 @@ type MP3Decoder struct {
 
 // CreateMP3Decoder 创建一个通过 Done 通道控制的 MP3 解码器
 // 为了兼容旧代码，保留此方法
-func CreateMP3Decoder(pipeReader *io.PipeReader, outputOpusChan chan []byte, perFrameDurationMs int, ctx context.Context) (*MP3Decoder, error) {
-	return &MP3Decoder{
+func CreateAudioDecoder(ctx context.Context, pipeReader io.ReadCloser, outputOpusChan chan []byte, perFrameDurationMs int, AudioFormat string) (*AudioDecoder, error) {
+	return &AudioDecoder{
 		pipeReader:         pipeReader,
 		outputOpusChan:     outputOpusChan,
 		perFrameDurationMs: perFrameDurationMs,
+		AudioFormat:        AudioFormat,
 		ctx:                ctx,
 	}, nil
 }
 
-func (d *MP3Decoder) Run(startTs int64) error {
+func (d *AudioDecoder) WithFormat(format beep.Format) *AudioDecoder {
+	d.format = format
+	return d
+}
+
+func (d *AudioDecoder) Run(startTs int64) error {
+	if d.AudioFormat == "wav" {
+		d.RunWavDecoder(startTs, false)
+	} else if d.AudioFormat == "pcm" {
+		d.RunWavDecoder(startTs, true)
+	} else if d.AudioFormat == "mp3" {
+		return d.RunMp3Decoder(startTs)
+	}
+	return nil
+}
+
+func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
+	defer close(d.outputOpusChan)
+
+	var sampleRate int
+	var channels int
+
+	if !isRaw {
+		// WAV文件头部固定为44字节
+		headerSize := 44
+		header := make([]byte, headerSize)
+		_, err := io.ReadFull(d.pipeReader, header)
+		if err != nil {
+			return fmt.Errorf("读取WAV头部失败: %v", err)
+		}
+
+		// 从WAV头部获取基本参数
+		// 采样率: 字节24-27
+		sampleRate = int(uint32(header[24]) | uint32(header[25])<<8 | uint32(header[26])<<16 | uint32(header[27])<<24)
+		// 通道数: 字节22-23
+		channels = int(uint16(header[22]) | uint16(header[23])<<8)
+
+		log.Debugf("WAV格式: %d Hz, %d 通道", sampleRate, channels)
+	} else {
+		// 对于原始PCM数据，使用format中的参数
+		sampleRate = int(d.format.SampleRate)
+		channels = d.format.NumChannels
+		log.Debugf("原始PCM格式: %d Hz, %d 通道", sampleRate, channels)
+	}
+
+	// 始终使用单通道输出
+	outputChannels := 1
+	if channels > 1 {
+		log.Debugf("将多声道音频转换为单声道输出")
+	}
+
+	enc, err := opus.NewEncoder(int(sampleRate), outputChannels, opus.AppAudio)
+	if err != nil {
+		return fmt.Errorf("创建Opus编码器失败: %v", err)
+	}
+	d.enc = enc
+
+	//opus相关配置及缓冲区
+	frameDurationMs := d.perFrameDurationMs              //每帧时长(ms)
+	frameSize := sampleRate * frameDurationMs / 1000     //每帧采样点数
+	pcmBuffer := make([]int16, frameSize*outputChannels) //PCM缓冲区
+	opusBuffer := make([]byte, 1000)                     //Opus输出缓冲区
+
+	// 用于读取原始PCM数据的缓冲区
+	rawBuffer := make([]byte, frameSize*channels*2) // 16位采样=2字节
+	currentFramePos := 0
+	var firstFrame bool
+
+	for {
+		select {
+		case <-d.ctx.Done():
+			return nil
+		default:
+			// 读取PCM数据
+			n, err := d.pipeReader.Read(rawBuffer)
+			if err == io.EOF {
+				// 处理剩余不足一帧的数据
+				if currentFramePos > 0 {
+					paddedFrame := make([]int16, frameSize)
+					copy(paddedFrame, pcmBuffer[:currentFramePos])
+
+					// 编码最后一帧
+					if n, err := d.enc.Encode(paddedFrame, opusBuffer); err == nil {
+						frameData := make([]byte, n)
+						copy(frameData, opusBuffer[:n])
+						d.outputOpusChan <- frameData
+					}
+				}
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("读取PCM数据失败: %v", err)
+			}
+
+			// 将字节数据转换为int16采样点
+			samplesRead := n / (2 * channels) // 每个采样2字节,考虑通道数
+			for i := 0; i < samplesRead; i++ {
+				// 对于多通道,取平均值
+				var sampleSum int32
+				for ch := 0; ch < channels; ch++ {
+					pos := i*channels*2 + ch*2
+					sample := int16(uint16(rawBuffer[pos]) | uint16(rawBuffer[pos+1])<<8)
+					sampleSum += int32(sample)
+				}
+
+				// 计算多通道平均值
+				avgSample := int16(sampleSum / int32(channels))
+				pcmBuffer[currentFramePos] = avgSample
+				currentFramePos++
+
+				// 如果缓冲区已满,进行编码
+				if currentFramePos == frameSize {
+					if n, err := d.enc.Encode(pcmBuffer, opusBuffer); err == nil {
+						frameData := make([]byte, n)
+						copy(frameData, opusBuffer[:n])
+
+						if !firstFrame {
+							firstFrame = true
+							log.Infof("tts云端->首帧解码完成耗时: %d ms", time.Now().UnixMilli()-startTs)
+						}
+
+						d.outputOpusChan <- frameData
+					}
+					currentFramePos = 0
+				}
+			}
+		}
+	}
+}
+
+func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 	defer close(d.outputOpusChan)
 
 	decoder, format, err := mp3.Decode(d.pipeReader)

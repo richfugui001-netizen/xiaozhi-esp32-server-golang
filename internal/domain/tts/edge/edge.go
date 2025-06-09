@@ -98,7 +98,7 @@ func (p *EdgeTTSProvider) TextToSpeech(ctx context.Context, text string, sampleR
 		_, _ = io.Copy(pipeWriter, f)
 		pipeWriter.Close()
 	}()
-	mp3Decoder, err := common.CreateMP3Decoder(pipeReader, outputChan, frameDuration, ctx)
+	mp3Decoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
 	if err != nil {
 		return nil, fmt.Errorf("创建MP3解码器失败: %v", err)
 	}
@@ -153,7 +153,7 @@ func (p *EdgeTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 	}()
 	// 启动MP3→Opus解码
 	go func() {
-		mp3Decoder, err := common.CreateMP3Decoder(pipeReader, outputChan, frameDuration, ctx)
+		mp3Decoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
 		if err != nil {
 			log.Errorf("EdgeTTS MP3解码器创建失败: %v", err)
 			return

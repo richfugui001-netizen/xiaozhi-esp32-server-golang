@@ -163,15 +163,12 @@ func (p *CosyVoiceTTSProvider) TextToSpeech(ctx context.Context, text string, sa
 	// 转换为Opus帧
 	if p.AudioFormat == "mp3" {
 		// 创建一个管道
-		pipeReader, pipeWriter := io.Pipe()
 		doneChan := make(chan struct{})
 		outputChan := make(chan []byte, 1000)
 
 		// 创建MP3解码器
-		mp3Decoder, err := common.CreateMP3Decoder(pipeReader, outputChan, frameDuration, ctx)
+		mp3Decoder, err := common.CreateAudioDecoder(ctx, resp.Body, outputChan, frameDuration, p.AudioFormat)
 		if err != nil {
-			pipeReader.Close()
-			pipeWriter.Close()
 			close(doneChan)
 			return nil, fmt.Errorf("创建MP3解码器失败: %v", err)
 		}
@@ -179,14 +176,6 @@ func (p *CosyVoiceTTSProvider) TextToSpeech(ctx context.Context, text string, sa
 		go func() {
 			if err := mp3Decoder.Run(startTs); err != nil {
 				log.Errorf("MP3解码失败: %v", err)
-			}
-		}()
-
-		go func() {
-			defer pipeWriter.Close()
-			// 直接使用bytes.NewReader和io.Copy，比手动写入更高效
-			if _, err := io.Copy(pipeWriter, resp.Body); err != nil {
-				log.Errorf("写入MP3数据失败: %v", err)
 			}
 		}()
 
@@ -230,12 +219,9 @@ func (p *CosyVoiceTTSProvider) TextToSpeechStream(ctx context.Context, text stri
 	client := getHTTPClient()
 
 	// 创建输出通道
-	outputChan = make(chan []byte, 10)
+	outputChan = make(chan []byte, 100)
 	// 启动goroutine处理流式响应
 	go func() {
-		// MP3解码器需要 *io.PipeReader，所以我们仍然需要使用pipe
-		pipeReader, pipeWriter := io.Pipe()
-
 		// 发送请求
 		resp, err := client.Do(req)
 		if err != nil {
@@ -244,8 +230,6 @@ func (p *CosyVoiceTTSProvider) TextToSpeechStream(ctx context.Context, text stri
 		}
 		defer func() {
 			resp.Body.Close()
-			pipeReader.Close()
-			pipeWriter.Close()
 		}()
 
 		// 检查响应状态码
@@ -277,32 +261,25 @@ func (p *CosyVoiceTTSProvider) TextToSpeechStream(ctx context.Context, text stri
 
 		// 根据音频格式处理流式响应
 		if p.AudioFormat == "mp3" {
-			go func() {
-				// 创建 MP3 解码器，传入 context 而不是 done 通道
-				mp3Decoder, err := common.CreateMP3Decoder(pipeReader, outputChan, frameDuration, ctx)
-				if err != nil {
-					log.Errorf("创建MP3解码器失败: %v", err)
-					close(outputChan)
-					return
-				}
+			// 创建 MP3 解码器，传入 context 而不是 done 通道
+			mp3Decoder, err := common.CreateAudioDecoder(ctx, resp.Body, outputChan, frameDuration, p.AudioFormat)
+			if err != nil {
+				log.Errorf("创建MP3解码器失败: %v", err)
+				close(outputChan)
+				return
+			}
 
-				// 启动解码过程
-				if err := mp3Decoder.Run(startTs); err != nil {
-					log.Errorf("MP3解码失败: %v", err)
-					return
-				}
-			}()
+			// 启动解码过程
+			if err := mp3Decoder.Run(startTs); err != nil {
+				log.Errorf("MP3解码失败: %v", err)
+				return
+			}
 
 			select {
 			case <-ctx.Done():
 				log.Debugf("TTS流式合成取消, 文本: %s", text)
 				return
 			default:
-				// 直接使用io.Copy，比手动读写更高效
-				if _, err := io.Copy(pipeWriter, resp.Body); err != nil {
-					log.Errorf("复制HTTP响应到管道失败: %v", err)
-					return
-				}
 				log.Infof("tts耗时: 从输入至获取MP3数据结束耗时: %d ms", time.Now().UnixMilli()-startTs)
 
 			}

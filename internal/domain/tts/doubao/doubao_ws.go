@@ -196,7 +196,7 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 	outputOpusChan = make(chan []byte, 1000)
 
 	go func() {
-		mp3Decoder, err := common.CreateMP3Decoder(pipeReader, outputOpusChan, frameDuration, ctx)
+		mp3Decoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputOpusChan, frameDuration, "mp3")
 		if err != nil {
 			log.Errorf("创建MP3解码器失败: %v", err)
 			close(outputOpusChan)

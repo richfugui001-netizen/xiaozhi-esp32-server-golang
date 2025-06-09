@@ -7,6 +7,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/domain/tts/cosyvoice"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/doubao"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/edge"
+	"xiaozhi-esp32-server-golang/internal/domain/tts/edge_offline"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/xiaozhi"
 )
 
@@ -34,6 +35,8 @@ func GetTTSProvider(providerName string, config map[string]interface{}) (TTSProv
 		baseProvider = cosyvoice.NewCosyVoiceTTSProvider(config)
 	case "edge":
 		baseProvider = edge.NewEdgeTTSProvider(config)
+	case "edge_offline":
+		baseProvider = edge_offline.NewEdgeOfflineTTSProvider(config)
 	case "xiaozhi":
 		baseProvider = xiaozhi.NewXiaozhiProvider(config)
 	default:

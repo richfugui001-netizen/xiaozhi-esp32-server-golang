@@ -132,7 +132,7 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 
 	ttsType := getTTsType(deviceConfig.Tts)
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
-	if ttsType == "xiaozhi" {
+	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}
@@ -199,7 +199,7 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 
 	ttsType := getTTsType(deviceConfig.Tts)
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
-	if ttsType == "xiaozhi" {
+	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}
