@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"sync"
@@ -98,6 +99,11 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 	// 创建带取消功能的上下文
 	ctx, cancel := context.WithCancel(context.Background())
 
+	maxSilenceDuration := viper.GetInt64("chat.chat_max_silence_duration")
+	if maxSilenceDuration == 0 {
+		maxSilenceDuration = 200
+	}
+
 	systemPrompt, _ := llm_memory.Get().GetSystemPrompt(ctx, deviceID)
 	clientState := &ClientState{
 		Dialogue:     &Dialogue{},
@@ -125,7 +131,7 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 			HaveVoice:            false,
 			HaveVoiceLastTime:    0,
 			VoiceStop:            false,
-			SilenceThresholdTime: 200,
+			SilenceThresholdTime: maxSilenceDuration,
 		},
 		SessionCtx: Ctx{},
 	}
@@ -165,6 +171,12 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 	}
 
 	systemPrompt, _ := llm_memory.Get().GetSystemPrompt(ctx, deviceID)
+
+	maxSilenceDuration := viper.GetInt64("chat.chat_max_silence_duration")
+	if maxSilenceDuration == 0 {
+		maxSilenceDuration = 200
+	}
+
 	clientState := &ClientState{
 		Dialogue:     &Dialogue{},
 		Abort:        false,
@@ -191,7 +203,7 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 			HaveVoice:            false,
 			HaveVoiceLastTime:    0,
 			VoiceStop:            false,
-			SilenceThresholdTime: 200,
+			SilenceThresholdTime: maxSilenceDuration,
 		},
 		SessionCtx: Ctx{},
 		UdpInfo:    udpSession,
@@ -240,6 +252,14 @@ func getTTSProvider(ttsConfig userconfig.TtsConfig) (tts.TTSProvider, error) {
 	}
 	return ttsProvider, nil
 }
+
+const (
+	ClientStatusInit       = "init"
+	ClientStatusListening  = "listening"
+	ClientStatusListenStop = "listenStop"
+	ClientStatusLLMStart   = "llmStart"
+	ClientStatusTTSStart   = "ttsStart"
+)
 
 // ClientState 表示客户端状态
 type ClientState struct {
@@ -290,6 +310,16 @@ type ClientState struct {
 	Statistic        Statistic   //耗时统计
 	MqttLastActiveTs int64       //最后活跃时间
 	VadLastActiveTs  int64       //vad最后活跃时间, 超过 60s && 没有在tts则断开连接
+
+	Status string //状态 listening, llmStart, ttsStart
+}
+
+func (c *ClientState) GetMaxIdleDuration() int64 {
+	maxIdleDuration := viper.GetInt64("chat.max_idle_duration")
+	if maxIdleDuration == 0 {
+		maxIdleDuration = 20000
+	}
+	return maxIdleDuration
 }
 
 func (c *ClientState) UpdateLastActiveTs() {
@@ -302,6 +332,14 @@ func (c *ClientState) IsActive() bool {
 
 func (c *ClientState) IsMqttUdp() bool {
 	return c.Conn.connType == 1
+}
+
+func (c *ClientState) SetStatus(status string) {
+	c.Status = status
+}
+
+func (c *ClientState) GetStatus() string {
+	return c.Status
 }
 
 type UdpInfo struct {
@@ -402,6 +440,8 @@ func (c *ClientState) Destroy() {
 	c.AsrAudioBuffer.ClearAsrAudioData()
 
 	c.ResetSessionCtx()
+	c.Statistic.Reset()
+	c.SetStatus(ClientStatusInit)
 }
 
 func (c *ClientState) SetAsrPcmFrameSize(sampleRate int, channels int, perFrameDuration int) {
@@ -502,10 +542,36 @@ func (state *ClientState) SendTTSAudio(ctx context.Context, audioChan chan []byt
 	}
 }
 
+func (state *ClientState) OnVoiceSilence() {
+	state.SetClientVoiceStop(true) //设置停止说话标志位, 此时收到的音频数据不会进vad
+	//客户端停止说话
+	state.Asr.Stop() //停止asr并获取结果，进行llm
+	//释放vad
+	state.Vad.Reset() //释放vad实例
+	//asr统计
+	state.SetStartAsrTs() //进行asr统计
+
+	state.SetStatus(ClientStatusListenStop)
+}
+
 type Vad struct {
 	lock sync.RWMutex
 	// VAD 提供者
 	VadProvider vad.VAD
+
+	IdleDuration int64 // 空闲时间, 单位: ms
+}
+
+func (v *Vad) AddIdleDuration(idleDuration int64) int64 {
+	return atomic.AddInt64(&v.IdleDuration, idleDuration)
+}
+
+func (v *Vad) GetIdleDuration() int64 {
+	return atomic.LoadInt64(&v.IdleDuration)
+}
+
+func (v *Vad) ResetIdleDuration() {
+	atomic.StoreInt64(&v.IdleDuration, 0)
 }
 
 func (v *Vad) Init() error {
@@ -524,9 +590,10 @@ func (v *Vad) Reset() error {
 	v.lock.Lock()
 	defer v.lock.Unlock()
 	if v.VadProvider != nil {
-		vad.ReleaseVAD(v.VadProvider)
-		v.VadProvider = nil
+		vad.ReleaseVAD(v.VadProvider) //释放vad实例资源
+		v.VadProvider = nil           //置nil
 	}
+	v.ResetIdleDuration()
 	return nil
 }
 
@@ -590,8 +657,8 @@ func (a *Asr) Stop() {
 	defer a.lock.Unlock()
 	if a.AsrAudioChannel != nil {
 		log.Debugf("停止asr")
-		close(a.AsrAudioChannel)
-		a.AsrAudioChannel = nil
+		close(a.AsrAudioChannel) //close掉asr输入音频的channel，通知asr停止, 返回结果
+		a.AsrAudioChannel = nil  //由于已经close，所以需要置空
 	}
 }
 

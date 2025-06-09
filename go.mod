@@ -17,6 +17,7 @@ require (
 	github.com/hraban/opus v0.0.0-20220302220929-eeacdbcb92d0
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
 	github.com/mark3labs/mcp-go v0.31.0
+	github.com/maxhawkins/go-webrtcvad v0.0.0-20210121163624-be60036f3083
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/r3labs/sse/v2 v2.10.0
 	github.com/redis/go-redis/v9 v9.7.3
