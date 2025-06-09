@@ -8,6 +8,12 @@ type Statistic struct {
 	TtsStartTs int64 //tts开始时间
 }
 
+func (s *Statistic) Reset() {
+	s.AsrStartTs = 0
+	s.LlmStartTs = 0
+	s.TtsStartTs = 0
+}
+
 func (state *ClientState) SetStartAsrTs() {
 	state.Statistic.AsrStartTs = time.Now().UnixMilli()
 }
