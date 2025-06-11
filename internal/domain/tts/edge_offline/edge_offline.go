@@ -54,7 +54,7 @@ type wsConnFactory struct {
 }
 
 func (f *wsConnFactory) MakeObject(ctx context.Context) (*pool.PooledObject, error) {
-	conn, _, err := f.dialer.DialContext(ctx, f.serverURL, nil)
+	conn, _, err := f.dialer.Dial(f.serverURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("WebSocket连接失败: %v", err)
 	}
@@ -137,18 +137,20 @@ func (p *EdgeOfflineTTSProvider) getConnection(ctx context.Context) (*wsConnWrap
 }
 
 // returnConnection 归还连接到连接池
-func (p *EdgeOfflineTTSProvider) returnConnection(ctx context.Context, wrapper *wsConnWrapper) error {
+func (p *EdgeOfflineTTSProvider) returnConnection(wrapper *wsConnWrapper) error {
 	if globalPool == nil {
 		return fmt.Errorf("全局连接池未初始化")
 	}
+	ctx := context.Background()
 	return globalPool.ReturnObject(ctx, wrapper)
 }
 
 // removeConnection 从连接池中移除连接
-func (p *EdgeOfflineTTSProvider) removeConnection(ctx context.Context, wrapper *wsConnWrapper) {
+func (p *EdgeOfflineTTSProvider) removeConnection(wrapper *wsConnWrapper) {
 	if wrapper == nil || globalPool == nil {
 		return
 	}
+	ctx := context.Background()
 	globalPool.InvalidateObject(ctx, wrapper)
 }
 
@@ -156,12 +158,8 @@ func (p *EdgeOfflineTTSProvider) removeConnection(ctx context.Context, wrapper *
 func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, sampleRate int, channels int, frameDuration int) ([][]byte, error) {
 	var frames [][]byte
 
-	// 创建一个新的上下文，带有超时
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, p.Timeout)
-	defer cancel()
-
 	// 获取连接
-	wrapper, err := p.getConnection(ctxWithTimeout)
+	wrapper, err := p.getConnection(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +167,7 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 	// 发送文本
 	err = wrapper.conn.WriteMessage(websocket.TextMessage, []byte(text))
 	if err != nil {
-		p.removeConnection(ctxWithTimeout, wrapper)
+		p.removeConnection(wrapper)
 		return nil, fmt.Errorf("发送文本失败: %v", err)
 	}
 
@@ -179,7 +177,7 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 	startTs := time.Now().UnixMilli()
 
 	// 创建音频解码器
-	audioDecoder, err := common.CreateAudioDecoder(ctxWithTimeout, pipeReader, outputChan, frameDuration, "mp3")
+	audioDecoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
 	if err != nil {
 		pipeReader.Close()
 		return nil, fmt.Errorf("创建音频解码器失败: %v", err)
@@ -226,8 +224,8 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 
 	// 等待完成或超时
 	select {
-	case <-ctxWithTimeout.Done():
-		p.removeConnection(ctxWithTimeout, wrapper)
+	case <-ctx.Done():
+		p.returnConnection(wrapper)
 		return nil, fmt.Errorf("TTS合成超时或被取消")
 	case <-done:
 		close(outputChan)
@@ -240,23 +238,18 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 	outputChan := make(chan []byte, 100)
 
 	go func() {
-
-		// 创建一个新的上下文，带有超时
-		ctxWithTimeout, cancel := context.WithTimeout(ctx, p.Timeout)
-		defer cancel()
-
 		// 获取连接
-		wrapper, err := p.getConnection(ctxWithTimeout)
+		wrapper, err := p.getConnection(ctx)
 		if err != nil {
 			log.Errorf("获取WebSocket连接失败: %v", err)
 			return
 		}
-		defer p.returnConnection(ctxWithTimeout, wrapper)
+		defer p.returnConnection(wrapper)
 
 		// 发送文本
 		err = wrapper.conn.WriteMessage(websocket.TextMessage, []byte(text))
 		if err != nil {
-			p.removeConnection(ctxWithTimeout, wrapper)
+			p.removeConnection(wrapper)
 			log.Errorf("发送文本失败: %v", err)
 			return
 		}
@@ -273,7 +266,7 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 		go func() {
 			startTs := time.Now().UnixMilli()
 			// 创建音频解码器
-			audioDecoder, err := common.CreateAudioDecoder(ctxWithTimeout, pipeReader, outputChan, frameDuration, "pcm")
+			audioDecoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "pcm")
 			if err != nil {
 				pipeReader.Close()
 				log.Errorf("创建音频解码器失败: %v", err)
@@ -294,8 +287,8 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 		// 接收WebSocket数据并写入管道
 		for {
 			select {
-			case <-ctxWithTimeout.Done():
-				p.removeConnection(ctxWithTimeout, wrapper)
+			case <-ctx.Done():
+				p.returnConnection(wrapper)
 				return
 			default:
 				messageType, data, err := wrapper.conn.ReadMessage()
@@ -304,14 +297,14 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 						return
 					}
 					log.Errorf("读取WebSocket消息失败: %v", err)
-					p.removeConnection(ctxWithTimeout, wrapper)
+					p.removeConnection(wrapper)
 					return
 				}
 
 				if messageType == websocket.BinaryMessage {
 					if _, err := pipeWriter.Write(data); err != nil {
 						log.Errorf("写入音频数据失败: %v", err)
-						p.removeConnection(ctxWithTimeout, wrapper)
+						p.removeConnection(wrapper)
 						return
 					}
 					return
