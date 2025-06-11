@@ -482,7 +482,7 @@ func (state *ClientState) SendTTSAudio(ctx context.Context, audioChan chan []byt
 	if firstFrameCount > 20 || firstFrameCount < 3 {
 		firstFrameCount = 5
 	}
-	// 收集前三帧
+	// 收集前180ms音频
 	for totalFrames < firstFrameCount {
 		select {
 		case frame, ok := <-audioChan:
