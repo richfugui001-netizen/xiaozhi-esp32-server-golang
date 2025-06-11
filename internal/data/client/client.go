@@ -629,18 +629,18 @@ func (a *Asr) Reset() {
 }
 
 func (a *Asr) RetireAsrResult(ctx context.Context) (string, error) {
+	defer func() {
+		a.Reset()
+	}()
 	for {
 		select {
 		case <-ctx.Done():
-			a.Reset()
 			return "", fmt.Errorf("RetireAsrResult ctx Done")
 		case result, ok := <-a.AsrResultChannel:
-			log.Debugf("asr result: %s, ok: %+v", result.Text, ok)
+			log.Debugf("asr result: %s, ok: %+v, isFinal: %+v", result.Text, ok, result.IsFinal)
 			a.AsrResult.WriteString(result.Text)
 			if result.IsFinal {
 				text := a.AsrResult.String()
-				log.Debugf("asr result is final: %s", text)
-				a.Reset()
 				return text, nil
 			}
 			if !ok {
