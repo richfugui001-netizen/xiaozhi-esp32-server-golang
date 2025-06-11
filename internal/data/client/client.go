@@ -477,8 +477,13 @@ func (state *ClientState) SendTTSAudio(ctx context.Context, audioChan chan []byt
 	totalFrames := preBufferCount // 跟踪已发送的总帧数
 
 	isStatistic := true
+	//首次发送180ms音频, 根据outputAudioFormat.FrameDuration计算
+	firstFrameCount := 180 / state.OutputAudioFormat.FrameDuration
+	if firstFrameCount > 20 || firstFrameCount < 3 {
+		firstFrameCount = 5
+	}
 	// 收集前三帧
-	for totalFrames < 3 {
+	for totalFrames < firstFrameCount {
 		select {
 		case frame, ok := <-audioChan:
 			if isStart && isStatistic {
