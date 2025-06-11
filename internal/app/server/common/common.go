@@ -14,6 +14,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
+	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 
 	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
@@ -21,6 +22,7 @@ import (
 
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
 )
@@ -37,11 +39,26 @@ type ServerMessage struct {
 	Emotion     string                   `json:"emotion,omitempty"`
 }
 
-func HandleLLMResponse(ctx context.Context, state *ClientState, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
+func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
 	log.Debugf("HandleLLMResponse start")
 	defer log.Debugf("HandleLLMResponse end")
 
+	var toolCalls []schema.ToolCall
 	var fullText bytes.Buffer
+
+	sendTtsEndFunc := func() error {
+		// 发送结束消息
+		response := ServerMessage{
+			Type:      ServerMessageTypeTts,
+			State:     MessageStateStop,
+			SessionID: state.SessionID,
+		}
+		if err := state.SendMsg(response); err != nil {
+			log.Errorf("发送 TTS 文本失败: stop, %v", err)
+			return fmt.Errorf("发送 TTS 文本失败: stop")
+		}
+		return nil
+	}
 	for {
 		select {
 		case llmResponse, ok := <-llmResponseChannel:
@@ -53,74 +70,41 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, llmResponseChann
 
 			log.Debugf("LLM 响应: %+v", llmResponse)
 
-			// 使用带上下文的TTS处理
-			outputChan, err := state.TTSProvider.TextToSpeechStream(state.Ctx, llmResponse.Text, state.OutputAudioFormat.SampleRate, state.OutputAudioFormat.Channels, state.OutputAudioFormat.FrameDuration)
-			if err != nil {
-				log.Errorf("生成 TTS 音频失败: %v", err)
-				return true, fmt.Errorf("生成 TTS 音频失败: %v", err)
+			if len(llmResponse.ToolCalls) > 0 {
+				log.Debugf("获取到工具: %+v", llmResponse.ToolCalls)
+				toolCalls = append(toolCalls, llmResponse.ToolCalls...)
 			}
 
-			if llmResponse.IsStart {
-				// 先发送文本
-				response := ServerMessage{
-					Type:      ServerMessageTypeTts,
-					State:     MessageStateStart,
-					SessionID: state.SessionID,
+			if llmResponse.Text != "" {
+				// 处理文本内容响应
+				if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
+					return true, err
 				}
-				if err := state.SendMsg(response); err != nil {
-					log.Errorf("发送 TTS Start 失败: %v", err)
-					return true, fmt.Errorf("发送 TTS Start 失败: %v", err)
-				}
-			}
-
-			// 先发送文本
-			response := ServerMessage{
-				Type:      ServerMessageTypeTts,
-				State:     MessageStateSentenceStart,
-				Text:      llmResponse.Text,
-				SessionID: state.SessionID,
-			}
-			if err := state.SendMsg(response); err != nil {
-				log.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
-				return true, fmt.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
-			}
-
-			state.SetStatus(ClientStatusTTSStart)
-
-			fullText.WriteString(llmResponse.Text)
-
-			// 发送音频帧
-			if err := state.SendTTSAudio(ctx, outputChan, llmResponse.IsStart); err != nil {
-				log.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
-				return true, fmt.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
-			}
-
-			// 先发送文本
-			response = ServerMessage{
-				Type:      ServerMessageTypeTts,
-				State:     MessageStateSentenceEnd,
-				Text:      llmResponse.Text,
-				SessionID: state.SessionID,
-			}
-			if err := state.SendMsg(response); err != nil {
-				log.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
-				return true, fmt.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
 			}
 
 			if llmResponse.IsEnd {
 				//延迟50ms毫秒再发stop
 				//time.Sleep(50 * time.Millisecond)
 				//写到redis中
-				llm_memory.Get().AddMessage(ctx, state.DeviceID, "assistant", fullText.String())
-				// 发送结束消息
-				response := ServerMessage{
-					Type:      ServerMessageTypeTts,
-					State:     MessageStateStop,
-					SessionID: state.SessionID,
+				strFullText := fullText.String()
+				if strFullText != "" {
+					llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.Assistant, strFullText)
 				}
-				if err := state.SendMsg(response); err != nil {
-					log.Errorf("发送 TTS 文本失败: stop, %v", err)
-					return false, fmt.Errorf("发送 TTS 文本失败: stop")
+				if len(toolCalls) > 0 {
+					invokeToolSuccess, err := handleToolCallResponse(ctx, state, requestEinoMessages, toolCalls)
+					if err != nil {
+						log.Errorf("处理工具调用响应失败: %v", err)
+						return true, fmt.Errorf("处理工具调用响应失败: %v", err)
+					}
+					if !invokeToolSuccess {
+						//工具调用失败
+						if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
+							return true, err
+						}
+						sendTtsEndFunc()
+					}
+				} else {
+					sendTtsEndFunc()
 				}
 
 				return ok, nil
@@ -131,7 +115,119 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, llmResponseChann
 			return false, nil
 		}
 	}
+}
 
+// handleTextResponse 处理文本内容响应
+func handleTextResponse(ctx context.Context, state *ClientState, llmResponse llm_common.LLMResponseStruct, fullText *bytes.Buffer) error {
+	if llmResponse.Text == "" {
+		return nil
+	}
+
+	// 使用带上下文的TTS处理
+	outputChan, err := state.TTSProvider.TextToSpeechStream(state.Ctx, llmResponse.Text, state.OutputAudioFormat.SampleRate, state.OutputAudioFormat.Channels, state.OutputAudioFormat.FrameDuration)
+	if err != nil {
+		log.Errorf("生成 TTS 音频失败: %v", err)
+		return fmt.Errorf("生成 TTS 音频失败: %v", err)
+	}
+
+	if llmResponse.IsStart {
+		// 先发送文本
+		response := ServerMessage{
+			Type:      ServerMessageTypeTts,
+			State:     MessageStateStart,
+			SessionID: state.SessionID,
+		}
+		if err := state.SendMsg(response); err != nil {
+			log.Errorf("发送 TTS Start 失败: %v", err)
+			return fmt.Errorf("发送 TTS Start 失败: %v", err)
+		}
+	}
+
+	// 先发送文本
+	response := ServerMessage{
+		Type:      ServerMessageTypeTts,
+		State:     MessageStateSentenceStart,
+		Text:      llmResponse.Text,
+		SessionID: state.SessionID,
+	}
+	if err := state.SendMsg(response); err != nil {
+		log.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
+		return fmt.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
+	}
+
+	state.SetStatus(ClientStatusTTSStart)
+
+	fullText.WriteString(llmResponse.Text)
+
+	// 发送音频帧
+	if err := state.SendTTSAudio(ctx, outputChan, llmResponse.IsStart); err != nil {
+		log.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
+		return fmt.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
+	}
+
+	// 先发送文本
+	response = ServerMessage{
+		Type:      ServerMessageTypeTts,
+		State:     MessageStateSentenceEnd,
+		Text:      llmResponse.Text,
+		SessionID: state.SessionID,
+	}
+	if err := state.SendMsg(response); err != nil {
+		log.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
+		return fmt.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
+	}
+
+	return nil
+}
+
+// handleToolCallResponse 处理工具调用响应
+func handleToolCallResponse(ctx context.Context, state *ClientState, requestEinoMessages []*schema.Message, tools []schema.ToolCall) (bool, error) {
+	if len(tools) == 0 {
+		return false, nil
+	}
+
+	log.Infof("处理 %d 个工具调用", len(tools))
+
+	globalMCPManager := mcp.GetGlobalMCPManager()
+
+	var invokeToolSuccess bool
+	msgList := make([]*schema.Message, 0)
+	for _, toolCall := range tools {
+		toolName := toolCall.Function.Name
+		tool, ok := globalMCPManager.GetToolByName(toolName)
+		if !ok || tool == nil {
+			log.Errorf("未找到工具: %s", toolName)
+			continue
+		}
+		log.Infof("进行工具调用请求: %s, 参数: %+v", toolName, toolCall.Function.Arguments)
+		result, err := tool.InvokableRun(ctx, toolCall.Function.Arguments)
+		if err != nil {
+			log.Errorf("工具调用失败: %v", err)
+			continue
+		}
+		invokeToolSuccess = true
+		log.Infof("工具调用结果: %s", result)
+		msg := []*schema.Message{
+			&schema.Message{
+				Role:      schema.Assistant,
+				ToolCalls: []schema.ToolCall{toolCall},
+			},
+			&schema.Message{
+				Role:       schema.Tool,
+				ToolCallID: toolCall.ID,
+				Content:    result,
+			},
+		}
+		msgList = append(msgList, msg...)
+	}
+
+	if invokeToolSuccess {
+		requestEinoMessages = append(requestEinoMessages, msgList...)
+		//不需要带tool进行调用
+		DoLLmRequest(ctx, state, requestEinoMessages, state.SessionID, nil)
+	}
+
+	return invokeToolSuccess, nil
 }
 
 func ProcessVadAudio(state *ClientState) {
@@ -473,34 +569,79 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 		log.Errorf("获取对话历史失败: %v", err)
 	}
 
-	requestMessages = append(requestMessages, llm_common.Message{
-		Role:    "user",
+	// 直接创建Eino原生消息
+	userMessage := &schema.Message{
+		Role:    schema.User,
 		Content: text,
-	})
+	}
+	requestMessages = append(requestMessages, *userMessage)
 
 	// 添加用户消息到对话历史
-	llm_memory.Get().AddMessage(ctx, clientState.DeviceID, "user", text)
+	llm_memory.Get().AddMessage(ctx, clientState.DeviceID, schema.User, text)
 
 	ctx, cancel := context.WithCancel(ctx)
 	_ = cancel
 
+	// 直接传递Eino原生消息，无需转换
+	requestEinoMessages := make([]*schema.Message, len(requestMessages))
+	for i, msg := range requestMessages {
+		requestEinoMessages[i] = &msg
+	}
+
+	// 获取全局MCP工具列表
+	globalMCPManager := mcp.GetGlobalMCPManager()
+	mcpTools := globalMCPManager.GetAllTools()
+
+	// 将MCP工具转换为接口格式以便传递给转换函数
+	mcpToolsInterface := make(map[string]interface{})
+	for name, tool := range mcpTools {
+		mcpToolsInterface[name] = tool
+	}
+
+	// 转换MCP工具为Eino ToolInfo格式
+	einoTools, err := llm.ConvertMCPToolsToEinoTools(ctx, mcpToolsInterface)
+	if err != nil {
+		log.Errorf("转换MCP工具失败: %v", err)
+		einoTools = nil
+	}
+
+	toolNameList := make([]string, 0)
+	for _, tool := range einoTools {
+		toolNameList = append(toolNameList, tool.Name)
+	}
+
+	// 发送带工具的LLM请求
+	log.Infof("使用 %d 个MCP工具发送LLM请求, tools: %+v", len(einoTools), toolNameList)
+
+	err = DoLLmRequest(ctx, clientState, requestEinoMessages, sessionID, einoTools)
+	if err != nil {
+		log.Errorf("发送带工具的 LLM 请求失败, seesionID: %s, error: %v", sessionID, err)
+		return fmt.Errorf("发送带工具的 LLM 请求失败: %v", err)
+	}
+
+	return nil
+}
+
+func DoLLmRequest(ctx context.Context, clientState *ClientState, requestEinoMessages []*schema.Message, sessionID string, einoTools []*schema.ToolInfo) error {
+	log.Debugf("发送带工具的 LLM 请求, seesionID: %s, requestEinoMessages: %+v", sessionID, requestEinoMessages)
 	clientState.SetStatus(ClientStatusLLMStart)
-	// 发送 LLM 请求
-	responseSentences, err := llm.HandleLLMWithContext(
+	responseSentences, err := llm.HandleLLMWithContextAndTools(
 		ctx,
 		clientState.LLMProvider,
-		messagesToInterfaces(requestMessages),
+		requestEinoMessages,
+		einoTools,
 		sessionID,
 	)
 	if err != nil {
-		log.Errorf("发送 LLM 请求失败, seesionID: %s, error: %v", sessionID, err)
-		return fmt.Errorf("发送 LLM 请求失败: %v", err)
+		log.Errorf("发送带工具的 LLM 请求失败, seesionID: %s, error: %v", sessionID, err)
+		return fmt.Errorf("发送带工具的 LLM 请求失败: %v", err)
 	}
 
 	go func() {
-		ok, err := HandleLLMResponse(ctx, clientState, responseSentences)
+		ok, err := HandleLLMResponse(ctx, clientState, requestEinoMessages, responseSentences)
 		if err != nil {
-			cancel()
+			log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", sessionID, err)
+			clientState.CancelSessionCtx()
 		}
 
 		_ = ok
@@ -511,13 +652,4 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 	}()
 
 	return nil
-}
-
-// 添加一个转换函数
-func messagesToInterfaces(msgs []llm_common.Message) []interface{} {
-	result := make([]interface{}, len(msgs))
-	for i, msg := range msgs {
-		result[i] = msg
-	}
-	return result
 }

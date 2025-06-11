@@ -24,6 +24,7 @@ import (
 
 	log "xiaozhi-esp32-server-golang/logger"
 
+	"github.com/cloudwego/eino/schema"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
@@ -31,7 +32,7 @@ import (
 
 // Dialogue 表示对话历史
 type Dialogue struct {
-	Messages []llm_common.Message
+	Messages []schema.Message
 }
 
 // *websocket.Conn  读: 不允许多个协程同时读   写: 不允许多个协程同时写   读写: 允许同时读写
@@ -137,7 +138,7 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 
 	ttsType := getTTsType(deviceConfig.Tts)
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
-	if ttsType == "xiaozhi" {
+	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}
@@ -210,7 +211,7 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 
 	ttsType := getTTsType(deviceConfig.Tts)
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
-	if ttsType == "xiaozhi" {
+	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}

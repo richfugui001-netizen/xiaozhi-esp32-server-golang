@@ -4,29 +4,19 @@ import (
 	"context"
 	"fmt"
 
-	"xiaozhi-esp32-server-golang/internal/domain/llm/ollama"
-	"xiaozhi-esp32-server-golang/internal/domain/llm/openai"
+	"github.com/cloudwego/eino/schema"
+
+	"xiaozhi-esp32-server-golang/internal/domain/llm/eino_llm"
 )
 
 // LLMProvider 大语言模型提供者接口
-// 所有LLM实现必须遵循此接口
+// 所有LLM实现必须遵循此接口，使用Eino原生类型
 type LLMProvider interface {
-	// Response 生成文本响应，返回一个字符串通道
-	// sessionID: 会话标识符，用于跟踪请求
-	// dialogue: 对话历史，包含用户和模型的消息
-	Response(sessionID string, dialogue []interface{}) chan string
-
-	// ResponseWithFunctions 生成带工具调用的响应，返回一个接口通道
-	// sessionID: 会话标识符，用于跟踪请求
-	// dialogue: 对话历史，包含用户和模型的消息
-	// functions: 可用的工具/函数定义
-	ResponseWithFunctions(sessionID string, dialogue []interface{}, functions interface{}) chan interface{}
-
 	// ResponseWithContext 带有上下文控制的响应，支持取消操作
 	// ctx: 上下文，可用于取消长时间运行的请求
 	// sessionID: 会话标识符
-	// dialogue: 对话历史
-	ResponseWithContext(ctx context.Context, sessionID string, dialogue []interface{}) chan string
+	// dialogue: 对话历史，使用Eino原生消息类型
+	ResponseWithContext(ctx context.Context, sessionID string, dialogue []*schema.Message, functions []*schema.ToolInfo) chan *schema.Message
 
 	// GetModelInfo 获取模型信息
 	// 返回模型名称和其他元数据
@@ -40,15 +30,20 @@ type LLMFactory interface {
 	CreateProvider(config map[string]interface{}) (LLMProvider, error)
 }
 
+// GetLLMProvider 创建LLM提供者
+// 统一使用EinoLLMProvider处理所有类型
 func GetLLMProvider(providerName string, config map[string]interface{}) (LLMProvider, error) {
 	llmType := config["type"].(string)
 	switch llmType {
-	case "openai":
-		return openai.NewOpenAIProvider(config), nil
-	case "ollama":
-		return ollama.NewOllamaProvider(config), nil
+	case "openai", "ollama", "eino_llm", "eino":
+		// 统一使用 EinoLLMProvider 处理所有类型
+		provider, err := eino_llm.NewEinoLLMProvider(config)
+		if err != nil {
+			return nil, fmt.Errorf("创建Eino LLM提供者失败: %v", err)
+		}
+		return provider, nil
 	}
-	return nil, fmt.Errorf("不支持的LLM提供者: %s", providerName)
+	return nil, fmt.Errorf("不支持的LLM提供者: %s", llmType)
 }
 
 // Config LLM配置结构
@@ -58,39 +53,4 @@ type Config struct {
 	BaseURL    string                 `json:"base_url"`
 	MaxTokens  int                    `json:"max_tokens"`
 	Parameters map[string]interface{} `json:"parameters,omitempty"`
-}
-
-// TextMessage 文本消息结构
-type TextMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// FunctionCall 函数调用结构
-type FunctionCall struct {
-	Name      string      `json:"name"`
-	Arguments interface{} `json:"arguments"`
-}
-
-// NewTextMessage 创建新的文本消息
-func NewTextMessage(role, content string) TextMessage {
-	return TextMessage{
-		Role:    role,
-		Content: content,
-	}
-}
-
-// NewUserMessage 创建用户消息
-func NewUserMessage(content string) TextMessage {
-	return NewTextMessage("user", content)
-}
-
-// NewAssistantMessage 创建助手消息
-func NewAssistantMessage(content string) TextMessage {
-	return NewTextMessage("assistant", content)
-}
-
-// NewSystemMessage 创建系统消息
-func NewSystemMessage(content string) TextMessage {
-	return NewTextMessage("system", content)
 }

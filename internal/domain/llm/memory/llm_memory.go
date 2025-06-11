@@ -7,8 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/cloudwego/eino/schema"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -17,12 +18,6 @@ var (
 	memoryInstance *Memory
 	once           sync.Once
 )
-
-// MemoryMessage 表示带时间戳的对话消息
-type MemoryMessage struct {
-	common.Message
-	Timestamp time.Time `json:"timestamp"`
-}
 
 // Memory 表示对话记忆体
 type Memory struct {
@@ -81,18 +76,15 @@ func (m *Memory) getSystemPromptKey(deviceID string) string {
 }
 
 // AddMessage 添加一条新的对话消息到记忆体
-func (m *Memory) AddMessage(ctx context.Context, deviceID string, role string, content string) error {
+func (m *Memory) AddMessage(ctx context.Context, deviceID string, role schema.RoleType, content string) error {
 	if m.redisClient == nil {
 		log.Log().Warn("redis client is nil")
 		return nil
 	}
 
-	msg := MemoryMessage{
-		Message: common.Message{
-			Role:    role,
-			Content: content,
-		},
-		Timestamp: time.Now(),
+	msg := schema.Message{
+		Role:    role,
+		Content: content,
 	}
 
 	msgBytes, err := json.Marshal(msg)
@@ -103,7 +95,7 @@ func (m *Memory) AddMessage(ctx context.Context, deviceID string, role string, c
 	key := m.getMemoryKey(deviceID)
 	// 使用纳秒时间戳作为分数
 	// ZREVRANGE 会返回分数从大到小的结果
-	score := float64(msg.Timestamp.UnixNano())
+	score := float64(time.Now().UnixNano())
 
 	log.Debugf("添加消息到记忆体: %s, %s", key, string(msgBytes))
 
@@ -114,10 +106,10 @@ func (m *Memory) AddMessage(ctx context.Context, deviceID string, role string, c
 }
 
 // GetMessages 获取设备的所有对话记忆
-func (m *Memory) GetMessages(ctx context.Context, deviceID string, count int) ([]MemoryMessage, error) {
+func (m *Memory) GetMessages(ctx context.Context, deviceID string, count int) ([]schema.Message, error) {
 	if m.redisClient == nil {
 		log.Log().Warn("redis client is nil")
-		return []MemoryMessage{}, nil
+		return []schema.Message{}, nil
 	}
 
 	key := m.getMemoryKey(deviceID)
@@ -134,7 +126,7 @@ func (m *Memory) GetMessages(ctx context.Context, deviceID string, count int) ([
 	}
 
 	// 预分配切片
-	messages := make([]MemoryMessage, len(results))
+	messages := make([]schema.Message, len(results))
 
 	// 反向遍历，使旧消息在前，新消息在后
 	for i := 0; i < len(results); i++ {
@@ -147,10 +139,10 @@ func (m *Memory) GetMessages(ctx context.Context, deviceID string, count int) ([
 }
 
 // GetMessagesForLLM 获取适用于 LLM 的消息格式
-func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count int) ([]common.Message, error) {
+func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count int) ([]schema.Message, error) {
 	if m.redisClient == nil {
 		log.Log().Warn("redis client is nil")
-		return []common.Message{}, nil
+		return []schema.Message{}, nil
 	}
 
 	// 首先获取系统 prompt
@@ -166,7 +158,7 @@ func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count i
 	}
 
 	// 预分配足够的容量
-	messages := make([]common.Message, 0, len(memoryMessages)+1)
+	messages := make([]schema.Message, 0, len(memoryMessages)+1)
 
 	// 系统 prompt 始终在最前面
 	if sysPrompt.Content != "" {
@@ -175,7 +167,7 @@ func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count i
 
 	// 添加历史消息（已经是按时间顺序：旧->新）
 	for _, msg := range memoryMessages {
-		messages = append(messages, msg.Message)
+		messages = append(messages, msg)
 	}
 
 	return messages, nil
@@ -193,24 +185,24 @@ func (m *Memory) SetSystemPrompt(ctx context.Context, deviceID string, prompt st
 }
 
 // GetSystemPrompt 获取设备的系统 prompt
-func (m *Memory) GetSystemPrompt(ctx context.Context, deviceID string) (common.Message, error) {
+func (m *Memory) GetSystemPrompt(ctx context.Context, deviceID string) (schema.Message, error) {
 	if m.redisClient == nil {
 		log.Log().Warn("redis client is nil")
-		return common.Message{}, nil
+		return schema.Message{}, nil
 	}
 
 	key := m.getSystemPromptKey(deviceID)
 
 	result, err := m.redisClient.Get(ctx, key).Result()
 	if err == redis.Nil {
-		return common.Message{}, nil // 返回空消息结构
+		return schema.Message{}, nil // 返回空消息结构
 	}
 	if err != nil {
-		return common.Message{}, fmt.Errorf("get system prompt failed: %w", err)
+		return schema.Message{}, fmt.Errorf("get system prompt failed: %w", err)
 	}
 
-	return common.Message{
-		Role:    "system",
+	return schema.Message{
+		Role:    schema.System,
 		Content: result,
 	}, nil
 }
@@ -238,10 +230,10 @@ func (m *Memory) ResetMemory(ctx context.Context, deviceID string) error {
 }
 
 // GetLastNMessages 获取最近的 N 条消息
-func (m *Memory) GetLastNMessages(ctx context.Context, deviceID string, n int64) ([]MemoryMessage, error) {
+func (m *Memory) GetLastNMessages(ctx context.Context, deviceID string, n int64) ([]schema.Message, error) {
 	if m.redisClient == nil {
 		log.Log().Warn("redis client is nil")
-		return []MemoryMessage{}, nil
+		return []schema.Message{}, nil
 	}
 
 	key := m.getMemoryKey(deviceID)
@@ -252,9 +244,9 @@ func (m *Memory) GetLastNMessages(ctx context.Context, deviceID string, n int64)
 		return nil, fmt.Errorf("get last messages failed: %w", err)
 	}
 
-	messages := make([]MemoryMessage, 0, len(results))
+	messages := make([]schema.Message, 0, len(results))
 	for i := len(results) - 1; i >= 0; i-- { // 反转顺序以保持时间顺序
-		var msg MemoryMessage
+		var msg schema.Message
 		if err := json.Unmarshal([]byte(results[i]), &msg); err != nil {
 			return nil, fmt.Errorf("unmarshal message failed: %w", err)
 		}
@@ -288,6 +280,6 @@ func (m *Memory) SetSummary(ctx context.Context, deviceID string, summary string
 }
 
 // 进行总结
-func (m *Memory) Summary(ctx context.Context, deviceID string, msgList []common.Message) (string, error) {
+func (m *Memory) Summary(ctx context.Context, deviceID string, msgList []schema.Message) (string, error) {
 	return "", nil
 }
