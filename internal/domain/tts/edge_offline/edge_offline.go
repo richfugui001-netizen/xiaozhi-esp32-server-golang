@@ -12,28 +12,86 @@ import (
 
 	"github.com/gopxl/beep"
 	"github.com/gorilla/websocket"
+	"github.com/jolestar/go-commons-pool/v2"
 )
+
+var (
+	// 全局连接池实例
+	globalPool *pool.ObjectPool
+	// 全局连接池配置
+	globalPoolConfig = &pool.ObjectPoolConfig{
+		MaxTotal:                10,
+		MaxIdle:                 5,
+		MinIdle:                 1,
+		TestOnBorrow:            true,
+		TestOnReturn:            true,
+		TestWhileIdle:           true,
+		MinEvictableIdleTime:    time.Minute,
+		TimeBetweenEvictionRuns: time.Minute,
+	}
+	// 确保全局连接池只初始化一次
+	initOnce sync.Once
+)
+
+// InitGlobalPool 初始化全局连接池
+func InitGlobalPool(serverURL string) {
+	initOnce.Do(func() {
+		factory := &wsConnFactory{
+			serverURL: serverURL,
+			dialer: &websocket.Dialer{
+				HandshakeTimeout: 10 * time.Second,
+			},
+		}
+
+		globalPool = pool.NewObjectPool(context.Background(), factory, globalPoolConfig)
+	})
+}
+
+// WebSocket连接工厂
+type wsConnFactory struct {
+	serverURL string
+	dialer    *websocket.Dialer
+}
+
+func (f *wsConnFactory) MakeObject(ctx context.Context) (*pool.PooledObject, error) {
+	conn, _, err := f.dialer.DialContext(ctx, f.serverURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("WebSocket连接失败: %v", err)
+	}
+	return pool.NewPooledObject(&wsConnWrapper{
+		conn:         conn,
+		lastActiveAt: time.Now(),
+	}), nil
+}
+
+func (f *wsConnFactory) DestroyObject(ctx context.Context, object *pool.PooledObject) error {
+	wrapper := object.Object.(*wsConnWrapper)
+	return wrapper.conn.Close()
+}
+
+func (f *wsConnFactory) ValidateObject(ctx context.Context, object *pool.PooledObject) bool {
+	wrapper := object.Object.(*wsConnWrapper)
+	return time.Since(wrapper.lastActiveAt) < 30*time.Second
+}
+
+func (f *wsConnFactory) ActivateObject(ctx context.Context, object *pool.PooledObject) error {
+	wrapper := object.Object.(*wsConnWrapper)
+	wrapper.lastActiveAt = time.Now()
+	return nil
+}
+
+func (f *wsConnFactory) PassivateObject(ctx context.Context, object *pool.PooledObject) error {
+	return nil
+}
 
 const (
 	// WebSocket缓冲区大小
 	wsBufferSize = 1024 * 1024 // 1MB
 )
 
-var (
-	// 全局连接池
-	wsConnPool     = make(map[*websocket.Conn]*wsConnWrapper)
-	wsConnPoolLock sync.RWMutex
-
-	// 全局 WebSocket 配置
-	wsDialer = websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
-)
-
 // wsConnWrapper WebSocket 连接包装器
 type wsConnWrapper struct {
 	conn         *websocket.Conn
-	InUse        bool
 	lastActiveAt time.Time
 }
 
@@ -56,79 +114,42 @@ func NewEdgeOfflineTTSProvider(config map[string]interface{}) *EdgeOfflineTTSPro
 		timeout = 30 // 默认30秒超时
 	}
 
+	// 初始化全局连接池
+	InitGlobalPool(serverURL)
+
 	return &EdgeOfflineTTSProvider{
 		ServerURL: serverURL,
 		Timeout:   time.Duration(timeout) * time.Second,
 	}
 }
 
-// getConnection 从连接池获取或创建新的连接
+// getConnection 从连接池获取连接
 func (p *EdgeOfflineTTSProvider) getConnection(ctx context.Context) (*wsConnWrapper, error) {
-	// 创建新连接
-	conn, _, err := wsDialer.DialContext(ctx, p.ServerURL, nil)
+	if globalPool == nil {
+		return nil, fmt.Errorf("全局连接池未初始化")
+	}
+
+	obj, err := globalPool.BorrowObject(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("WebSocket连接失败: %v", err)
+		return nil, fmt.Errorf("从连接池获取连接失败: %v", err)
 	}
+	return obj.(*wsConnWrapper), nil
+}
 
-	wrapper := &wsConnWrapper{
-		conn:         conn,
-		lastActiveAt: time.Now(),
+// returnConnection 归还连接到连接池
+func (p *EdgeOfflineTTSProvider) returnConnection(ctx context.Context, wrapper *wsConnWrapper) error {
+	if globalPool == nil {
+		return fmt.Errorf("全局连接池未初始化")
 	}
-	return wrapper, nil
-	/*
-		wsConnPoolLock.Lock()
-		defer wsConnPoolLock.Unlock()
-
-		// 查找可用的连接
-		for conn, wrapper := range wsConnPool {
-			if !wrapper.InUse && time.Since(wrapper.lastActiveAt) < 30*time.Second {
-				wrapper.lastActiveAt = time.Now()
-				wrapper.InUse = true
-				return wrapper, nil
-			}
-			// 移除过期或正在使用的连接
-			conn.Close()
-			delete(wsConnPool, conn)
-		}
-
-		// 创建新连接
-		conn, _, err := wsDialer.DialContext(ctx, p.ServerURL, nil)
-		if err != nil {
-			return nil, fmt.Errorf("WebSocket连接失败: %v", err)
-		}
-
-		wrapper := &wsConnWrapper{
-			conn:         conn,
-			lastActiveAt: time.Now(),
-		}
-		wsConnPool[conn] = wrapper
-		wrapper.InUse = true
-		return wrapper, nil
-	*/
+	return globalPool.ReturnObject(ctx, wrapper)
 }
 
 // removeConnection 从连接池中移除连接
-func (p *EdgeOfflineTTSProvider) removeConnection(conn *websocket.Conn) {
-	if conn == nil {
+func (p *EdgeOfflineTTSProvider) removeConnection(ctx context.Context, wrapper *wsConnWrapper) {
+	if wrapper == nil || globalPool == nil {
 		return
 	}
-
-	wsConnPoolLock.Lock()
-	defer wsConnPoolLock.Unlock()
-
-	if wrapper, exists := wsConnPool[conn]; exists {
-		wrapper.conn.Close()
-		delete(wsConnPool, conn)
-	}
-}
-
-// ReleaseConn 释放连接回连接池
-func (p *EdgeOfflineTTSProvider) ReleaseConn(wsConn *wsConnWrapper) {
-	wsConnPoolLock.Lock()
-	defer wsConnPoolLock.Unlock()
-
-	wsConn.InUse = false
-	wsConn.lastActiveAt = time.Now()
+	globalPool.InvalidateObject(ctx, wrapper)
 }
 
 // TextToSpeech 将文本转换为语音，返回音频帧数据
@@ -148,7 +169,7 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 	// 发送文本
 	err = wrapper.conn.WriteMessage(websocket.TextMessage, []byte(text))
 	if err != nil {
-		p.removeConnection(wrapper.conn)
+		p.removeConnection(ctxWithTimeout, wrapper)
 		return nil, fmt.Errorf("发送文本失败: %v", err)
 	}
 
@@ -206,10 +227,9 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 	// 等待完成或超时
 	select {
 	case <-ctxWithTimeout.Done():
-		p.removeConnection(wrapper.conn)
+		p.removeConnection(ctxWithTimeout, wrapper)
 		return nil, fmt.Errorf("TTS合成超时或被取消")
 	case <-done:
-		wrapper.lastActiveAt = time.Now()
 		close(outputChan)
 		return frames, nil
 	}
@@ -231,12 +251,12 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 			log.Errorf("获取WebSocket连接失败: %v", err)
 			return
 		}
-		defer p.ReleaseConn(wrapper)
+		defer p.returnConnection(ctxWithTimeout, wrapper)
 
 		// 发送文本
 		err = wrapper.conn.WriteMessage(websocket.TextMessage, []byte(text))
 		if err != nil {
-			p.removeConnection(wrapper.conn)
+			p.removeConnection(ctxWithTimeout, wrapper)
 			log.Errorf("发送文本失败: %v", err)
 			return
 		}
@@ -275,7 +295,7 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 		for {
 			select {
 			case <-ctxWithTimeout.Done():
-				p.removeConnection(wrapper.conn)
+				p.removeConnection(ctxWithTimeout, wrapper)
 				return
 			default:
 				messageType, data, err := wrapper.conn.ReadMessage()
@@ -284,14 +304,14 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 						return
 					}
 					log.Errorf("读取WebSocket消息失败: %v", err)
-					p.removeConnection(wrapper.conn)
+					p.removeConnection(ctxWithTimeout, wrapper)
 					return
 				}
 
 				if messageType == websocket.BinaryMessage {
 					if _, err := pipeWriter.Write(data); err != nil {
 						log.Errorf("写入音频数据失败: %v", err)
-						p.removeConnection(wrapper.conn)
+						p.removeConnection(ctxWithTimeout, wrapper)
 						return
 					}
 					return
