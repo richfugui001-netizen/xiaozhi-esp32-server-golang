@@ -46,19 +46,32 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 	var toolCalls []schema.ToolCall
 	var fullText bytes.Buffer
 
-	sendTtsEndFunc := func() error {
+	sendTtsStartEndFunc := func(isStart bool) error {
+		msgState := MessageStateStart
+		if !isStart {
+			msgState = MessageStateStop
+		}
 		// 发送结束消息
 		response := ServerMessage{
 			Type:      ServerMessageTypeTts,
-			State:     MessageStateStop,
+			State:     msgState,
 			SessionID: state.SessionID,
 		}
 		if err := state.SendMsg(response); err != nil {
 			log.Errorf("发送 TTS 文本失败: stop, %v", err)
 			return fmt.Errorf("发送 TTS 文本失败: stop")
 		}
+
+		if isStart {
+			state.SetTtsStart(true)
+		}
 		return nil
 	}
+
+	if !state.GetTtsStart() {
+		sendTtsStartEndFunc(true)
+	}
+
 	for {
 		select {
 		case llmResponse, ok := <-llmResponseChannel:
@@ -101,10 +114,10 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 						if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
 							return true, err
 						}
-						sendTtsEndFunc()
+						sendTtsStartEndFunc(false)
 					}
 				} else {
-					sendTtsEndFunc()
+					sendTtsStartEndFunc(false)
 				}
 
 				return ok, nil
@@ -128,19 +141,6 @@ func handleTextResponse(ctx context.Context, state *ClientState, llmResponse llm
 	if err != nil {
 		log.Errorf("生成 TTS 音频失败: %v", err)
 		return fmt.Errorf("生成 TTS 音频失败: %v", err)
-	}
-
-	if llmResponse.IsStart {
-		// 先发送文本
-		response := ServerMessage{
-			Type:      ServerMessageTypeTts,
-			State:     MessageStateStart,
-			SessionID: state.SessionID,
-		}
-		if err := state.SendMsg(response); err != nil {
-			log.Errorf("发送 TTS Start 失败: %v", err)
-			return fmt.Errorf("发送 TTS Start 失败: %v", err)
-		}
 	}
 
 	// 先发送文本

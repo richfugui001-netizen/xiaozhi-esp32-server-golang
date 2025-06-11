@@ -312,6 +312,16 @@ type ClientState struct {
 	VadLastActiveTs  int64       //vad最后活跃时间, 超过 60s && 没有在tts则断开连接
 
 	Status string //状态 listening, llmStart, ttsStart
+
+	IsTtsStart bool //是否tts开始
+}
+
+func (c *ClientState) SetTtsStart(isStart bool) {
+	c.IsTtsStart = isStart
+}
+
+func (c *ClientState) GetTtsStart() bool {
+	return c.IsTtsStart
 }
 
 func (c *ClientState) GetMaxIdleDuration() int64 {
@@ -442,6 +452,7 @@ func (c *ClientState) Destroy() {
 	c.ResetSessionCtx()
 	c.Statistic.Reset()
 	c.SetStatus(ClientStatusInit)
+	c.SetTtsStart(false)
 }
 
 func (c *ClientState) SetAsrPcmFrameSize(sampleRate int, channels int, perFrameDuration int) {
