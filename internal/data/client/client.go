@@ -478,8 +478,13 @@ func (state *ClientState) SendTTSAudio(ctx context.Context, audioChan chan []byt
 	totalFrames := preBufferCount // 跟踪已发送的总帧数
 
 	isStatistic := true
-	// 收集前三帧
-	for totalFrames < 3 {
+	//首次发送180ms音频, 根据outputAudioFormat.FrameDuration计算
+	firstFrameCount := 180 / state.OutputAudioFormat.FrameDuration
+	if firstFrameCount > 20 || firstFrameCount < 3 {
+		firstFrameCount = 5
+	}
+	// 收集前180ms音频
+	for totalFrames < firstFrameCount {
 		select {
 		case frame, ok := <-audioChan:
 			if isStart && isStatistic {
@@ -630,18 +635,18 @@ func (a *Asr) Reset() {
 }
 
 func (a *Asr) RetireAsrResult(ctx context.Context) (string, error) {
+	defer func() {
+		a.Reset()
+	}()
 	for {
 		select {
 		case <-ctx.Done():
-			a.Reset()
 			return "", fmt.Errorf("RetireAsrResult ctx Done")
 		case result, ok := <-a.AsrResultChannel:
-			log.Debugf("asr result: %s, ok: %+v", result.Text, ok)
+			log.Debugf("asr result: %s, ok: %+v, isFinal: %+v", result.Text, ok, result.IsFinal)
 			a.AsrResult.WriteString(result.Text)
 			if result.IsFinal {
 				text := a.AsrResult.String()
-				log.Debugf("asr result is final: %s", text)
-				a.Reset()
 				return text, nil
 			}
 			if !ok {

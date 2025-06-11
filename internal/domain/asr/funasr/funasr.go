@@ -301,18 +301,9 @@ func (f *Funasr) recvResult(ctx context.Context, conn *websocket.Conn, resultCha
 			// 继续正常处理
 		}
 
-		// 设置读取超时
-		conn.SetReadDeadline(time.Now().Add(time.Duration(f.config.Timeout) * time.Second))
-
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			if isTimeoutError(err) {
-				log.Debugf("funasr recvResult 读取识别结果超时: %v", err)
-				//f.removeConnection(conn) // 读取超时，移除连接
-				continue
-			}
 			log.Debugf("funasr recvResult 读取识别结果失败: %v", err)
-			f.removeConnection(conn) // 读取失败时移除连接
 			return
 		}
 		log.Debugf("funasr recvResult 读取识别结果: %v", string(message))
@@ -371,7 +362,8 @@ func (f *Funasr) forwardStreamAudio(ctx context.Context, cancelFunc context.Canc
 		case <-ctx.Done():
 			// 上下文取消，发送结束消息并退出
 			log.Debugf("funasr forwardStreamAudio 上下文已取消: %v", ctx.Err())
-			defer cancelFunc() // 确保结束时取消上下文，通知接收goroutine
+			cancelFunc() // 确保结束时取消上下文，通知接收goroutine
+			sendEndMsg()
 			return
 		case pcmChunk, ok := <-audioStream:
 			if !ok {

@@ -23,12 +23,16 @@ func handleListenStart(state *ClientState, msg *ClientMessage) error {
 }
 
 func handleListenStop(state *ClientState) error {
+	if state.ListenMode == "auto" {
+		state.CancelSessionCtx()
+	}
 	// 停止录音
 	state.SetClientHaveVoice(true)
 	state.SetClientVoiceStop(true)
 	state.SetClientHaveVoiceLastTime(0)
 	state.Destroy()
 	state.SetStartAsrTs()
+	state.SetStatus(ClientStatusListenStop)
 	return nil
 }
 
@@ -71,7 +75,7 @@ func Restart(state *ClientState) error {
 			}
 		}()
 
-		maxEmptyRetries := 3 // 最大空结果重试次数
+		maxEmptyRetries := 5 // 最大空结果重试次数
 		emptyRetryCount := 0
 
 		for {
@@ -85,16 +89,6 @@ func Restart(state *ClientState) error {
 			text, err := state.RetireAsrResult(ctx)
 			if err != nil {
 				log.Errorf("处理asr结果失败: %v", err)
-				// 如果是连接错误，尝试重启ASR
-				if emptyRetryCount < maxEmptyRetries {
-					log.Warnf("ASR处理出错，尝试重启ASR识别 (重试 %d/%d)", emptyRetryCount+1, maxEmptyRetries)
-					emptyRetryCount++
-					if restartErr := restartAsrRecognition(ctx, state); restartErr != nil {
-						log.Errorf("重启ASR识别失败: %v", restartErr)
-						return
-					}
-					continue
-				}
 				return
 			}
 
@@ -121,20 +115,30 @@ func Restart(state *ClientState) error {
 				}
 				return
 			} else {
-				// text 为空，检查是否需要重新启动ASR
-				if emptyRetryCount < maxEmptyRetries {
-					log.Warnf("ASR识别结果为空，尝试重启ASR识别 (重试 %d/%d)", emptyRetryCount+1, maxEmptyRetries)
-					emptyRetryCount++
-					if restartErr := restartAsrRecognition(ctx, state); restartErr != nil {
-						log.Errorf("重启ASR识别失败: %v", restartErr)
+				select {
+				case <-ctx.Done():
+					log.Debugf("asr ctx done")
+					return
+				default:
+				}
+				log.Debugf("ready Restart Asr, state.Status: %s", state.Status)
+				if state.Status == ClientStatusListening || state.Status == ClientStatusListenStop {
+					// text 为空，检查是否需要重新启动ASR
+					if emptyRetryCount < maxEmptyRetries {
+						log.Warnf("ASR识别结果为空，尝试重启ASR识别 (重试 %d/%d)", emptyRetryCount+1, maxEmptyRetries)
+						emptyRetryCount++
+						if restartErr := restartAsrRecognition(ctx, state); restartErr != nil {
+							log.Errorf("重启ASR识别失败: %v", restartErr)
+							return
+						}
+						continue
+					} else {
+						log.Warnf("ASR识别结果为空，已达到最大重试次数 (%d)，停止重试", maxEmptyRetries)
 						return
 					}
-					continue
-				} else {
-					log.Warnf("ASR识别结果为空，已达到最大重试次数 (%d)，停止重试", maxEmptyRetries)
-					return
 				}
 			}
+			return
 		}
 	}()
 	return nil
