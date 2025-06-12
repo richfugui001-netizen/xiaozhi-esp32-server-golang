@@ -242,11 +242,11 @@ func ProcessVadAudio(state *ClientState) {
 
 		vadNeedGetCount := 60 / audioFormat.FrameDuration
 
-		var skipVad bool
 		for {
 			//sessionCtx := state.GetSessionCtx()
 			select {
 			case opusFrame, ok := <-state.OpusAudioBuffer:
+				var skipVad bool
 				if state.GetClientVoiceStop() { //已停止 说话 则不接收音频数据
 					//log.Infof("客户端停止说话, 跳过音频数据")
 					continue
