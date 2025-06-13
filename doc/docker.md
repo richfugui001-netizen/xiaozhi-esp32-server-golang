@@ -78,7 +78,7 @@ docker run -itd --name xiaozhi_server -v $(pwd)/config:/workspace/config -p 8989
 
 # 开发环境
 ```
-docker run -itd --name xiaozhi_server_golang -v $(pwd)/config:/workspace/config -p 8989:8989 hackers365/xiaozhi_golang:0.1
+docker run -itd --name xiaozhi_server_golang -v $(pwd):/workspace/ -p 8989:8989 hackers365/xiaozhi_golang:0.1
 国内连不上的话，使用如下源
-docker run -itd --name xiaozhi_server -v $(pwd)/config:/workspace/config -p 8989:8989 docker.jsdelivr.fyi/hackers365/xiaozhi_golang:0.1
+docker run -itd --name xiaozhi_server -v $(pwd):/workspace/ -p 8989:8989 docker.jsdelivr.fyi/hackers365/xiaozhi_golang:0.1
 ```
