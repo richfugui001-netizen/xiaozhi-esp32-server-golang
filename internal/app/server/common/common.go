@@ -22,6 +22,7 @@ import (
 
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
@@ -188,13 +189,11 @@ func handleToolCallResponse(ctx context.Context, state *ClientState, requestEino
 
 	log.Infof("处理 %d 个工具调用", len(tools))
 
-	globalMCPManager := mcp.GetGlobalMCPManager()
-
 	var invokeToolSuccess bool
 	msgList := make([]*schema.Message, 0)
 	for _, toolCall := range tools {
 		toolName := toolCall.Function.Name
-		tool, ok := globalMCPManager.GetToolByName(toolName)
+		tool, ok := mcp.GetToolByName(state.DeviceID, toolName)
 		if !ok || tool == nil {
 			log.Errorf("未找到工具: %s", toolName)
 			continue
@@ -589,8 +588,11 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 	}
 
 	// 获取全局MCP工具列表
-	globalMCPManager := mcp.GetGlobalMCPManager()
-	mcpTools := globalMCPManager.GetAllTools()
+	mcpTools, err := mcp.GetToolsByDeviceId(clientState.DeviceID)
+	if err != nil {
+		log.Errorf("获取设备 %s 的工具失败: %v", clientState.DeviceID, err)
+		mcpTools = make(map[string]tool.InvokableTool)
+	}
 
 	// 将MCP工具转换为接口格式以便传递给转换函数
 	mcpToolsInterface := make(map[string]interface{})

@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
 
@@ -35,8 +34,6 @@ type WebSocketServer struct {
 	port int
 	// MCP管理器
 	globalMCPManager *mcp.GlobalMCPManager
-	// MCP客户端
-	mcpClients sync.Map
 }
 
 // NewWebSocketServer 创建新的 WebSocket 服务器
@@ -119,13 +116,6 @@ func (s *WebSocketServer) handleMCPWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// 检查是否已存在连接
-	if _, exists := s.mcpClients.Load(deviceID); exists {
-		log.Warnf("设备 %s 已存在MCP连接", deviceID)
-		http.Error(w, "设备已存在MCP连接", http.StatusConflict)
-		return
-	}
-
 	// 升级WebSocket连接
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -141,13 +131,12 @@ func (s *WebSocketServer) handleMCPWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// 保存MCP客户端
-	s.mcpClients.Store(deviceID, mcpClient)
+	mcp.AddDeviceMcpClient(deviceID, mcpClient)
 
 	// 监听客户端断开连接
 	go func() {
 		<-mcpClient.Context().Done()
-		s.mcpClients.Delete(deviceID)
+		mcp.RemoveDeviceMcpClient(deviceID)
 		log.Infof("设备 %s 的MCP连接已断开", deviceID)
 	}()
 
@@ -180,83 +169,7 @@ func (s *WebSocketServer) handleMCPAPI(w http.ResponseWriter, r *http.Request) {
 
 // handleGetDeviceTools 获取设备的工具列表
 func (s *WebSocketServer) handleGetDeviceTools(w http.ResponseWriter, r *http.Request, deviceID string) {
-	// 获取设备特定工具
-	var deviceTools map[string]tool.InvokableTool
-	if mcpClient, ok := s.mcpClients.Load(deviceID); ok {
-		deviceTools = mcpClient.(*mcp.DeviceMCPClient).GetTools()
-	} else {
-		deviceTools = make(map[string]tool.InvokableTool)
-	}
 
-	// 获取全局工具
-	globalTools := s.globalMCPManager.GetAllTools()
-
-	// 合并工具列表
-	allTools := make(map[string]interface{})
-
-	// 添加全局工具
-	for name, tool := range globalTools {
-		info, err := tool.Info(context.Background())
-		if err != nil {
-			continue
-		}
-		allTools[name] = map[string]interface{}{
-			"name":        info.Name,
-			"description": info.Desc,
-			"type":        "global",
-		}
-	}
-
-	// 添加设备特定工具
-	for name, tool := range deviceTools {
-		info, err := tool.Info(context.Background())
-		if err != nil {
-			continue
-		}
-		allTools[name] = map[string]interface{}{
-			"name":        info.Name,
-			"description": info.Desc,
-			"type":        "device",
-		}
-	}
-
-	response := map[string]interface{}{
-		"deviceId":    deviceID,
-		"tools":       allTools,
-		"globalCount": len(globalTools),
-		"deviceCount": len(deviceTools),
-		"totalCount":  len(allTools),
-		"timestamp":   time.Now().Unix(),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Errorf("编码MCP工具列表响应失败: %v", err)
-		http.Error(w, "内部服务器错误", http.StatusInternalServerError)
-		return
-	}
-
-	log.Infof("返回设备 %s 的工具列表: 全局 %d 个，设备 %d 个", deviceID, len(globalTools), len(deviceTools))
-}
-
-// Stop 停止WebSocket服务器和MCP管理器
-func (s *WebSocketServer) Stop() error {
-	if err := s.globalMCPManager.Stop(); err != nil {
-		log.Errorf("停止全局MCP管理器失败: %v", err)
-	}
-
-	// 停止所有MCP客户端
-	s.mcpClients.Range(func(key, value interface{}) bool {
-		if client, ok := value.(*mcp.DeviceMCPClient); ok {
-			if err := client.Stop(); err != nil {
-				log.Errorf("停止设备 %s 的MCP客户端失败: %v", key.(string), err)
-			}
-		}
-		return true
-	})
-
-	log.Info("WebSocket服务器和MCP管理器已停止")
-	return nil
 }
 
 // cleanupSessions 定期清理过期会话

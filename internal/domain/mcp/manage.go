@@ -52,6 +52,7 @@ type MCPServerConnection struct {
 	mu         sync.RWMutex
 	lastError  error
 	retryCount int
+	lastPing   time.Time
 }
 
 var (
@@ -266,11 +267,18 @@ func (conn *MCPServerConnection) refreshTools(ctx context.Context) error {
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
 
-	// 清空旧工具
-	conn.tools = make(map[string]tool.InvokableTool)
+	conn.tools = ConvertMcpToolListToInvokableToolList(toolsResult.Tools, conn.config.Name, conn.client)
 
-	// 注册新工具
-	for _, tool := range toolsResult.Tools {
+	// 更新全局工具列表
+	globalManager.updateGlobalTools(conn.config.Name, conn.tools)
+
+	log.Infof("MCP服务器 %s 工具列表已更新，共 %d 个工具", conn.config.Name, len(conn.tools))
+	return nil
+}
+
+func ConvertMcpToolListToInvokableToolList(tools []mcp.Tool, serverName string, client *client.Client) map[string]tool.InvokableTool {
+	invokeTools := make(map[string]tool.InvokableTool)
+	for _, tool := range tools {
 		// 转换InputSchema类型
 		var inputSchema map[string]interface{}
 		// 通过JSON序列化和反序列化来转换类型
@@ -282,17 +290,12 @@ func (conn *MCPServerConnection) refreshTools(ctx context.Context) error {
 			name:        tool.Name,
 			description: tool.Description,
 			inputSchema: inputSchema,
-			serverName:  conn.config.Name,
-			client:      conn.client,
+			serverName:  serverName,
+			client:      client,
 		}
-		conn.tools[tool.Name] = mcpToolInstance
+		invokeTools[tool.Name] = mcpToolInstance
 	}
-
-	// 更新全局工具列表
-	globalManager.updateGlobalTools(conn.config.Name, conn.tools)
-
-	log.Infof("MCP服务器 %s 工具列表已更新，共 %d 个工具", conn.config.Name, len(conn.tools))
-	return nil
+	return invokeTools
 }
 
 // disconnect 断开连接
@@ -371,7 +374,9 @@ func isSessionClosedError(err error) bool {
 // monitorConnections 监控连接状态
 func (g *GlobalMCPManager) monitorConnections() {
 	ticker := time.NewTicker(g.reconnectConf.Interval)
+	pingTicker := time.NewTicker(30 * time.Second) // 每30秒ping一次
 	defer ticker.Stop()
+	defer pingTicker.Stop()
 
 	for {
 		select {
@@ -380,7 +385,7 @@ func (g *GlobalMCPManager) monitorConnections() {
 		case <-ticker.C:
 			g.checkAndReconnect()
 
-			// 新增：定时健康检查
+			// 定时健康检查
 			g.mu.RLock()
 			for name, conn := range g.servers {
 				go func(name string, conn *MCPServerConnection) {
@@ -396,6 +401,28 @@ func (g *GlobalMCPManager) monitorConnections() {
 						} else {
 							log.Debugf("MCP服务器 %s 健康检查失败(非session closed错误): %v", name, err)
 						}
+					}
+				}(name, conn)
+			}
+			g.mu.RUnlock()
+		case <-pingTicker.C:
+			// 执行ping检测
+			g.mu.RLock()
+			for name, conn := range g.servers {
+				go func(name string, conn *MCPServerConnection) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+
+					if err := conn.ping(ctx); err != nil {
+						log.Warnf("MCP服务器 %s ping失败: %v", name, err)
+						if isSessionClosedError(err) {
+							conn.mu.Lock()
+							conn.connected = false
+							conn.lastError = err
+							conn.mu.Unlock()
+						}
+					} else {
+						log.Debugf("MCP服务器 %s ping成功", name)
 					}
 				}(name, conn)
 			}
@@ -556,4 +583,23 @@ func (t *mcpTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 	}
 
 	return "", fmt.Errorf("工具调用未返回任何内容")
+}
+
+// ping 发送ping请求检测连接状态
+func (conn *MCPServerConnection) ping(ctx context.Context) error {
+	if conn.client == nil {
+		return fmt.Errorf("client未初始化")
+	}
+
+	// 使用空的Ping请求作为ping
+	err := conn.client.Ping(ctx)
+	if err != nil {
+		return fmt.Errorf("ping失败: %v", err)
+	}
+
+	conn.mu.Lock()
+	conn.lastPing = time.Now()
+	conn.mu.Unlock()
+
+	return nil
 }
