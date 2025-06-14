@@ -247,6 +247,14 @@ func ProcessVadAudio(state *ClientState) {
 			select {
 			case opusFrame, ok := <-state.OpusAudioBuffer:
 				var skipVad bool
+				var haveVoice bool
+				clientHaveVoice := state.GetClientHaveVoice()
+				if state.Asr.AutoEnd {
+					skipVad = true
+					clientHaveVoice = true
+					haveVoice = true
+				}
+
 				if state.GetClientVoiceStop() { //已停止 说话 则不接收音频数据
 					//log.Infof("客户端停止说话, 跳过音频数据")
 					continue
@@ -257,8 +265,7 @@ func ProcessVadAudio(state *ClientState) {
 					return
 				}
 				log.Debugf("clientVoiceStop: %+v, asrDataSize: %d\n", state.GetClientVoiceStop(), state.AsrAudioBuffer.GetAsrDataSize())
-				clientHaveVoice := state.GetClientHaveVoice()
-				var haveVoice bool
+
 				if state.ListenMode != "auto" {
 					haveVoice = true       //如果是manual, 本次音频入asr
 					clientHaveVoice = true //之前有声音
@@ -333,7 +340,9 @@ func ProcessVadAudio(state *ClientState) {
 				if clientHaveVoice {
 					//vad识别成功, 往asr音频通道里发送数据
 					log.Infof("vad识别成功, 往asr音频通道里发送数据, len: %d", len(pcmData))
-					state.AsrAudioChannel <- pcmData
+					if state.AsrAudioChannel != nil {
+						state.AsrAudioChannel <- pcmData
+					}
 				}
 
 				//已经有语音了, 但本次没有检测到语音, 则需要判断是否已经停止说话

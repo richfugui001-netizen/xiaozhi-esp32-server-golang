@@ -23,6 +23,7 @@ func NewFunasrAdapter(config map[string]interface{}) (AsrProvider, error) {
 		ChunkInterval:  audio.FrameDuration,
 		MaxConnections: 5,
 		Timeout:        30,
+		AutoEnd:        false,
 	}
 
 	// 从 map 中获取配置项
@@ -57,6 +58,10 @@ func NewFunasrAdapter(config map[string]interface{}) (AsrProvider, error) {
 	}
 	if chunkSize, ok := config["chunk_size"].([]int); ok && len(chunkSize) > 0 {
 		funasrConfig.ChunkSize = chunkSize
+	}
+
+	if autoEnd, ok := config["auto_end"].(bool); ok {
+		funasrConfig.AutoEnd = autoEnd
 	}
 
 	// 创建FunASR引擎

@@ -73,7 +73,8 @@
       "chunk_size": [5, 10, 5],
       "chunk_interval": 10,
       "max_connections": 5,
-      "timeout": 30
+      "timeout": 30,
+      "auto_end": true
     }
   },
   "tts": {

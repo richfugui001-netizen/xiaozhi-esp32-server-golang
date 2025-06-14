@@ -28,6 +28,7 @@ type FunasrConfig struct {
 	ChunkInterval  int    // 分块间隔
 	MaxConnections int    // 最大连接数
 	Timeout        int    // 连接超时时间（秒）
+	AutoEnd        bool   // 是否超时 xx ms自动结束，不依赖 isSpeaking为false
 }
 
 // DefaultConfig 默认配置
@@ -331,9 +332,14 @@ func (f *Funasr) recvResult(ctx context.Context, conn *websocket.Conn, resultCha
 			IsFinal: response.IsFinal,
 		}:
 		}
+		/*if f.config.AutoEnd {
+			log.Debugf("funasr recvResult autoend")
+			return
+		}*/
 		// 结果发送成功
 		// 如果是最终结果且输入已结束，则退出循环
 		if response.IsFinal {
+			log.Debugf("funasr recvResult isfinal")
 			return
 		}
 	}
