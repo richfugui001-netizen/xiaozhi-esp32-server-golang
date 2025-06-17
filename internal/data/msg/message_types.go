@@ -15,6 +15,7 @@ const (
 	MessageTypeAbort  = "abort"  // 中止消息
 	MessageTypeListen = "listen" // 监听消息
 	MessageTypeIot    = "iot"    // 物联网消息
+	MessageTypeMcp    = "mcp"    // MCP消息
 )
 
 // 服务器消息类型常量

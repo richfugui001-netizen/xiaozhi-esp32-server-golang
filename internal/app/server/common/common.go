@@ -38,6 +38,7 @@ type ServerMessage struct {
 	Transport   string                   `json:"transport,omitempty"`
 	AudioFormat *types_audio.AudioFormat `json:"audio_params,omitempty"`
 	Emotion     string                   `json:"emotion,omitempty"`
+	PayLoad     interface{}              `json:"payload,omitempty"`
 }
 
 func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
@@ -199,13 +200,15 @@ func handleToolCallResponse(ctx context.Context, state *ClientState, requestEino
 			continue
 		}
 		log.Infof("进行工具调用请求: %s, 参数: %+v", toolName, toolCall.Function.Arguments)
+		startTs := time.Now().UnixMilli()
 		result, err := tool.InvokableRun(ctx, toolCall.Function.Arguments)
 		if err != nil {
 			log.Errorf("工具调用失败: %v", err)
 			continue
 		}
+		costTs := time.Now().UnixMilli() - startTs
 		invokeToolSuccess = true
-		log.Infof("工具调用结果: %s", result)
+		log.Infof("工具调用结果: %s, 耗时: %dms", result, costTs)
 		msg := []*schema.Message{
 			&schema.Message{
 				Role:      schema.Assistant,
@@ -371,6 +374,8 @@ func HandleTextMessage(clientState *ClientState, message []byte) error {
 		return handleAbortMessage(clientState, &clientMsg)
 	case MessageTypeIot:
 		return handleIoTMessage(clientState, &clientMsg)
+	case MessageTypeMcp:
+		return handleMcpMessage(clientState, &clientMsg)
 	default:
 		// 未知消息类型，直接回显
 		return clientState.Conn.WriteMessage(websocket.TextMessage, message)
@@ -379,6 +384,7 @@ func HandleTextMessage(clientState *ClientState, message []byte) error {
 
 // handleHelloMessage 处理 hello 消息
 func handleHelloMessage(clientState *ClientState, msg *ClientMessage) error {
+
 	// 创建新会话
 	session, err := auth.A().CreateSession(msg.DeviceID)
 	if err != nil {
@@ -387,6 +393,10 @@ func handleHelloMessage(clientState *ClientState, msg *ClientMessage) error {
 
 	// 更新客户端状态
 	clientState.SessionID = session.ID
+
+	if isMcp, ok := msg.Features["mcp"]; ok && isMcp {
+		go initMcp(clientState)
+	}
 
 	clientState.InputAudioFormat = types_audio.AudioFormat{
 		SampleRate:    msg.AudioParams.SampleRate,
@@ -554,6 +564,35 @@ func handleIoTMessage(clientState *ClientState, msg *ClientMessage) error {
 
 	// 记录日志
 	log.Infof("设备 %s 物联网指令: %s", msg.DeviceID, msg.Text)
+	return nil
+}
+
+func handleMcpMessage(clientState *ClientState, msg *ClientMessage) error {
+	mcpSession := mcp.GetDeviceMcpClient(clientState.DeviceID)
+	if mcpSession != nil {
+		select {
+		case clientState.McpRecvMsgChan <- msg.PayLoad:
+		default:
+			log.Warnf("mcp 接收消息通道已满, 丢弃消息")
+		}
+	}
+	return nil
+}
+
+func initIotOverMcp(clientState *ClientState) error {
+	mcpSession := mcp.GetDeviceMcpClient(clientState.DeviceID)
+	if mcpSession == nil {
+		mcpSession = mcp.NewDeviceMCPSession(clientState.DeviceID)
+		mcp.AddDeviceMcpClient(clientState.DeviceID, mcpSession)
+	}
+
+	mcpTransport := &McpTransport{
+		Client: clientState,
+	}
+
+	iotOverMcp := mcp.NewIotOverMcpClient(clientState.DeviceID, mcpTransport)
+	mcpSession.SetIotOverMcp(iotOverMcp)
+
 	return nil
 }
 

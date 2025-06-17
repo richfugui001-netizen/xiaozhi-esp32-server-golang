@@ -19,7 +19,11 @@ func GetToolByName(deviceId string, toolName string) (tool.InvokableTool, bool) 
 	return tool, true
 }
 
-func AddDeviceMcpClient(deviceId string, mcpClient *DeviceMCPClient) error {
+func GetDeviceMcpClient(deviceId string) *DeviceMcpSession {
+	return mcpClientPool.GetMcpClient(deviceId)
+}
+
+func AddDeviceMcpClient(deviceId string, mcpClient *DeviceMcpSession) error {
 	mcpClientPool.AddMcpClient(deviceId, mcpClient)
 	return nil
 }

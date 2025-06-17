@@ -123,19 +123,24 @@ func (s *WebSocketServer) handleMCPWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	mcpClientSession := mcp.GetDeviceMcpClient(deviceID)
+	if mcpClientSession == nil {
+		mcpClientSession = mcp.NewDeviceMCPSession(deviceID)
+		mcp.AddDeviceMcpClient(deviceID, mcpClientSession)
+	}
+
 	// 创建MCP客户端
-	mcpClient := mcp.NewDeviceMCPClient(deviceID, conn)
+	mcpClient := mcp.NewWsEndPointMcpClient(mcpClientSession.Ctx, deviceID, conn)
 	if mcpClient == nil {
 		log.Errorf("创建MCP客户端失败")
 		conn.Close()
 		return
 	}
-
-	mcp.AddDeviceMcpClient(deviceID, mcpClient)
+	mcpClientSession.SetWsEndPointMcp(mcpClient)
 
 	// 监听客户端断开连接
 	go func() {
-		<-mcpClient.Context().Done()
+		<-mcpClientSession.Ctx.Done()
 		mcp.RemoveDeviceMcpClient(deviceID)
 		log.Infof("设备 %s 的MCP连接已断开", deviceID)
 	}()
