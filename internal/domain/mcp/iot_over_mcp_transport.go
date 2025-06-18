@@ -30,7 +30,7 @@ type Interface interface {
 */
 
 type ConnInterface interface {
-	SendMcpMsg(payload interface{}) error
+	SendMcpMsg(payload []byte) error
 	RecvMcpMsg(timeOut int) ([]byte, error)
 }
 
@@ -56,14 +56,18 @@ func (t *IotOverMcpTransport) Start(ctx context.Context) error {
 }
 
 func (t *IotOverMcpTransport) SendRequest(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
 	// TODO: 发送请求并同步等待响应
-	err := t.conn.SendMcpMsg(request)
+	err = t.conn.SendMcpMsg(payload)
 	if err != nil {
 		return nil, err
 	}
 
 	var response transport.JSONRPCResponse
-	msg, err := t.conn.RecvMcpMsg(2000)
+	msg, err := t.conn.RecvMcpMsg(15000) //15秒超时
 	if err != nil {
 		return nil, err
 	}

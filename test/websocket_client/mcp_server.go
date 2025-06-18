@@ -60,7 +60,7 @@ func NewMcpServer(sendMsgChan chan []byte, recvMsgChan chan []byte) {
 	s := server.NewMCPServer("taiji-pi-s3", "1.0.0")
 
 	// Add tool
-	tool := mcp.NewTool("hello_world",
+	/*tool := mcp.NewTool("hello_world",
 		mcp.WithDescription("Say hello to someone"),
 		mcp.WithString("name",
 			mcp.Required(),
@@ -86,12 +86,24 @@ func NewMcpServer(sendMsgChan chan []byte, recvMsgChan chan []byte) {
 		),
 	)
 
-	// Add tool handler
+
+
+	// 注册所有工具及其handler
 	s.AddTool(tool, helloHandler)
-	// 注册查询天气工具
 	s.AddTool(weatherTool, queryWeatherHandler)
-	// 注册生成随机数工具
-	s.AddTool(randomNumberTool, randomNumberHandler)
+	s.AddTool(randomNumberTool, randomNumberHandler)*/
+
+	// 新增讲笑话工具
+	jokeTool := mcp.NewTool("tell_joke",
+		mcp.WithDescription("讲一个笑话"),
+	)
+	s.AddTool(jokeTool, jokeHandler)
+
+	// 新增讲笑话工具
+	visionTool := mcp.NewTool("vision_tool",
+		mcp.WithDescription("拍照分析图片"),
+	)
+	s.AddTool(visionTool, visionHandler)
 
 	mcpHandle := &McpTransport{
 		SendMsgChan: sendMsgChan,
@@ -133,4 +145,22 @@ func randomNumberHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp
 		rnd = min + int(time.Now().UnixNano()%int64(max-min+1))
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("随机数：%d", rnd)), nil
+}
+
+// 讲笑话 handler
+func jokeHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	joke := "有一天小明去上学，老师问他为什么迟到，小明说：因为作业太难，梦里都在写作业，结果一觉醒来就迟到了。"
+	return mcp.NewToolResultText(joke), nil
+}
+
+func visionHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	image := "1.jpg"
+	question := "图片中有什么？"
+	url := "http://192.168.208.214:8989/xiaozhi/api/vision"
+	deviceId := "shijingbo"
+	responseText, err := requestVllm(image, question, url, deviceId)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(responseText), nil
 }

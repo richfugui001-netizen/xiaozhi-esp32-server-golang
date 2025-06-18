@@ -1,6 +1,7 @@
 package common
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -8,19 +9,53 @@ import (
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/gorilla/websocket"
+	"github.com/mark3labs/mcp-go/client/transport"
+	"github.com/spf13/viper"
 )
 
 type McpTransport struct {
 	Client *ClientState
 }
 
-func (c *McpTransport) SendMcpMsg(payload interface{}) error {
+func (c *McpTransport) SendMcpMsg(payload []byte) error {
+	//如果是initialize请求，则注入vision
+	var request transport.JSONRPCRequest
+	err := json.Unmarshal(payload, &request)
+	if err == nil {
+		if request.Method == "initialize" {
+			if origInitParams, ok := request.Params.(map[string]interface{}); ok {
+				b, err := json.Marshal(origInitParams)
+				if err != nil {
+					return err
+				}
+
+				var initParams mcp.InitializeParams
+				err = json.Unmarshal(b, &initParams)
+				if err != nil {
+					return err
+				}
+				initParams.Capabilities["vision"] = mcp.Vision{
+					Url:   viper.GetString("chat.vision_url"),
+					Token: "1234567890",
+				}
+				request.Params = initParams
+			}
+			payload, _ = json.Marshal(request)
+		}
+	}
+
 	serverMsg := ServerMessage{
 		Type:      MessageTypeMcp,
 		SessionID: c.Client.SessionID,
 		PayLoad:   payload,
 	}
-	return c.Client.Conn.WriteJSON(serverMsg)
+	msg, err := json.Marshal(serverMsg)
+	if err != nil {
+		return err
+	}
+	return c.Client.Conn.WriteMessage(websocket.TextMessage, msg)
 }
 
 func (c *McpTransport) RecvMcpMsg(timeOut int) ([]byte, error) {

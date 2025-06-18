@@ -38,7 +38,7 @@ type ServerMessage struct {
 	Transport   string                   `json:"transport,omitempty"`
 	AudioFormat *types_audio.AudioFormat `json:"audio_params,omitempty"`
 	Emotion     string                   `json:"emotion,omitempty"`
-	PayLoad     interface{}              `json:"payload,omitempty"`
+	PayLoad     json.RawMessage          `json:"payload,omitempty"`
 }
 
 func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
