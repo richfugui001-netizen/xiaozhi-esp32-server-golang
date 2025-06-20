@@ -457,18 +457,19 @@ func handleListenMessage(clientState *ClientState, msg *ClientMessage) error {
 
 			// 检查是否是唤醒词
 			isWakeupWord := isWakeupWord(text)
-			enableGreeting := viper.GetBool("enable_greeting") // 从配置获取
+			//enableGreeting := viper.GetBool("enable_greeting") // 从配置获取
 
-			if isWakeupWord && !enableGreeting {
+			if isWakeupWord {
 				// 如果是唤醒词，且关闭了唤醒词回复，发送 STT 消息后停止 TTS
-				sttResponse := ServerMessage{
+				/*sttResponse := ServerMessage{
 					Type:      ServerMessageTypeStt,
 					Text:      text,
 					SessionID: sessionID,
 				}
 				if err := clientState.SendMsg(sttResponse); err != nil {
 					return fmt.Errorf("发送 STT 消息失败: %v", err)
-				}
+				}*/
+				log.Infof("唤醒词: %s", text)
 			} else {
 				// 否则开始对话
 				if err := startChat(clientState.GetSessionCtx(), clientState, text); err != nil {
