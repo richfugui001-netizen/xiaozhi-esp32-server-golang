@@ -18,6 +18,7 @@ import (
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
 	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
+	utypes "xiaozhi-esp32-server-golang/internal/domain/user_config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/vad"
 
 	. "xiaozhi-esp32-server-golang/internal/data/audio"
@@ -90,7 +91,12 @@ func (c *Conn) Close() error {
 }
 
 func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientState, error) {
-	deviceConfig, err := userconfig.U().GetUserConfig(context.Background(), deviceID)
+	configProvider, err := userconfig.GetProvider()
+	if err != nil {
+		log.Errorf("获取 用户配置提供者失败: %+v", err)
+		return nil, err
+	}
+	deviceConfig, err := configProvider.GetUserConfig(context.Background(), deviceID)
 	if err != nil {
 		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
 		return nil, err
@@ -277,7 +283,7 @@ type ClientState struct {
 	Conn *Conn
 
 	//设备配置
-	DeviceConfig userconfig.UConfig
+	DeviceConfig utypes.UConfig
 
 	Vad
 	Asr
@@ -390,12 +396,13 @@ type Ctx struct {
 }
 
 func (s *ClientState) getLLMProvider() (llm.LLMProvider, error) {
-	llmProviderName := viper.GetString("llm.provider")
-	if s.DeviceConfig.Llm.Type != "" {
-		llmProviderName = s.DeviceConfig.Llm.Type
+	configMap := s.DeviceConfig.Llm
+	types, ok := configMap["type"]
+	if !ok {
+		log.Errorf("llm type 不存在")
+		return nil, fmt.Errorf("llm type 不存在")
 	}
-	configMap := viper.GetStringMap(fmt.Sprintf("llm.%s", llmProviderName))
-	llmProvider, err := llm.GetLLMProvider(llmProviderName, configMap)
+	llmProvider, err := llm.GetLLMProvider(types.(string), configMap)
 	if err != nil {
 		return nil, fmt.Errorf("创建 LLM 提供者失败: %v", err)
 	}

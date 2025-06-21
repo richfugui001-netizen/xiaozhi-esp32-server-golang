@@ -7,12 +7,10 @@ import (
 	"strings"
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
-	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
+	redisdb "xiaozhi-esp32-server-golang/internal/db/redis"
 	"xiaozhi-esp32-server-golang/internal/domain/vad"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
-	"github.com/redis/go-redis/v9"
 	logrus "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -124,20 +122,17 @@ func initVad() error {
 }
 
 func initRedis() error {
-	redisOptions := &redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", viper.GetString("redis.host"), viper.GetInt("redis.port")),
+	// 初始化我们的统一Redis模块
+	redisConfig := &redisdb.Config{
+		Host:     viper.GetString("redis.host"),
+		Port:     viper.GetInt("redis.port"),
 		Password: viper.GetString("redis.password"),
 		DB:       viper.GetInt("redis.db"),
 	}
-	err := llm_memory.Init(redisOptions, viper.GetString("redis.key_prefix"))
+
+	err := redisdb.Init(redisConfig)
 	if err != nil {
 		fmt.Printf("init redis error: %v\n", err)
-		return err
-	}
-
-	err = userconfig.InitUserConfig(redisOptions, viper.GetString("redis.key_prefix"))
-	if err != nil {
-		fmt.Printf("init userconfig error: %v\n", err)
 		return err
 	}
 
