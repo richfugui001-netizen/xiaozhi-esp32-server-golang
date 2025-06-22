@@ -435,7 +435,7 @@ func RecvAudio(clientState *ClientState, data []byte) bool {
 // handleListenMessage 处理监听消息
 func handleListenMessage(clientState *ClientState, msg *ClientMessage) error {
 
-	sessionID := clientState.SessionID
+	//sessionID := clientState.SessionID
 
 	// 根据状态处理
 	switch msg.State {
