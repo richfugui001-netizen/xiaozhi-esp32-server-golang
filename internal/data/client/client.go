@@ -142,14 +142,14 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 		SessionCtx: Ctx{},
 	}
 
-	ttsType := getTTsType(deviceConfig.Tts)
+	ttsType := clientState.DeviceConfig.Tts.Provider
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
 	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}
 
-	ttsProvider, err := getTTSProvider(deviceConfig.Tts)
+	ttsProvider, err := getTTSProvider(clientState.DeviceConfig.Tts)
 	if err != nil {
 		log.Errorf("创建 TTS 提供者失败: %v", err)
 		return nil, err
@@ -162,7 +162,12 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 }
 
 func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Client, udpSession *UdpSession, clientMsg *ClientMessage) (*ClientState, error) {
-	deviceConfig, err := userconfig.U().GetUserConfig(context.Background(), deviceID)
+	configProvider, err := userconfig.GetProvider()
+	if err != nil {
+		log.Errorf("获取 用户配置提供者失败: %+v", err)
+		return nil, err
+	}
+	deviceConfig, err := configProvider.GetUserConfig(context.Background(), deviceID)
 	if err != nil {
 		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
 		return nil, err
@@ -215,7 +220,7 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 		UdpInfo:    udpSession,
 	}
 
-	ttsType := getTTsType(deviceConfig.Tts)
+	ttsType := clientState.DeviceConfig.Tts.Provider
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
 	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
@@ -240,19 +245,8 @@ func (c *ClientState) StartMqttUdpClient() error {
 	return nil
 }
 
-func getTTsType(ttsConfig userconfig.TtsConfig) string {
-	ttsProviderName := viper.GetString("tts.provider")
-	if ttsConfig.Type != "" {
-		ttsProviderName = ttsConfig.Type
-	}
-	return ttsProviderName
-}
-
-func getTTSProvider(ttsConfig userconfig.TtsConfig) (tts.TTSProvider, error) {
-	ttsProviderName := getTTsType(ttsConfig)
-	providerConfig := viper.GetStringMap(fmt.Sprintf("tts.%s", ttsProviderName))
-
-	ttsProvider, err := tts.GetTTSProvider(ttsProviderName, providerConfig)
+func getTTSProvider(ttsConfig utypes.TtsConfig) (tts.TTSProvider, error) {
+	ttsProvider, err := tts.GetTTSProvider(ttsConfig.Provider, ttsConfig.Config)
 	if err != nil {
 		return nil, fmt.Errorf("创建 TTS 提供者失败: %v", err)
 	}
@@ -396,13 +390,8 @@ type Ctx struct {
 }
 
 func (s *ClientState) getLLMProvider() (llm.LLMProvider, error) {
-	configMap := s.DeviceConfig.Llm
-	types, ok := configMap["type"]
-	if !ok {
-		log.Errorf("llm type 不存在")
-		return nil, fmt.Errorf("llm type 不存在")
-	}
-	llmProvider, err := llm.GetLLMProvider(types.(string), configMap)
+	llmConfig := s.DeviceConfig.Llm
+	llmProvider, err := llm.GetLLMProvider(llmConfig.Provider, llmConfig.Config)
 	if err != nil {
 		return nil, fmt.Errorf("创建 LLM 提供者失败: %v", err)
 	}
@@ -426,8 +415,9 @@ func (s *ClientState) InitLlm() {
 }
 
 func (s *ClientState) InitAsr() {
+	asrConfig := s.DeviceConfig.Asr
 	//初始化asr
-	asrProvider, err := asr.NewAsrProvider(viper.GetString("asr.provider"), viper.GetStringMap(fmt.Sprintf("asr.%s", viper.GetString("asr.provider"))))
+	asrProvider, err := asr.NewAsrProvider(asrConfig.Provider, asrConfig.Config)
 	if err != nil {
 		log.Errorf("创建asr提供者失败: %v", err)
 		return
