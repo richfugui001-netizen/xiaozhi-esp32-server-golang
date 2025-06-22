@@ -153,6 +153,41 @@
       "base_url": "https://open.bigmodel.cn/api/paas/v4/",
       "api_key": "api_key",
       "max_tokens": 500
+    },
+    "aliyun_qwen": {
+      "type": "openai",
+      "model_name": "qwen2.5-72b-instruct",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "api_key",
+      "max_token": 500
+    },
+    "doubao_deepseek": {
+      "type": "openai",
+      "model_name": "deepseek-v3",
+      "api_key": "api_key",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "max_tokens": 500
+    }
+  },
+  "vision": {
+    "enable_auth": false,
+    "vision_url": "http://192.168.208.214:8989/xiaozhi/api/vision",
+    "vllm": {
+      "provider": "aliyun_vision",
+      "aliyun_vision": {
+        "type": "openai",
+        "model_name": "qwen-vl-plus-latest",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "api_key",
+        "max_token": 500
+      },
+      "doubao_vision": {
+        "type": "openai",
+        "model_name": "doubao-1.5-vision-lite-250315",
+        "api_key": "api_key",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "max_tokens": 500
+      }
     }
   },
   "ota": {

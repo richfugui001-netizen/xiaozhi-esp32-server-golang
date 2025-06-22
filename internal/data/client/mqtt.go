@@ -37,6 +37,10 @@ func (c *MqttConn) WriteJSON(message interface{}) error {
 	return token.Error()
 }
 
+func (c *MqttConn) ReadJSON(v interface{}) error {
+	return nil
+}
+
 func (c *MqttConn) WriteMessage(messageType int, message []byte) error {
 	token := c.Conn.Publish(c.PubTopic, byte(0), false, message)
 	token.Wait()

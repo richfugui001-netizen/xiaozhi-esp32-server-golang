@@ -22,6 +22,7 @@ import (
 
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
@@ -37,6 +38,7 @@ type ServerMessage struct {
 	Transport   string                   `json:"transport,omitempty"`
 	AudioFormat *types_audio.AudioFormat `json:"audio_params,omitempty"`
 	Emotion     string                   `json:"emotion,omitempty"`
+	PayLoad     json.RawMessage          `json:"payload,omitempty"`
 }
 
 func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
@@ -188,25 +190,25 @@ func handleToolCallResponse(ctx context.Context, state *ClientState, requestEino
 
 	log.Infof("处理 %d 个工具调用", len(tools))
 
-	globalMCPManager := mcp.GetGlobalMCPManager()
-
 	var invokeToolSuccess bool
 	msgList := make([]*schema.Message, 0)
 	for _, toolCall := range tools {
 		toolName := toolCall.Function.Name
-		tool, ok := globalMCPManager.GetToolByName(toolName)
+		tool, ok := mcp.GetToolByName(state.DeviceID, toolName)
 		if !ok || tool == nil {
 			log.Errorf("未找到工具: %s", toolName)
 			continue
 		}
 		log.Infof("进行工具调用请求: %s, 参数: %+v", toolName, toolCall.Function.Arguments)
+		startTs := time.Now().UnixMilli()
 		result, err := tool.InvokableRun(ctx, toolCall.Function.Arguments)
 		if err != nil {
 			log.Errorf("工具调用失败: %v", err)
 			continue
 		}
+		costTs := time.Now().UnixMilli() - startTs
 		invokeToolSuccess = true
-		log.Infof("工具调用结果: %s", result)
+		log.Infof("工具调用结果: %s, 耗时: %dms", result, costTs)
 		msg := []*schema.Message{
 			&schema.Message{
 				Role:      schema.Assistant,
@@ -372,6 +374,8 @@ func HandleTextMessage(clientState *ClientState, message []byte) error {
 		return handleAbortMessage(clientState, &clientMsg)
 	case MessageTypeIot:
 		return handleIoTMessage(clientState, &clientMsg)
+	case MessageTypeMcp:
+		return handleMcpMessage(clientState, &clientMsg)
 	default:
 		// 未知消息类型，直接回显
 		return clientState.Conn.WriteMessage(websocket.TextMessage, message)
@@ -380,6 +384,7 @@ func HandleTextMessage(clientState *ClientState, message []byte) error {
 
 // handleHelloMessage 处理 hello 消息
 func handleHelloMessage(clientState *ClientState, msg *ClientMessage) error {
+
 	// 创建新会话
 	session, err := auth.A().CreateSession(msg.DeviceID)
 	if err != nil {
@@ -388,6 +393,10 @@ func handleHelloMessage(clientState *ClientState, msg *ClientMessage) error {
 
 	// 更新客户端状态
 	clientState.SessionID = session.ID
+
+	if isMcp, ok := msg.Features["mcp"]; ok && isMcp {
+		go initMcp(clientState)
+	}
 
 	clientState.InputAudioFormat = types_audio.AudioFormat{
 		SampleRate:    msg.AudioParams.SampleRate,
@@ -448,18 +457,19 @@ func handleListenMessage(clientState *ClientState, msg *ClientMessage) error {
 
 			// 检查是否是唤醒词
 			isWakeupWord := isWakeupWord(text)
-			enableGreeting := viper.GetBool("enable_greeting") // 从配置获取
+			//enableGreeting := viper.GetBool("enable_greeting") // 从配置获取
 
-			if isWakeupWord && !enableGreeting {
+			if isWakeupWord {
 				// 如果是唤醒词，且关闭了唤醒词回复，发送 STT 消息后停止 TTS
-				sttResponse := ServerMessage{
+				/*sttResponse := ServerMessage{
 					Type:      ServerMessageTypeStt,
 					Text:      text,
 					SessionID: sessionID,
 				}
 				if err := clientState.SendMsg(sttResponse); err != nil {
 					return fmt.Errorf("发送 STT 消息失败: %v", err)
-				}
+				}*/
+				log.Infof("唤醒词: %s", text)
 			} else {
 				// 否则开始对话
 				if err := startChat(clientState.GetSessionCtx(), clientState, text); err != nil {
@@ -558,6 +568,35 @@ func handleIoTMessage(clientState *ClientState, msg *ClientMessage) error {
 	return nil
 }
 
+func handleMcpMessage(clientState *ClientState, msg *ClientMessage) error {
+	mcpSession := mcp.GetDeviceMcpClient(clientState.DeviceID)
+	if mcpSession != nil {
+		select {
+		case clientState.McpRecvMsgChan <- msg.PayLoad:
+		default:
+			log.Warnf("mcp 接收消息通道已满, 丢弃消息")
+		}
+	}
+	return nil
+}
+
+func initIotOverMcp(clientState *ClientState) error {
+	mcpSession := mcp.GetDeviceMcpClient(clientState.DeviceID)
+	if mcpSession == nil {
+		mcpSession = mcp.NewDeviceMCPSession(clientState.DeviceID)
+		mcp.AddDeviceMcpClient(clientState.DeviceID, mcpSession)
+	}
+
+	mcpTransport := &McpTransport{
+		Client: clientState,
+	}
+
+	iotOverMcp := mcp.NewIotOverMcpClient(clientState.DeviceID, mcpTransport)
+	mcpSession.SetIotOverMcp(iotOverMcp)
+
+	return nil
+}
+
 // startChat 开始对话
 func startChat(ctx context.Context, clientState *ClientState, text string) error {
 	// 获取客户端状态
@@ -589,8 +628,11 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 	}
 
 	// 获取全局MCP工具列表
-	globalMCPManager := mcp.GetGlobalMCPManager()
-	mcpTools := globalMCPManager.GetAllTools()
+	mcpTools, err := mcp.GetToolsByDeviceId(clientState.DeviceID)
+	if err != nil {
+		log.Errorf("获取设备 %s 的工具失败: %v", clientState.DeviceID, err)
+		mcpTools = make(map[string]tool.InvokableTool)
+	}
 
 	// 将MCP工具转换为接口格式以便传递给转换函数
 	mcpToolsInterface := make(map[string]interface{})

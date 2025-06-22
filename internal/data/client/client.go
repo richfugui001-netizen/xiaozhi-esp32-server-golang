@@ -56,6 +56,16 @@ func (c *Conn) WriteJSON(message interface{}) error {
 	}
 }
 
+func (c *Conn) ReadJSON(v interface{}) error {
+	if c.connType == 0 {
+		c.lock.Lock()
+		defer c.lock.Unlock()
+		return c.websocketConn.ReadJSON(v)
+	} else {
+		return c.MqttConn.ReadJSON(v)
+	}
+}
+
 func (c *Conn) WriteMessage(messageType int, message []byte) error {
 
 	if messageType == websocket.TextMessage {
@@ -139,7 +149,8 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 			VoiceStop:            false,
 			SilenceThresholdTime: maxSilenceDuration,
 		},
-		SessionCtx: Ctx{},
+		SessionCtx:     Ctx{},
+		McpRecvMsgChan: make(chan []byte, 10),
 	}
 
 	ttsType := clientState.DeviceConfig.Tts.Provider
@@ -216,8 +227,9 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 			VoiceStop:            false,
 			SilenceThresholdTime: maxSilenceDuration,
 		},
-		SessionCtx: Ctx{},
-		UdpInfo:    udpSession,
+		SessionCtx:     Ctx{},
+		UdpInfo:        udpSession,
+		McpRecvMsgChan: make(chan []byte, 10),
 	}
 
 	ttsType := clientState.DeviceConfig.Tts.Provider
@@ -314,6 +326,8 @@ type ClientState struct {
 	Status string //状态 listening, llmStart, ttsStart
 
 	IsTtsStart bool //是否tts开始
+
+	McpRecvMsgChan chan []byte //mcp接收消息通道
 }
 
 func (c *ClientState) SetTtsStart(isStart bool) {
@@ -778,15 +792,17 @@ func (v *VoiceStatus) SetClientVoiceStop(voiceStop bool) {
 
 // ClientMessage 表示客户端消息
 type ClientMessage struct {
-	Type        string       `json:"type"`
-	DeviceID    string       `json:"device_id,omitempty"`
-	SessionID   string       `json:"session_id,omitempty"`
-	Text        string       `json:"text,omitempty"`
-	Mode        string       `json:"mode,omitempty"`
-	State       string       `json:"state,omitempty"`
-	Token       string       `json:"token,omitempty"`
-	DeviceMac   string       `json:"device_mac,omitempty"`
-	Version     int          `json:"version,omitempty"`
-	Transport   string       `json:"transport,omitempty"`
-	AudioParams *AudioFormat `json:"audio_params,omitempty"`
+	Type        string          `json:"type"`
+	DeviceID    string          `json:"device_id,omitempty"`
+	SessionID   string          `json:"session_id,omitempty"`
+	Text        string          `json:"text,omitempty"`
+	Mode        string          `json:"mode,omitempty"`
+	State       string          `json:"state,omitempty"`
+	Token       string          `json:"token,omitempty"`
+	DeviceMac   string          `json:"device_mac,omitempty"`
+	Version     int             `json:"version,omitempty"`
+	Transport   string          `json:"transport,omitempty"`
+	Features    map[string]bool `json:"features,omitempty"`
+	AudioParams *AudioFormat    `json:"audio_params,omitempty"`
+	PayLoad     json.RawMessage `json:"payload,omitempty"`
 }

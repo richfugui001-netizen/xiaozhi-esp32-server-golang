@@ -28,6 +28,7 @@ const (
 	MessageTypeListen = "listen"
 	MessageTypeAbort  = "abort"
 	MessageTypeIot    = "iot"
+	MessageTypeMcp    = "mcp"
 )
 
 // 消息状态常量
@@ -42,26 +43,29 @@ const (
 
 // ClientMessage 表示客户端消息
 type ClientMessage struct {
-	Type        string       `json:"type"`
-	DeviceID    string       `json:"device_id"`
-	Text        string       `json:"text,omitempty"`
-	Mode        string       `json:"mode,omitempty"`
-	State       string       `json:"state,omitempty"`
-	Token       string       `json:"token,omitempty"`
-	DeviceMac   string       `json:"device_mac,omitempty"`
-	Version     int          `json:"version,omitempty"`
-	Transport   string       `json:"transport,omitempty"`
-	AudioParams *AudioFormat `json:"audio_params,omitempty"`
+	Type        string          `json:"type"`
+	DeviceID    string          `json:"device_id"`
+	Text        string          `json:"text,omitempty"`
+	Mode        string          `json:"mode,omitempty"`
+	State       string          `json:"state,omitempty"`
+	Token       string          `json:"token,omitempty"`
+	DeviceMac   string          `json:"device_mac,omitempty"`
+	Version     int             `json:"version,omitempty"`
+	Transport   string          `json:"transport,omitempty"`
+	AudioParams *AudioFormat    `json:"audio_params,omitempty"`
+	Features    map[string]bool `json:"features,omitempty"`
+	PayLoad     json.RawMessage `json:"payload,omitempty"`
 }
 
 // ServerMessage 表示服务器消息
 type ServerMessage struct {
-	Type        string       `json:"type"`
-	Text        string       `json:"text,omitempty"`
-	State       string       `json:"state,omitempty"`
-	SessionID   string       `json:"session_id,omitempty"`
-	Transport   string       `json:"transport,omitempty"`
-	AudioFormat *AudioFormat `json:"audio_format,omitempty"`
+	Type        string          `json:"type"`
+	Text        string          `json:"text,omitempty"`
+	State       string          `json:"state,omitempty"`
+	SessionID   string          `json:"session_id,omitempty"`
+	Transport   string          `json:"transport,omitempty"`
+	AudioFormat *AudioFormat    `json:"audio_format,omitempty"`
+	PayLoad     json.RawMessage `json:"payload,omitempty"`
 }
 
 // AudioFormat 表示音频格式
@@ -84,6 +88,8 @@ var (
 	PCMBufferSize = SampleRate * Channels * FrameDurationMs / 1000
 
 	mode = "auto"
+
+	addMcp = false
 )
 
 var speectText = "你好测试"
@@ -99,6 +105,7 @@ func main() {
 	modeFlag := flag.String("mode", "auto", "模式")
 	sampleRate := flag.Int("sample_rate", 16000, "sampleRate")
 	frameDurationsMs := flag.Int("frame_ms", 20, "frame duration ms")
+	addMcpFlag := flag.Bool("mcp", false, "是否启用mcp")
 
 	flag.Parse()
 
@@ -109,6 +116,7 @@ func main() {
 	SampleRate = *sampleRate
 	FrameDurationMs = *frameDurationsMs
 	mode = *modeFlag
+	addMcp = *addMcpFlag
 
 	// 运行客户端
 	if err := runClient(*serverAddr, *deviceID, *audioFile); err != nil {
@@ -143,6 +151,22 @@ func runClient(serverAddr, deviceID, audioFile string) error {
 
 	fmt.Println("已连接到服务器")
 
+	mcpSendMsgChan := make(chan []byte, 10)
+	mcpRecvMsgChan := make(chan []byte, 10)
+
+	go func() {
+		for msg := range mcpSendMsgChan {
+			fmt.Printf("发送mcp消息: %s\n", string(msg))
+			/*respMsg := ClientMessage{
+				Type:     MessageTypeMcp,
+				DeviceID: deviceID,
+				PayLoad:  msg,
+			}
+			jsonByte, _ := json.Marshal(respMsg)*/
+			conn.WriteMessage(websocket.TextMessage, msg)
+		}
+	}()
+
 	// 设置消息处理
 	done := make(chan struct{})
 
@@ -167,6 +191,14 @@ func runClient(serverAddr, deviceID, audioFile string) error {
 					continue
 				}
 
+				if serverMsg.Type == "mcp" {
+					select {
+					case mcpRecvMsgChan <- serverMsg.PayLoad:
+					default:
+						fmt.Printf("mcp消息队列已满, 丢弃消息: %s\n", string(serverMsg.PayLoad))
+					}
+				}
+
 				if serverMsg.Type == "tts" && serverMsg.State == "stop" {
 					//OpusToWav(OpusData, 24000, 1, "ws_output_24000.wav")
 					waitInput <- struct{}{}
@@ -184,18 +216,27 @@ func runClient(serverAddr, deviceID, audioFile string) error {
 		}
 	}()
 
+	go func() {
+		NewMcpServer(mcpSendMsgChan, mcpRecvMsgChan)
+	}()
+
 	// 发送hello消息
 	helloMsg := ClientMessage{
 		Type:      MessageTypeHello,
 		DeviceID:  deviceID,
 		Transport: "websocket",
 		Version:   1,
+		Features:  map[string]bool{},
 		AudioParams: &AudioFormat{
 			SampleRate:    SampleRate,
 			Channels:      Channels,
 			FrameDuration: FrameDurationMs,
 			Format:        "opus",
 		},
+	}
+
+	if addMcp {
+		helloMsg.Features["mcp"] = true
 	}
 
 	if err := sendJSONMessage(conn, helloMsg); err != nil {
