@@ -40,40 +40,49 @@ func NewRedisUserConfigProvider(config interface{}) (*RedisUserConfigProvider, e
 }
 
 func (u *UserConfig) GetUserConfig(ctx context.Context, userID string) (types.UConfig, error) {
-	if u.redisInstance == nil {
-		log.Log().Warn("redis instance is nil")
-		return types.UConfig{}, nil
-	}
+	redisConfig := map[string]string{}
 
-	key := u.GetUserConfigKey(userID)
-	//hgetall 拿到所有的
-	userConfig, err := u.redisInstance.HGetAll(ctx, key).Result()
-	if err != nil {
-		return types.UConfig{}, err
+	if u.redisInstance != nil {
+		key := u.GetUserConfigKey(userID)
+		//hgetall 拿到所有的
+		var err error
+		redisConfig, err = u.redisInstance.HGetAll(ctx, key).Result()
+		if err != nil {
+			return types.UConfig{}, err
+		}
 	}
 
 	ret := types.UConfig{}
 	//将UserConfig转换成UConfig结构
-	for k, v := range userConfig {
-		var perConfig map[string]interface{}
-		err := json.Unmarshal([]byte(v), &perConfig)
+	kv := map[string]string{
+		"llm": "",
+		"asr": "",
+		"tts": "",
+	}
+	for k, _ := range kv {
+		var redisPerStrConfig string
+		if rv, ok := redisConfig[k]; ok {
+			redisPerStrConfig = rv
+		}
+		var redisPerConfig map[string]interface{}
+		err := json.Unmarshal([]byte(redisPerStrConfig), &redisPerConfig)
 		if err != nil {
 			continue
 		}
 		if k == "llm" {
-			config, err := u.getLlmConfig(ctx, perConfig)
+			config, err := u.getLlmConfig(ctx, redisPerConfig)
 			if err != nil {
 				return types.UConfig{}, err
 			}
 			ret.Llm = config
 		} else if k == "tts" {
-			config, err := u.getTtsConfig(ctx, perConfig)
+			config, err := u.getTtsConfig(ctx, redisPerConfig)
 			if err != nil {
 				return types.UConfig{}, err
 			}
 			ret.Tts = config
 		} else if k == "asr" {
-			config, err := u.getAsrConfig(ctx, perConfig)
+			config, err := u.getAsrConfig(ctx, redisPerConfig)
 			if err != nil {
 				return types.UConfig{}, err
 			}
