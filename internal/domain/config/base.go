@@ -1,26 +1,11 @@
 package user_config
 
 import (
-	"context"
 	"fmt"
 
-	userconfig_memory "xiaozhi-esp32-server-golang/internal/domain/user_config/memory"
-	userconfig_redis "xiaozhi-esp32-server-golang/internal/domain/user_config/redis"
-	"xiaozhi-esp32-server-golang/internal/domain/user_config/types"
+	userconfig_memory "xiaozhi-esp32-server-golang/internal/domain/config/memory"
+	userconfig_redis "xiaozhi-esp32-server-golang/internal/domain/config/redis"
 )
-
-// UserConfigProvider 用户配置提供者接口
-// 这是一个扩展的接口，支持更多操作，区别于原有的UserConfig接口
-type UserConfigProvider interface {
-	// GetUserConfig 获取用户配置（兼容原有接口）
-	GetUserConfig(ctx context.Context, userID string) (types.UConfig, error)
-}
-
-// UserConfigFactory 用户配置工厂接口
-type UserConfigFactory interface {
-	// CreateProvider 根据配置创建用户配置提供者
-	CreateProvider(config map[string]interface{}) (UserConfigProvider, error)
-}
 
 // Config 用户配置提供者配置结构
 type Config struct {

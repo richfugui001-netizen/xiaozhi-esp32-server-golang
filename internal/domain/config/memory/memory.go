@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"xiaozhi-esp32-server-golang/internal/domain/user_config/types"
+	"xiaozhi-esp32-server-golang/internal/domain/config/types"
 	log "xiaozhi-esp32-server-golang/logger"
 )
 

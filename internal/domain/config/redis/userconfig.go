@@ -1,4 +1,4 @@
-package userconfig
+package redis_config
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	log "xiaozhi-esp32-server-golang/logger"
 
 	i_redis "xiaozhi-esp32-server-golang/internal/db/redis"
-	"xiaozhi-esp32-server-golang/internal/domain/user_config/types"
+	"xiaozhi-esp32-server-golang/internal/domain/config/types"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"

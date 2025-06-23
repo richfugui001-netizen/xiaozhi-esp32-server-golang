@@ -17,9 +17,9 @@ import (
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	"xiaozhi-esp32-server-golang/internal/app/server/common"
 	"xiaozhi-esp32-server-golang/internal/data/client"
+	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
+	utypes "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
-	utypes "xiaozhi-esp32-server-golang/internal/domain/user_config/types"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 )
