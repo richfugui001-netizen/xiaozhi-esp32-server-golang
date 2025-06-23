@@ -60,15 +60,16 @@ func (u *UserConfig) GetUserConfig(ctx context.Context, userID string) (types.UC
 		"tts": "",
 	}
 	for k, _ := range kv {
-		var redisPerStrConfig string
-		if rv, ok := redisConfig[k]; ok {
-			redisPerStrConfig = rv
-		}
 		var redisPerConfig map[string]interface{}
-		err := json.Unmarshal([]byte(redisPerStrConfig), &redisPerConfig)
-		if err != nil {
-			continue
+		if rv, ok := redisConfig[k]; ok {
+			if rv != "" {
+				err := json.Unmarshal([]byte(rv), &redisPerConfig)
+				if err != nil {
+					log.Log().Errorf("redis config unmarshal error: %+v", err)
+				}
+			}
 		}
+
 		if k == "llm" {
 			config, err := u.getLlmConfig(ctx, redisPerConfig)
 			if err != nil {
@@ -89,6 +90,7 @@ func (u *UserConfig) GetUserConfig(ctx context.Context, userID string) (types.UC
 			ret.Asr = config
 		}
 	}
+	log.Log().Infof("userconfig: %+v", ret)
 	return ret, nil
 }
 

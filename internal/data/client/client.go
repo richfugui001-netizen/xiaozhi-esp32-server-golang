@@ -167,7 +167,10 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 	}
 	clientState.TTSProvider = ttsProvider
 
-	clientState.Init()
+	if err := clientState.Init(); err != nil {
+		log.Errorf("初始化客户端状态失败: %v", err)
+		return nil, err
+	}
 
 	return clientState, nil
 }
@@ -252,7 +255,10 @@ func (c *ClientState) StartMqttUdpClient() error {
 	}
 	c.TTSProvider = ttsProvider
 
-	c.Init()
+	if err := c.Init(); err != nil {
+		log.Errorf("初始化客户端状态失败: %v", err)
+		return err
+	}
 
 	return nil
 }
@@ -417,13 +423,13 @@ func (s *ClientState) getLLMProvider() (llm.LLMProvider, error) {
 	return llmProvider, nil
 }
 
-func (s *ClientState) InitLlm() {
+func (s *ClientState) InitLlm() error {
 	ctx, cancel := context.WithCancel(s.Ctx)
 
 	llmProvider, err := s.getLLMProvider()
 	if err != nil {
 		log.Errorf("创建 LLM 提供者失败: %v", err)
-		return
+		return err
 	}
 
 	s.Llm = Llm{
@@ -431,15 +437,16 @@ func (s *ClientState) InitLlm() {
 		Cancel:      cancel,
 		LLMProvider: llmProvider,
 	}
+	return nil
 }
 
-func (s *ClientState) InitAsr() {
+func (s *ClientState) InitAsr() error {
 	asrConfig := s.DeviceConfig.Asr
 	//初始化asr
 	asrProvider, err := asr.NewAsrProvider(asrConfig.Provider, asrConfig.Config)
 	if err != nil {
 		log.Errorf("创建asr提供者失败: %v", err)
-		return
+		return fmt.Errorf("创建asr提供者失败: %v", err)
 	}
 	ctx, cancel := context.WithCancel(s.Ctx)
 	s.Asr = Asr{
@@ -450,12 +457,18 @@ func (s *ClientState) InitAsr() {
 		AsrEnd:          make(chan bool, 1),
 		AsrResult:       bytes.Buffer{},
 	}
+	return nil
 }
 
-func (c *ClientState) Init() {
-	c.InitLlm()
-	c.InitAsr()
+func (c *ClientState) Init() error {
+	if err := c.InitLlm(); err != nil {
+		return fmt.Errorf("初始化LLM失败: %v", err)
+	}
+	if err := c.InitAsr(); err != nil {
+		return fmt.Errorf("初始化ASR失败: %v", err)
+	}
 	c.SetAsrPcmFrameSize(c.InputAudioFormat.SampleRate, c.InputAudioFormat.Channels, c.InputAudioFormat.FrameDuration)
+	return nil
 }
 
 func (c *ClientState) Destroy() {
