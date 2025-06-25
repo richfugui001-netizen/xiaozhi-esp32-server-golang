@@ -17,8 +17,9 @@ import (
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	"xiaozhi-esp32-server-golang/internal/app/server/common"
 	"xiaozhi-esp32-server-golang/internal/data/client"
+	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
+	utypes "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -197,12 +198,17 @@ func (s *WebSocketServer) SendBinaryMsg(conn *client.Conn, audio []byte) error {
 }
 
 // 获取设备配置
-func (s *WebSocketServer) getUserConfig(deviceID string) (*userconfig.UConfig, error) {
-	userConfig, err := userconfig.U().GetUserConfig(context.Background(), deviceID)
+func (s *WebSocketServer) getUserConfig(deviceID string) (*utypes.UConfig, error) {
+	userConfigInstance, err := userconfig.GetProvider()
 	if err != nil {
 		return nil, fmt.Errorf("获取用户配置失败: %v", err)
 	}
-	return &userConfig, nil
+	uConfig, err := userConfigInstance.GetUserConfig(context.Background(), deviceID)
+	if err != nil {
+		log.Errorf("getUserConfig error: %+v", err)
+		return nil, fmt.Errorf("getUserConfig error: %+v", err)
+	}
+	return &uConfig, nil
 }
 
 // handleWebSocket 处理 WebSocket 连接

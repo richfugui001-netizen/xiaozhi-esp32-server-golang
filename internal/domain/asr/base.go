@@ -2,6 +2,7 @@ package asr
 
 import (
 	"context"
+	"fmt"
 
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
 )
@@ -26,6 +27,6 @@ func NewAsrProvider(asrType string, config map[string]interface{}) (AsrProvider,
 	case "funasr":
 		return NewFunasrAdapter(config)
 	default:
-		return nil, nil
+		return nil, fmt.Errorf("不支持的ASR引擎类型: %s，目前仅支持 'funasr'", asrType)
 	}
 }

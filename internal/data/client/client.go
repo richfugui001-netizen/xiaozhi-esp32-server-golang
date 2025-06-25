@@ -18,6 +18,7 @@ import (
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
 	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
+	utypes "xiaozhi-esp32-server-golang/internal/domain/user_config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/vad"
 
 	. "xiaozhi-esp32-server-golang/internal/data/audio"
@@ -100,7 +101,12 @@ func (c *Conn) Close() error {
 }
 
 func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientState, error) {
-	deviceConfig, err := userconfig.U().GetUserConfig(context.Background(), deviceID)
+	configProvider, err := userconfig.GetProvider()
+	if err != nil {
+		log.Errorf("获取 用户配置提供者失败: %+v", err)
+		return nil, err
+	}
+	deviceConfig, err := configProvider.GetUserConfig(context.Background(), deviceID)
 	if err != nil {
 		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
 		return nil, err
@@ -147,27 +153,35 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 		McpRecvMsgChan: make(chan []byte, 10),
 	}
 
-	ttsType := getTTsType(deviceConfig.Tts)
+	ttsType := clientState.DeviceConfig.Tts.Provider
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
 	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}
 
-	ttsProvider, err := getTTSProvider(deviceConfig.Tts)
+	ttsProvider, err := getTTSProvider(clientState.DeviceConfig.Tts)
 	if err != nil {
 		log.Errorf("创建 TTS 提供者失败: %v", err)
 		return nil, err
 	}
 	clientState.TTSProvider = ttsProvider
 
-	clientState.Init()
+	if err := clientState.Init(); err != nil {
+		log.Errorf("初始化客户端状态失败: %v", err)
+		return nil, err
+	}
 
 	return clientState, nil
 }
 
 func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Client, udpSession *UdpSession, clientMsg *ClientMessage) (*ClientState, error) {
-	deviceConfig, err := userconfig.U().GetUserConfig(context.Background(), deviceID)
+	configProvider, err := userconfig.GetProvider()
+	if err != nil {
+		log.Errorf("获取 用户配置提供者失败: %+v", err)
+		return nil, err
+	}
+	deviceConfig, err := configProvider.GetUserConfig(context.Background(), deviceID)
 	if err != nil {
 		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
 		return nil, err
@@ -221,7 +235,7 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 		McpRecvMsgChan: make(chan []byte, 10),
 	}
 
-	ttsType := getTTsType(deviceConfig.Tts)
+	ttsType := clientState.DeviceConfig.Tts.Provider
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
 	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
@@ -241,24 +255,16 @@ func (c *ClientState) StartMqttUdpClient() error {
 	}
 	c.TTSProvider = ttsProvider
 
-	c.Init()
+	if err := c.Init(); err != nil {
+		log.Errorf("初始化客户端状态失败: %v", err)
+		return err
+	}
 
 	return nil
 }
 
-func getTTsType(ttsConfig userconfig.TtsConfig) string {
-	ttsProviderName := viper.GetString("tts.provider")
-	if ttsConfig.Type != "" {
-		ttsProviderName = ttsConfig.Type
-	}
-	return ttsProviderName
-}
-
-func getTTSProvider(ttsConfig userconfig.TtsConfig) (tts.TTSProvider, error) {
-	ttsProviderName := getTTsType(ttsConfig)
-	providerConfig := viper.GetStringMap(fmt.Sprintf("tts.%s", ttsProviderName))
-
-	ttsProvider, err := tts.GetTTSProvider(ttsProviderName, providerConfig)
+func getTTSProvider(ttsConfig utypes.TtsConfig) (tts.TTSProvider, error) {
+	ttsProvider, err := tts.GetTTSProvider(ttsConfig.Provider, ttsConfig.Config)
 	if err != nil {
 		return nil, fmt.Errorf("创建 TTS 提供者失败: %v", err)
 	}
@@ -289,7 +295,7 @@ type ClientState struct {
 	Conn *Conn
 
 	//设备配置
-	DeviceConfig userconfig.UConfig
+	DeviceConfig utypes.UConfig
 
 	Vad
 	Asr
@@ -404,25 +410,26 @@ type Ctx struct {
 }
 
 func (s *ClientState) getLLMProvider() (llm.LLMProvider, error) {
-	llmProviderName := viper.GetString("llm.provider")
-	if s.DeviceConfig.Llm.Type != "" {
-		llmProviderName = s.DeviceConfig.Llm.Type
+	llmConfig := s.DeviceConfig.Llm
+	llmType, ok := llmConfig.Config["type"]
+	if !ok {
+		log.Errorf("getLLMProvider err: not found llm type: %+v", llmConfig)
+		return nil, fmt.Errorf("llm config type not found")
 	}
-	configMap := viper.GetStringMap(fmt.Sprintf("llm.%s", llmProviderName))
-	llmProvider, err := llm.GetLLMProvider(llmProviderName, configMap)
+	llmProvider, err := llm.GetLLMProvider(llmType.(string), llmConfig.Config)
 	if err != nil {
 		return nil, fmt.Errorf("创建 LLM 提供者失败: %v", err)
 	}
 	return llmProvider, nil
 }
 
-func (s *ClientState) InitLlm() {
+func (s *ClientState) InitLlm() error {
 	ctx, cancel := context.WithCancel(s.Ctx)
 
 	llmProvider, err := s.getLLMProvider()
 	if err != nil {
 		log.Errorf("创建 LLM 提供者失败: %v", err)
-		return
+		return err
 	}
 
 	s.Llm = Llm{
@@ -430,14 +437,16 @@ func (s *ClientState) InitLlm() {
 		Cancel:      cancel,
 		LLMProvider: llmProvider,
 	}
+	return nil
 }
 
-func (s *ClientState) InitAsr() {
+func (s *ClientState) InitAsr() error {
+	asrConfig := s.DeviceConfig.Asr
 	//初始化asr
-	asrProvider, err := asr.NewAsrProvider(viper.GetString("asr.provider"), viper.GetStringMap(fmt.Sprintf("asr.%s", viper.GetString("asr.provider"))))
+	asrProvider, err := asr.NewAsrProvider(asrConfig.Provider, asrConfig.Config)
 	if err != nil {
 		log.Errorf("创建asr提供者失败: %v", err)
-		return
+		return fmt.Errorf("创建asr提供者失败: %v", err)
 	}
 	ctx, cancel := context.WithCancel(s.Ctx)
 	s.Asr = Asr{
@@ -448,12 +457,18 @@ func (s *ClientState) InitAsr() {
 		AsrEnd:          make(chan bool, 1),
 		AsrResult:       bytes.Buffer{},
 	}
+	return nil
 }
 
-func (c *ClientState) Init() {
-	c.InitLlm()
-	c.InitAsr()
+func (c *ClientState) Init() error {
+	if err := c.InitLlm(); err != nil {
+		return fmt.Errorf("初始化LLM失败: %v", err)
+	}
+	if err := c.InitAsr(); err != nil {
+		return fmt.Errorf("初始化ASR失败: %v", err)
+	}
 	c.SetAsrPcmFrameSize(c.InputAudioFormat.SampleRate, c.InputAudioFormat.Channels, c.InputAudioFormat.FrameDuration)
+	return nil
 }
 
 func (c *ClientState) Destroy() {
