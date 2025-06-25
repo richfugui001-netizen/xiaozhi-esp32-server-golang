@@ -240,9 +240,13 @@ func ProcessVadAudio(state *ClientState) {
 			log.Errorf("获取解码器失败: %v", err)
 			return
 		}
-		pcmFrame := make([]float32, state.AsrAudioBuffer.PcmFrameSize)
+		frameSize := state.AsrAudioBuffer.PcmFrameSize
+		pcmFrame := make([]float32, frameSize)
 
-		vadNeedGetCount := 60 / audioFormat.FrameDuration
+		vadNeedGetCount := 1
+		if state.DeviceConfig.Vad.Provider == "silero_vad" {
+			vadNeedGetCount = 60 / audioFormat.FrameDuration
+		}
 
 		for {
 			//sessionCtx := state.GetSessionCtx()
@@ -258,14 +262,15 @@ func ProcessVadAudio(state *ClientState) {
 					log.Debugf("processAsrAudio 音频通道已关闭")
 					return
 				}
-				log.Debugf("clientVoiceStop: %+v, asrDataSize: %d\n", state.GetClientVoiceStop(), state.AsrAudioBuffer.GetAsrDataSize())
 				clientHaveVoice := state.GetClientHaveVoice()
 				var haveVoice bool
-				if state.ListenMode != "auto" {
+				if state.ListenMode == "manual" {
 					haveVoice = true       //如果是manual, 本次音频入asr
 					clientHaveVoice = true //之前有声音
 					skipVad = true         //跳过vad
 				}
+
+				log.Debugf("clientVoiceStop: %+v, asrDataSize: %d, listenMode: %s, isSkipVad: %v\n", state.GetClientVoiceStop(), state.AsrAudioBuffer.GetAsrDataSize(), state.ListenMode, skipVad)
 
 				n, err := audioProcesser.DecoderFloat32(opusFrame, pcmFrame)
 				if err != nil {
@@ -279,7 +284,7 @@ func ProcessVadAudio(state *ClientState) {
 					//如果已经检测到语音, 则不进行vad检测, 直接将pcmData传给asr
 					if state.VadProvider == nil {
 						// 初始化vad
-						err = state.Vad.Init()
+						err = state.Vad.Init(state.DeviceConfig.Vad.Provider, state.DeviceConfig.Vad.Config)
 						if err != nil {
 							log.Errorf("初始化vad失败: %v", err)
 							continue
@@ -292,7 +297,8 @@ func ProcessVadAudio(state *ClientState) {
 						//如果要进行vad, 至少要取60ms的音频数据
 						vadPcmData = state.AsrAudioBuffer.GetAsrData(vadNeedGetCount)
 						state.VadProvider.Reset()
-						haveVoice, err = state.VadProvider.IsVAD(vadPcmData)
+						haveVoice, err = state.VadProvider.IsVADExt(vadPcmData, audioFormat.SampleRate, frameSize)
+
 						if err != nil {
 							log.Errorf("processAsrAudio VAD检测失败: %v", err)
 							//删除
@@ -384,7 +390,6 @@ func HandleTextMessage(clientState *ClientState, message []byte) error {
 
 // handleHelloMessage 处理 hello 消息
 func handleHelloMessage(clientState *ClientState, msg *ClientMessage) error {
-
 	// 创建新会话
 	session, err := auth.A().CreateSession(msg.DeviceID)
 	if err != nil {

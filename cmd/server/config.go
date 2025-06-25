@@ -8,7 +8,6 @@ import (
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	redisdb "xiaozhi-esp32-server-golang/internal/db/redis"
-	"xiaozhi-esp32-server-golang/internal/domain/vad"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	logrus "github.com/sirupsen/logrus"
@@ -28,7 +27,7 @@ func Init(configFile string) error {
 	initLog()
 
 	//init vad
-	initVad()
+	//initVad()
 
 	//init redis
 	initRedis()
@@ -111,16 +110,17 @@ func initLog() error {
 	return nil
 }
 
-func initVad() error {
-	err := vad.InitVAD()
-	if err != nil {
-		fmt.Printf("initVad error: %v\n", err)
-		os.Exit(1)
-		return err
+/*
+	func initVad() error {
+		err := vad.InitVAD()
+		if err != nil {
+			fmt.Printf("initVad error: %v\n", err)
+			os.Exit(1)
+			return err
+		}
+		return nil
 	}
-	return nil
-}
-
+*/
 func initRedis() error {
 	// 初始化我们的统一Redis模块
 	redisConfig := &redisdb.Config{

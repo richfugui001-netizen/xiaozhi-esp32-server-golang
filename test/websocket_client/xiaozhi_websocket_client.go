@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
@@ -174,6 +175,7 @@ func runClient(serverAddr, deviceID, audioFile string) error {
 	_ = startTs
 	// 启动一个协程来处理从服务器接收的消息
 	go func() {
+		var iLock sync.Mutex
 		defer close(done)
 		//var recvInterval int64
 		for {
@@ -205,8 +207,12 @@ func runClient(serverAddr, deviceID, audioFile string) error {
 				}
 			} else if messageType == websocket.BinaryMessage {
 				if !firstRecvFrame {
-					firstRecvFrame = true
-					fmt.Printf("首帧到达时间: %d 毫秒\n", time.Now().UnixMilli()-detectStartTs)
+					iLock.Lock()
+					if !firstRecvFrame {
+						firstRecvFrame = true
+						fmt.Printf("首帧到达时间: %d 毫秒\n", time.Now().UnixMilli()-detectStartTs)
+					}
+					iLock.Unlock()
 					//os.WriteFile("ws_output_first_frame.wav", message, 0644)
 				}
 				OpusData = append(OpusData, message)
@@ -447,7 +453,7 @@ func sendAudioFile(conn *websocket.Conn, filePath string) error {
 // 调用tts服务生成语音, 并编码至opus发送至服务端
 func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 	cosyVoiceConfig := map[string]interface{}{
-		"api_url":        "https://tts.linkerai.top/tts",
+		"api_url":        "https://tts.linkerai.cn/tts",
 		"spk_id":         "OUeAo1mhq6IBExi",
 		"frame_duration": FrameDurationMs,
 		"target_sr":      SampleRate,
@@ -501,13 +507,14 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 			time.Sleep(time.Duration(FrameDurationMs) * time.Millisecond)
 		}
 
-		emptyFrame := make([]byte, 50)
+		detectStartTs = time.Now().UnixMilli()
+
+		emptyFrame := make([]byte, 320)
 		for i := 0; i <= count; i++ {
 			conn.WriteMessage(websocket.BinaryMessage, emptyFrame)
 			time.Sleep(time.Duration(FrameDurationMs) * time.Millisecond)
 		}
 
-		detectStartTs = time.Now().UnixMilli()
 		firstRecvFrame = false
 		return nil
 	}
@@ -531,7 +538,7 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 				continue
 			}
 			sendListenStart(conn, deviceID, mode)
-			genAndSendAudio(input, 20)
+			genAndSendAudio(input, 50)
 			if mode != "auto" {
 				sendListenStop(conn, deviceID)
 			}
