@@ -13,13 +13,15 @@ import (
 
 	"xiaozhi-esp32-server-golang/internal/domain/asr"
 	asr_types "xiaozhi-esp32-server-golang/internal/domain/asr/types"
+	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
+	utypes "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
-	utypes "xiaozhi-esp32-server-golang/internal/domain/user_config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/vad"
+	vad_inter "xiaozhi-esp32-server-golang/internal/domain/vad/inter"
+	"xiaozhi-esp32-server-golang/internal/domain/vad/silero_vad"
 
 	. "xiaozhi-esp32-server-golang/internal/data/audio"
 
@@ -110,6 +112,10 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 	if err != nil {
 		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
 		return nil, err
+	}
+
+	if deviceConfig.Vad.Provider == "silero_vad" {
+		silero_vad.InitVadPool(deviceConfig.Vad.Config)
 	}
 
 	// 创建带取消功能的上下文
@@ -468,6 +474,7 @@ func (c *ClientState) Init() error {
 		return fmt.Errorf("初始化ASR失败: %v", err)
 	}
 	c.SetAsrPcmFrameSize(c.InputAudioFormat.SampleRate, c.InputAudioFormat.Channels, c.InputAudioFormat.FrameDuration)
+
 	return nil
 }
 
@@ -602,7 +609,7 @@ func (state *ClientState) OnVoiceSilence() {
 type Vad struct {
 	lock sync.RWMutex
 	// VAD 提供者
-	VadProvider vad.VAD
+	VadProvider vad_inter.VAD
 
 	IdleDuration int64 // 空闲时间, 单位: ms
 }
@@ -619,13 +626,14 @@ func (v *Vad) ResetIdleDuration() {
 	atomic.StoreInt64(&v.IdleDuration, 0)
 }
 
-func (v *Vad) Init() error {
+func (v *Vad) Init(provider string, config map[string]interface{}) error {
 	v.lock.Lock()
 	defer v.lock.Unlock()
-	vadProvider, err := vad.AcquireVAD()
+	vadProvider, err := vad.AcquireVAD(provider, config)
 	if err != nil {
 		return fmt.Errorf("创建 VAD 提供者失败: %v", err)
 	}
+
 	vadProvider.Reset()
 	v.VadProvider = vadProvider
 	return nil

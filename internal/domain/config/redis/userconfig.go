@@ -90,8 +90,18 @@ func (u *UserConfig) GetUserConfig(ctx context.Context, userID string) (types.UC
 			ret.Asr = config
 		}
 	}
+	ret.Vad = u.getVadConfig(ctx)
+
 	log.Log().Infof("userconfig: %+v", ret)
 	return ret, nil
+}
+
+func (u *UserConfig) getVadConfig(ctx context.Context) types.VadConfig {
+	provider := viper.GetString("vad.provider")
+	return types.VadConfig{
+		Provider: provider,
+		Config:   viper.GetStringMap(fmt.Sprintf("vad.%s", provider)),
+	}
 }
 
 func (u *UserConfig) getConfigByType(ctx context.Context, config map[string]interface{}, prefix string) (string, map[string]interface{}, error) {

@@ -350,7 +350,7 @@ type AudioOpusData struct {
 
 func genAudioOpusDataList(textList []string) ([]AudioOpusData, error) {
 	cosyVoiceConfig := map[string]interface{}{
-		"api_url":        "https://tts.linkerai.top/tts",
+		"api_url":        "https://tts.linkerai.cn/tts",
 		"spk_id":         "OUeAo1mhq6IBExi",
 		"frame_duration": FrameDurationMs,
 		"target_sr":      SampleRate,

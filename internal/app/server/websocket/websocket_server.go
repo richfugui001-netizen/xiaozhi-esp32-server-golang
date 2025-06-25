@@ -269,7 +269,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 	// 处理消息
 	for {
 		// 每次收到消息都刷新超时时间, 空闲60秒就退出
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
 			// 这里会捕获到超时、断开等异常

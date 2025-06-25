@@ -15,9 +15,15 @@ type LlmConfig struct {
 	Config   map[string]interface{} `json:"config"`
 }
 
+type VadConfig struct {
+	Provider string                 `json:"provider"`
+	Config   map[string]interface{} `json:"config"`
+}
+
 type UConfig struct {
 	SystemPrompt string    `json:"system_prompt"`
 	Asr          AsrConfig `json:"asr"`
 	Tts          TtsConfig `json:"tts"`
 	Llm          LlmConfig `json:"llm"`
+	Vad          VadConfig `json:"vad"`
 }
