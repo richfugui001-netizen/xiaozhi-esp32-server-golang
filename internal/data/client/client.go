@@ -13,12 +13,15 @@ import (
 
 	"xiaozhi-esp32-server-golang/internal/domain/asr"
 	asr_types "xiaozhi-esp32-server-golang/internal/domain/asr/types"
+	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
+	utypes "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
 	"xiaozhi-esp32-server-golang/internal/domain/vad"
+	vad_inter "xiaozhi-esp32-server-golang/internal/domain/vad/inter"
+	"xiaozhi-esp32-server-golang/internal/domain/vad/silero_vad"
 
 	. "xiaozhi-esp32-server-golang/internal/data/audio"
 
@@ -52,6 +55,16 @@ func (c *Conn) WriteJSON(message interface{}) error {
 		return c.websocketConn.WriteJSON(message)
 	} else {
 		return c.MqttConn.WriteJSON(message)
+	}
+}
+
+func (c *Conn) ReadJSON(v interface{}) error {
+	if c.connType == 0 {
+		c.lock.Lock()
+		defer c.lock.Unlock()
+		return c.websocketConn.ReadJSON(v)
+	} else {
+		return c.MqttConn.ReadJSON(v)
 	}
 }
 
@@ -90,10 +103,19 @@ func (c *Conn) Close() error {
 }
 
 func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientState, error) {
-	deviceConfig, err := userconfig.U().GetUserConfig(context.Background(), deviceID)
+	configProvider, err := userconfig.GetProvider()
+	if err != nil {
+		log.Errorf("获取 用户配置提供者失败: %+v", err)
+		return nil, err
+	}
+	deviceConfig, err := configProvider.GetUserConfig(context.Background(), deviceID)
 	if err != nil {
 		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
 		return nil, err
+	}
+
+	if deviceConfig.Vad.Provider == "silero_vad" {
+		silero_vad.InitVadPool(deviceConfig.Vad.Config)
 	}
 
 	// 创建带取消功能的上下文
@@ -133,30 +155,39 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 			VoiceStop:            false,
 			SilenceThresholdTime: maxSilenceDuration,
 		},
-		SessionCtx: Ctx{},
+		SessionCtx:     Ctx{},
+		McpRecvMsgChan: make(chan []byte, 10),
 	}
 
-	ttsType := getTTsType(deviceConfig.Tts)
+	ttsType := clientState.DeviceConfig.Tts.Provider
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
 	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}
 
-	ttsProvider, err := getTTSProvider(deviceConfig.Tts)
+	ttsProvider, err := getTTSProvider(clientState.DeviceConfig.Tts)
 	if err != nil {
 		log.Errorf("创建 TTS 提供者失败: %v", err)
 		return nil, err
 	}
 	clientState.TTSProvider = ttsProvider
 
-	clientState.Init()
+	if err := clientState.Init(); err != nil {
+		log.Errorf("初始化客户端状态失败: %v", err)
+		return nil, err
+	}
 
 	return clientState, nil
 }
 
 func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Client, udpSession *UdpSession, clientMsg *ClientMessage) (*ClientState, error) {
-	deviceConfig, err := userconfig.U().GetUserConfig(context.Background(), deviceID)
+	configProvider, err := userconfig.GetProvider()
+	if err != nil {
+		log.Errorf("获取 用户配置提供者失败: %+v", err)
+		return nil, err
+	}
+	deviceConfig, err := configProvider.GetUserConfig(context.Background(), deviceID)
 	if err != nil {
 		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
 		return nil, err
@@ -205,11 +236,12 @@ func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Cli
 			VoiceStop:            false,
 			SilenceThresholdTime: maxSilenceDuration,
 		},
-		SessionCtx: Ctx{},
-		UdpInfo:    udpSession,
+		SessionCtx:     Ctx{},
+		UdpInfo:        udpSession,
+		McpRecvMsgChan: make(chan []byte, 10),
 	}
 
-	ttsType := getTTsType(deviceConfig.Tts)
+	ttsType := clientState.DeviceConfig.Tts.Provider
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
 	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
 		clientState.OutputAudioFormat.SampleRate = 24000
@@ -229,24 +261,16 @@ func (c *ClientState) StartMqttUdpClient() error {
 	}
 	c.TTSProvider = ttsProvider
 
-	c.Init()
+	if err := c.Init(); err != nil {
+		log.Errorf("初始化客户端状态失败: %v", err)
+		return err
+	}
 
 	return nil
 }
 
-func getTTsType(ttsConfig userconfig.TtsConfig) string {
-	ttsProviderName := viper.GetString("tts.provider")
-	if ttsConfig.Type != "" {
-		ttsProviderName = ttsConfig.Type
-	}
-	return ttsProviderName
-}
-
-func getTTSProvider(ttsConfig userconfig.TtsConfig) (tts.TTSProvider, error) {
-	ttsProviderName := getTTsType(ttsConfig)
-	providerConfig := viper.GetStringMap(fmt.Sprintf("tts.%s", ttsProviderName))
-
-	ttsProvider, err := tts.GetTTSProvider(ttsProviderName, providerConfig)
+func getTTSProvider(ttsConfig utypes.TtsConfig) (tts.TTSProvider, error) {
+	ttsProvider, err := tts.GetTTSProvider(ttsConfig.Provider, ttsConfig.Config)
 	if err != nil {
 		return nil, fmt.Errorf("创建 TTS 提供者失败: %v", err)
 	}
@@ -277,7 +301,7 @@ type ClientState struct {
 	Conn *Conn
 
 	//设备配置
-	DeviceConfig userconfig.UConfig
+	DeviceConfig utypes.UConfig
 
 	Vad
 	Asr
@@ -314,6 +338,8 @@ type ClientState struct {
 	Status string //状态 listening, llmStart, ttsStart
 
 	IsTtsStart bool //是否tts开始
+
+	McpRecvMsgChan chan []byte //mcp接收消息通道
 }
 
 func (c *ClientState) SetTtsStart(isStart bool) {
@@ -390,25 +416,26 @@ type Ctx struct {
 }
 
 func (s *ClientState) getLLMProvider() (llm.LLMProvider, error) {
-	llmProviderName := viper.GetString("llm.provider")
-	if s.DeviceConfig.Llm.Type != "" {
-		llmProviderName = s.DeviceConfig.Llm.Type
+	llmConfig := s.DeviceConfig.Llm
+	llmType, ok := llmConfig.Config["type"]
+	if !ok {
+		log.Errorf("getLLMProvider err: not found llm type: %+v", llmConfig)
+		return nil, fmt.Errorf("llm config type not found")
 	}
-	configMap := viper.GetStringMap(fmt.Sprintf("llm.%s", llmProviderName))
-	llmProvider, err := llm.GetLLMProvider(llmProviderName, configMap)
+	llmProvider, err := llm.GetLLMProvider(llmType.(string), llmConfig.Config)
 	if err != nil {
 		return nil, fmt.Errorf("创建 LLM 提供者失败: %v", err)
 	}
 	return llmProvider, nil
 }
 
-func (s *ClientState) InitLlm() {
+func (s *ClientState) InitLlm() error {
 	ctx, cancel := context.WithCancel(s.Ctx)
 
 	llmProvider, err := s.getLLMProvider()
 	if err != nil {
 		log.Errorf("创建 LLM 提供者失败: %v", err)
-		return
+		return err
 	}
 
 	s.Llm = Llm{
@@ -416,14 +443,16 @@ func (s *ClientState) InitLlm() {
 		Cancel:      cancel,
 		LLMProvider: llmProvider,
 	}
+	return nil
 }
 
-func (s *ClientState) InitAsr() {
+func (s *ClientState) InitAsr() error {
+	asrConfig := s.DeviceConfig.Asr
 	//初始化asr
-	asrProvider, err := asr.NewAsrProvider(viper.GetString("asr.provider"), viper.GetStringMap(fmt.Sprintf("asr.%s", viper.GetString("asr.provider"))))
+	asrProvider, err := asr.NewAsrProvider(asrConfig.Provider, asrConfig.Config)
 	if err != nil {
 		log.Errorf("创建asr提供者失败: %v", err)
-		return
+		return fmt.Errorf("创建asr提供者失败: %v", err)
 	}
 	ctx, cancel := context.WithCancel(s.Ctx)
 	s.Asr = Asr{
@@ -434,12 +463,19 @@ func (s *ClientState) InitAsr() {
 		AsrEnd:          make(chan bool, 1),
 		AsrResult:       bytes.Buffer{},
 	}
+	return nil
 }
 
-func (c *ClientState) Init() {
-	c.InitLlm()
-	c.InitAsr()
+func (c *ClientState) Init() error {
+	if err := c.InitLlm(); err != nil {
+		return fmt.Errorf("初始化LLM失败: %v", err)
+	}
+	if err := c.InitAsr(); err != nil {
+		return fmt.Errorf("初始化ASR失败: %v", err)
+	}
 	c.SetAsrPcmFrameSize(c.InputAudioFormat.SampleRate, c.InputAudioFormat.Channels, c.InputAudioFormat.FrameDuration)
+
+	return nil
 }
 
 func (c *ClientState) Destroy() {
@@ -573,7 +609,7 @@ func (state *ClientState) OnVoiceSilence() {
 type Vad struct {
 	lock sync.RWMutex
 	// VAD 提供者
-	VadProvider vad.VAD
+	VadProvider vad_inter.VAD
 
 	IdleDuration int64 // 空闲时间, 单位: ms
 }
@@ -590,13 +626,14 @@ func (v *Vad) ResetIdleDuration() {
 	atomic.StoreInt64(&v.IdleDuration, 0)
 }
 
-func (v *Vad) Init() error {
+func (v *Vad) Init(provider string, config map[string]interface{}) error {
 	v.lock.Lock()
 	defer v.lock.Unlock()
-	vadProvider, err := vad.AcquireVAD()
+	vadProvider, err := vad.AcquireVAD(provider, config)
 	if err != nil {
 		return fmt.Errorf("创建 VAD 提供者失败: %v", err)
 	}
+
 	vadProvider.Reset()
 	v.VadProvider = vadProvider
 	return nil
@@ -782,15 +819,17 @@ func (v *VoiceStatus) SetClientVoiceStop(voiceStop bool) {
 
 // ClientMessage 表示客户端消息
 type ClientMessage struct {
-	Type        string       `json:"type"`
-	DeviceID    string       `json:"device_id,omitempty"`
-	SessionID   string       `json:"session_id,omitempty"`
-	Text        string       `json:"text,omitempty"`
-	Mode        string       `json:"mode,omitempty"`
-	State       string       `json:"state,omitempty"`
-	Token       string       `json:"token,omitempty"`
-	DeviceMac   string       `json:"device_mac,omitempty"`
-	Version     int          `json:"version,omitempty"`
-	Transport   string       `json:"transport,omitempty"`
-	AudioParams *AudioFormat `json:"audio_params,omitempty"`
+	Type        string          `json:"type"`
+	DeviceID    string          `json:"device_id,omitempty"`
+	SessionID   string          `json:"session_id,omitempty"`
+	Text        string          `json:"text,omitempty"`
+	Mode        string          `json:"mode,omitempty"`
+	State       string          `json:"state,omitempty"`
+	Token       string          `json:"token,omitempty"`
+	DeviceMac   string          `json:"device_mac,omitempty"`
+	Version     int             `json:"version,omitempty"`
+	Transport   string          `json:"transport,omitempty"`
+	Features    map[string]bool `json:"features,omitempty"`
+	AudioParams *AudioFormat    `json:"audio_params,omitempty"`
+	PayLoad     json.RawMessage `json:"payload,omitempty"`
 }

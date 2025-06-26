@@ -2,17 +2,15 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
-	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
-	"xiaozhi-esp32-server-golang/internal/domain/vad"
+	redisdb "xiaozhi-esp32-server-golang/internal/db/redis"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
-	"github.com/redis/go-redis/v9"
 	logrus "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -30,7 +28,7 @@ func Init(configFile string) error {
 	initLog()
 
 	//init vad
-	initVad()
+	//initVad()
 
 	//init redis
 	initRedis()
@@ -75,7 +73,6 @@ func initConfig(configFile string) error {
 }
 
 func initLog() error {
-	// 不再检查stdout配置，统一输出到文件
 	// 输出到文件
 	binPath, _ := os.Executable()
 	baseDir := filepath.Dir(binPath)
@@ -99,11 +96,24 @@ func initLog() error {
 		os.Exit(1)
 		return err
 	}
-	logrus.SetOutput(writer)
-	logrus.SetFormatter(&logrus.TextFormatter{
-		TimestampFormat: "2006-01-02 15:04:05.000", //时间格式化，添加毫秒
-		ForceColors:     false,                     // 文件输出不启用颜色
-	})
+
+	// 根据配置决定输出目标
+	if viper.GetBool("log.stdout") {
+		// 同时输出到文件和标准输出
+		multiWriter := io.MultiWriter(writer, os.Stdout)
+		logrus.SetOutput(multiWriter)
+		logrus.SetFormatter(&logrus.TextFormatter{
+			TimestampFormat: "2006-01-02 15:04:05.000", //时间格式化，添加毫秒
+			ForceColors:     true,                      // 标准输出启用颜色
+		})
+	} else {
+		// 只输出到文件
+		logrus.SetOutput(writer)
+		logrus.SetFormatter(&logrus.TextFormatter{
+			TimestampFormat: "2006-01-02 15:04:05.000", //时间格式化，添加毫秒
+			ForceColors:     false,                     // 文件输出不启用颜色
+		})
+	}
 
 	// 禁用默认的调用者报告，使用自定义的caller字段
 	logrus.SetReportCaller(false)
@@ -113,31 +123,29 @@ func initLog() error {
 	return nil
 }
 
-func initVad() error {
-	err := vad.InitVAD()
-	if err != nil {
-		fmt.Printf("initVad error: %v\n", err)
-		os.Exit(1)
-		return err
+/*
+	func initVad() error {
+		err := vad.InitVAD()
+		if err != nil {
+			fmt.Printf("initVad error: %v\n", err)
+			os.Exit(1)
+			return err
+		}
+		return nil
 	}
-	return nil
-}
-
+*/
 func initRedis() error {
-	redisOptions := &redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", viper.GetString("redis.host"), viper.GetInt("redis.port")),
+	// 初始化我们的统一Redis模块
+	redisConfig := &redisdb.Config{
+		Host:     viper.GetString("redis.host"),
+		Port:     viper.GetInt("redis.port"),
 		Password: viper.GetString("redis.password"),
 		DB:       viper.GetInt("redis.db"),
 	}
-	err := llm_memory.Init(redisOptions, viper.GetString("redis.key_prefix"))
+
+	err := redisdb.Init(redisConfig)
 	if err != nil {
 		fmt.Printf("init redis error: %v\n", err)
-		return err
-	}
-
-	err = userconfig.InitUserConfig(redisOptions, viper.GetString("redis.key_prefix"))
-	if err != nil {
-		fmt.Printf("init userconfig error: %v\n", err)
 		return err
 	}
 

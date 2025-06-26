@@ -18,6 +18,8 @@ type LLMProvider interface {
 	// dialogue: 对话历史，使用Eino原生消息类型
 	ResponseWithContext(ctx context.Context, sessionID string, dialogue []*schema.Message, functions []*schema.ToolInfo) chan *schema.Message
 
+	ResponseWithVllm(ctx context.Context, file []byte, text string, mimeType string) (string, error)
+
 	// GetModelInfo 获取模型信息
 	// 返回模型名称和其他元数据
 	GetModelInfo() map[string]interface{}

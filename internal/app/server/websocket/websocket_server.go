@@ -5,20 +5,21 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
 
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	"xiaozhi-esp32-server-golang/internal/app/server/common"
 	"xiaozhi-esp32-server-golang/internal/data/client"
+	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
+	utypes "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/user_config"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -35,8 +36,6 @@ type WebSocketServer struct {
 	port int
 	// MCP管理器
 	globalMCPManager *mcp.GlobalMCPManager
-	// MCP客户端
-	mcpClients sync.Map
 }
 
 // NewWebSocketServer 创建新的 WebSocket 服务器
@@ -71,6 +70,7 @@ func (s *WebSocketServer) Start() error {
 	http.HandleFunc("/xiaozhi/ota/", s.handleOta)
 	http.HandleFunc("/xiaozhi/mcp/", s.handleMCPWebSocket)
 	http.HandleFunc("/xiaozhi/api/mcp/tools/", s.handleMCPAPI)
+	http.HandleFunc("/xiaozhi/api/vision", s.handleVisionAPI) //图片识别API
 
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", s.port)
 	log.Infof("WebSocket 服务器启动在 ws://%s/xiaozhi/v1/", listenAddr)
@@ -119,13 +119,6 @@ func (s *WebSocketServer) handleMCPWebSocket(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// 检查是否已存在连接
-	if _, exists := s.mcpClients.Load(deviceID); exists {
-		log.Warnf("设备 %s 已存在MCP连接", deviceID)
-		http.Error(w, "设备已存在MCP连接", http.StatusConflict)
-		return
-	}
-
 	// 升级WebSocket连接
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -133,21 +126,25 @@ func (s *WebSocketServer) handleMCPWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	mcpClientSession := mcp.GetDeviceMcpClient(deviceID)
+	if mcpClientSession == nil {
+		mcpClientSession = mcp.NewDeviceMCPSession(deviceID)
+		mcp.AddDeviceMcpClient(deviceID, mcpClientSession)
+	}
+
 	// 创建MCP客户端
-	mcpClient := mcp.NewDeviceMCPClient(deviceID, conn)
+	mcpClient := mcp.NewWsEndPointMcpClient(mcpClientSession.Ctx, deviceID, conn)
 	if mcpClient == nil {
 		log.Errorf("创建MCP客户端失败")
 		conn.Close()
 		return
 	}
-
-	// 保存MCP客户端
-	s.mcpClients.Store(deviceID, mcpClient)
+	mcpClientSession.SetWsEndPointMcp(mcpClient)
 
 	// 监听客户端断开连接
 	go func() {
-		<-mcpClient.Context().Done()
-		s.mcpClients.Delete(deviceID)
+		<-mcpClientSession.Ctx.Done()
+		mcp.RemoveDeviceMcpClient(deviceID)
 		log.Infof("设备 %s 的MCP连接已断开", deviceID)
 	}()
 
@@ -180,83 +177,7 @@ func (s *WebSocketServer) handleMCPAPI(w http.ResponseWriter, r *http.Request) {
 
 // handleGetDeviceTools 获取设备的工具列表
 func (s *WebSocketServer) handleGetDeviceTools(w http.ResponseWriter, r *http.Request, deviceID string) {
-	// 获取设备特定工具
-	var deviceTools map[string]tool.InvokableTool
-	if mcpClient, ok := s.mcpClients.Load(deviceID); ok {
-		deviceTools = mcpClient.(*mcp.DeviceMCPClient).GetTools()
-	} else {
-		deviceTools = make(map[string]tool.InvokableTool)
-	}
 
-	// 获取全局工具
-	globalTools := s.globalMCPManager.GetAllTools()
-
-	// 合并工具列表
-	allTools := make(map[string]interface{})
-
-	// 添加全局工具
-	for name, tool := range globalTools {
-		info, err := tool.Info(context.Background())
-		if err != nil {
-			continue
-		}
-		allTools[name] = map[string]interface{}{
-			"name":        info.Name,
-			"description": info.Desc,
-			"type":        "global",
-		}
-	}
-
-	// 添加设备特定工具
-	for name, tool := range deviceTools {
-		info, err := tool.Info(context.Background())
-		if err != nil {
-			continue
-		}
-		allTools[name] = map[string]interface{}{
-			"name":        info.Name,
-			"description": info.Desc,
-			"type":        "device",
-		}
-	}
-
-	response := map[string]interface{}{
-		"deviceId":    deviceID,
-		"tools":       allTools,
-		"globalCount": len(globalTools),
-		"deviceCount": len(deviceTools),
-		"totalCount":  len(allTools),
-		"timestamp":   time.Now().Unix(),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Errorf("编码MCP工具列表响应失败: %v", err)
-		http.Error(w, "内部服务器错误", http.StatusInternalServerError)
-		return
-	}
-
-	log.Infof("返回设备 %s 的工具列表: 全局 %d 个，设备 %d 个", deviceID, len(globalTools), len(deviceTools))
-}
-
-// Stop 停止WebSocket服务器和MCP管理器
-func (s *WebSocketServer) Stop() error {
-	if err := s.globalMCPManager.Stop(); err != nil {
-		log.Errorf("停止全局MCP管理器失败: %v", err)
-	}
-
-	// 停止所有MCP客户端
-	s.mcpClients.Range(func(key, value interface{}) bool {
-		if client, ok := value.(*mcp.DeviceMCPClient); ok {
-			if err := client.Stop(); err != nil {
-				log.Errorf("停止设备 %s 的MCP客户端失败: %v", key.(string), err)
-			}
-		}
-		return true
-	})
-
-	log.Info("WebSocket服务器和MCP管理器已停止")
-	return nil
 }
 
 // cleanupSessions 定期清理过期会话
@@ -277,12 +198,17 @@ func (s *WebSocketServer) SendBinaryMsg(conn *client.Conn, audio []byte) error {
 }
 
 // 获取设备配置
-func (s *WebSocketServer) getUserConfig(deviceID string) (*userconfig.UConfig, error) {
-	userConfig, err := userconfig.U().GetUserConfig(context.Background(), deviceID)
+func (s *WebSocketServer) getUserConfig(deviceID string) (*utypes.UConfig, error) {
+	userConfigInstance, err := userconfig.GetProvider()
 	if err != nil {
 		return nil, fmt.Errorf("获取用户配置失败: %v", err)
 	}
-	return &userConfig, nil
+	uConfig, err := userConfigInstance.GetUserConfig(context.Background(), deviceID)
+	if err != nil {
+		log.Errorf("getUserConfig error: %+v", err)
+		return nil, fmt.Errorf("getUserConfig error: %+v", err)
+	}
+	return &uConfig, nil
 }
 
 // handleWebSocket 处理 WebSocket 连接
@@ -343,7 +269,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 	// 处理消息
 	for {
 		// 每次收到消息都刷新超时时间, 空闲60秒就退出
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
 			// 这里会捕获到超时、断开等异常
@@ -467,4 +393,75 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	return
+}
+
+// handleVisionAPI 处理图片识别API
+func (s *WebSocketServer) handleVisionAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "仅支持POST请求", http.StatusMethodNotAllowed)
+		return
+	}
+
+	//从header头部获取Device-Id和Client-Id
+	deviceId := r.Header.Get("Device-Id")
+	clientId := r.Header.Get("Client-Id")
+	_ = clientId
+	if deviceId == "" {
+		log.Errorf("缺少Device-Id")
+		http.Error(w, "缺少Device-Id", http.StatusBadRequest)
+		return
+	}
+
+	if viper.GetBool("vision.enable_auth") {
+
+		//从header Authorization中获取Bearer token
+		authToken := r.Header.Get("Authorization")
+		if authToken == "" {
+			log.Errorf("缺少Authorization")
+			http.Error(w, "缺少Authorization", http.StatusBadRequest)
+			return
+		}
+		authToken = strings.TrimPrefix(authToken, "Bearer ")
+
+		err := common.VisvionAuth(authToken)
+		if err != nil {
+			log.Errorf("图片识别认证失败: %v", err)
+			http.Error(w, "图片识别认证失败", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// 解析 multipart 表单，最大 10MB
+	question := r.FormValue("question")
+	if question == "" {
+		http.Error(w, "缺少question参数", http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "缺少file参数或文件读取失败", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "文件读取失败", http.StatusInternalServerError)
+		return
+	}
+
+	file.Close()
+
+	result, err := common.HandleVllm(deviceId, fileBytes, question)
+	if err != nil {
+		log.Errorf("图片识别失败: %v", err)
+		http.Error(w, "图片识别失败", http.StatusInternalServerError)
+		return
+	}
+
+	// TODO: 调用llm进行图片识别，输出识别内容
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(result))
 }

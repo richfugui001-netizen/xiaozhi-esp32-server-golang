@@ -22,6 +22,7 @@ import (
 
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
@@ -37,6 +38,7 @@ type ServerMessage struct {
 	Transport   string                   `json:"transport,omitempty"`
 	AudioFormat *types_audio.AudioFormat `json:"audio_params,omitempty"`
 	Emotion     string                   `json:"emotion,omitempty"`
+	PayLoad     json.RawMessage          `json:"payload,omitempty"`
 }
 
 func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
@@ -188,25 +190,25 @@ func handleToolCallResponse(ctx context.Context, state *ClientState, requestEino
 
 	log.Infof("处理 %d 个工具调用", len(tools))
 
-	globalMCPManager := mcp.GetGlobalMCPManager()
-
 	var invokeToolSuccess bool
 	msgList := make([]*schema.Message, 0)
 	for _, toolCall := range tools {
 		toolName := toolCall.Function.Name
-		tool, ok := globalMCPManager.GetToolByName(toolName)
+		tool, ok := mcp.GetToolByName(state.DeviceID, toolName)
 		if !ok || tool == nil {
 			log.Errorf("未找到工具: %s", toolName)
 			continue
 		}
 		log.Infof("进行工具调用请求: %s, 参数: %+v", toolName, toolCall.Function.Arguments)
+		startTs := time.Now().UnixMilli()
 		result, err := tool.InvokableRun(ctx, toolCall.Function.Arguments)
 		if err != nil {
 			log.Errorf("工具调用失败: %v", err)
 			continue
 		}
+		costTs := time.Now().UnixMilli() - startTs
 		invokeToolSuccess = true
-		log.Infof("工具调用结果: %s", result)
+		log.Infof("工具调用结果: %s, 耗时: %dms", result, costTs)
 		msg := []*schema.Message{
 			&schema.Message{
 				Role:      schema.Assistant,
@@ -238,39 +240,39 @@ func ProcessVadAudio(state *ClientState) {
 			log.Errorf("获取解码器失败: %v", err)
 			return
 		}
-		pcmFrame := make([]float32, state.AsrAudioBuffer.PcmFrameSize)
+		frameSize := state.AsrAudioBuffer.PcmFrameSize
+		pcmFrame := make([]float32, frameSize)
 
-		vadNeedGetCount := 60 / audioFormat.FrameDuration
+		vadNeedGetCount := 1
+		if state.DeviceConfig.Vad.Provider == "silero_vad" {
+			vadNeedGetCount = 60 / audioFormat.FrameDuration
+		}
 
 		for {
 			//sessionCtx := state.GetSessionCtx()
 			select {
 			case opusFrame, ok := <-state.OpusAudioBuffer:
+				log.Debugf("processAsrAudio 收到音频数据, len: %d", len(opusFrame))
+				if !ok {
+					log.Debugf("processAsrAudio 音频通道已关闭")
+					return
+				}
+
 				var skipVad bool
 				var haveVoice bool
 				clientHaveVoice := state.GetClientHaveVoice()
-				if state.Asr.AutoEnd {
-					skipVad = true
-					clientHaveVoice = true
-					haveVoice = true
+				if state.Asr.AutoEnd || state.ListenMode == "manual" {
+					skipVad = true         //跳过vad
+					clientHaveVoice = true //之前有声音
+					haveVoice = true       //本次有声音
 				}
 
 				if state.GetClientVoiceStop() { //已停止 说话 则不接收音频数据
 					//log.Infof("客户端停止说话, 跳过音频数据")
 					continue
 				}
-				log.Debugf("processAsrAudio 收到音频数据, len: %d", len(opusFrame))
-				if !ok {
-					log.Debugf("processAsrAudio 音频通道已关闭")
-					return
-				}
-				log.Debugf("clientVoiceStop: %+v, asrDataSize: %d\n", state.GetClientVoiceStop(), state.AsrAudioBuffer.GetAsrDataSize())
 
-				if state.ListenMode != "auto" {
-					haveVoice = true       //如果是manual, 本次音频入asr
-					clientHaveVoice = true //之前有声音
-					skipVad = true         //跳过vad
-				}
+				log.Debugf("clientVoiceStop: %+v, asrDataSize: %d, listenMode: %s, isSkipVad: %v\n", state.GetClientVoiceStop(), state.AsrAudioBuffer.GetAsrDataSize(), state.ListenMode, skipVad)
 
 				n, err := audioProcesser.DecoderFloat32(opusFrame, pcmFrame)
 				if err != nil {
@@ -284,7 +286,7 @@ func ProcessVadAudio(state *ClientState) {
 					//如果已经检测到语音, 则不进行vad检测, 直接将pcmData传给asr
 					if state.VadProvider == nil {
 						// 初始化vad
-						err = state.Vad.Init()
+						err = state.Vad.Init(state.DeviceConfig.Vad.Provider, state.DeviceConfig.Vad.Config)
 						if err != nil {
 							log.Errorf("初始化vad失败: %v", err)
 							continue
@@ -297,7 +299,8 @@ func ProcessVadAudio(state *ClientState) {
 						//如果要进行vad, 至少要取60ms的音频数据
 						vadPcmData = state.AsrAudioBuffer.GetAsrData(vadNeedGetCount)
 						state.VadProvider.Reset()
-						haveVoice, err = state.VadProvider.IsVAD(vadPcmData)
+						haveVoice, err = state.VadProvider.IsVADExt(vadPcmData, audioFormat.SampleRate, frameSize)
+
 						if err != nil {
 							log.Errorf("processAsrAudio VAD检测失败: %v", err)
 							//删除
@@ -381,6 +384,8 @@ func HandleTextMessage(clientState *ClientState, message []byte) error {
 		return handleAbortMessage(clientState, &clientMsg)
 	case MessageTypeIot:
 		return handleIoTMessage(clientState, &clientMsg)
+	case MessageTypeMcp:
+		return handleMcpMessage(clientState, &clientMsg)
 	default:
 		// 未知消息类型，直接回显
 		return clientState.Conn.WriteMessage(websocket.TextMessage, message)
@@ -397,6 +402,10 @@ func handleHelloMessage(clientState *ClientState, msg *ClientMessage) error {
 
 	// 更新客户端状态
 	clientState.SessionID = session.ID
+
+	if isMcp, ok := msg.Features["mcp"]; ok && isMcp {
+		go initMcp(clientState)
+	}
 
 	clientState.InputAudioFormat = types_audio.AudioFormat{
 		SampleRate:    msg.AudioParams.SampleRate,
@@ -435,7 +444,7 @@ func RecvAudio(clientState *ClientState, data []byte) bool {
 // handleListenMessage 处理监听消息
 func handleListenMessage(clientState *ClientState, msg *ClientMessage) error {
 
-	sessionID := clientState.SessionID
+	//sessionID := clientState.SessionID
 
 	// 根据状态处理
 	switch msg.State {
@@ -457,18 +466,19 @@ func handleListenMessage(clientState *ClientState, msg *ClientMessage) error {
 
 			// 检查是否是唤醒词
 			isWakeupWord := isWakeupWord(text)
-			enableGreeting := viper.GetBool("enable_greeting") // 从配置获取
+			//enableGreeting := viper.GetBool("enable_greeting") // 从配置获取
 
-			if isWakeupWord && !enableGreeting {
+			if isWakeupWord {
 				// 如果是唤醒词，且关闭了唤醒词回复，发送 STT 消息后停止 TTS
-				sttResponse := ServerMessage{
+				/*sttResponse := ServerMessage{
 					Type:      ServerMessageTypeStt,
 					Text:      text,
 					SessionID: sessionID,
 				}
 				if err := clientState.SendMsg(sttResponse); err != nil {
 					return fmt.Errorf("发送 STT 消息失败: %v", err)
-				}
+				}*/
+				log.Infof("唤醒词: %s", text)
 			} else {
 				// 否则开始对话
 				if err := startChat(clientState.GetSessionCtx(), clientState, text); err != nil {
@@ -567,6 +577,35 @@ func handleIoTMessage(clientState *ClientState, msg *ClientMessage) error {
 	return nil
 }
 
+func handleMcpMessage(clientState *ClientState, msg *ClientMessage) error {
+	mcpSession := mcp.GetDeviceMcpClient(clientState.DeviceID)
+	if mcpSession != nil {
+		select {
+		case clientState.McpRecvMsgChan <- msg.PayLoad:
+		default:
+			log.Warnf("mcp 接收消息通道已满, 丢弃消息")
+		}
+	}
+	return nil
+}
+
+func initIotOverMcp(clientState *ClientState) error {
+	mcpSession := mcp.GetDeviceMcpClient(clientState.DeviceID)
+	if mcpSession == nil {
+		mcpSession = mcp.NewDeviceMCPSession(clientState.DeviceID)
+		mcp.AddDeviceMcpClient(clientState.DeviceID, mcpSession)
+	}
+
+	mcpTransport := &McpTransport{
+		Client: clientState,
+	}
+
+	iotOverMcp := mcp.NewIotOverMcpClient(clientState.DeviceID, mcpTransport)
+	mcpSession.SetIotOverMcp(iotOverMcp)
+
+	return nil
+}
+
 // startChat 开始对话
 func startChat(ctx context.Context, clientState *ClientState, text string) error {
 	// 获取客户端状态
@@ -598,8 +637,11 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 	}
 
 	// 获取全局MCP工具列表
-	globalMCPManager := mcp.GetGlobalMCPManager()
-	mcpTools := globalMCPManager.GetAllTools()
+	mcpTools, err := mcp.GetToolsByDeviceId(clientState.DeviceID)
+	if err != nil {
+		log.Errorf("获取设备 %s 的工具失败: %v", clientState.DeviceID, err)
+		mcpTools = make(map[string]tool.InvokableTool)
+	}
 
 	// 将MCP工具转换为接口格式以便传递给转换函数
 	mcpToolsInterface := make(map[string]interface{})

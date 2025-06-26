@@ -7,9 +7,11 @@ import (
 	"sync"
 	"time"
 
+	i_redis "xiaozhi-esp32-server-golang/internal/db/redis"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/spf13/viper"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -27,24 +29,14 @@ type Memory struct {
 }
 
 // Init 初始化记忆体实例
-func Init(redisOptions *redis.Options, keyPrefix string) error {
+func Init() error {
 	var initErr error
 	once.Do(func() {
-		if redisOptions == nil {
-			initErr = fmt.Errorf("redis options cannot be nil")
-			return
-		}
-
-		client := redis.NewClient(redisOptions)
-		// 测试 Redis 连接
-		if err := client.Ping(context.Background()).Err(); err != nil {
-			initErr = fmt.Errorf("failed to connect to redis: %w", err)
-			return
-		}
+		redisInstance := i_redis.GetClient()
 
 		memoryInstance = &Memory{
-			redisClient: client,
-			keyPrefix:   keyPrefix,
+			redisClient: redisInstance,
+			keyPrefix:   viper.GetString("redis.key_prefix"),
 		}
 	})
 	return initErr
@@ -53,7 +45,7 @@ func Init(redisOptions *redis.Options, keyPrefix string) error {
 // Get 获取记忆体实例
 func Get() *Memory {
 	if memoryInstance == nil {
-		return &Memory{}
+		Init()
 	}
 	return memoryInstance
 }

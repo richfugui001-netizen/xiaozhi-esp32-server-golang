@@ -7,6 +7,8 @@
 - 实现了小智ai websocket
 - 实现了mqtt和udp服务器
 - 外部资源连接池复用，减少耗时
+- 支持 全局mcp、websocket接入点mcp、端侧mcp
+- 支持 视觉mcp
 
 # 快速开始
 [docker 快速开始](doc/docker.md)
@@ -44,9 +46,15 @@ go build cmd/mqtt/*.go
 ### llm记忆体
 ### docker化部署
 
-![群二维码_0604](https://github.com/user-attachments/assets/e1420621-e698-46d4-bf44-ef6a90f67a23)
+
+![群二维码_0618(1)](https://github.com/user-attachments/assets/9f92a149-14f2-425f-bc8c-565e1ce73703)
 
 
 
 
-微信：hackers365
+
+个人微信：hackers365
+
+![个人二维码_0618(1)](https://github.com/user-attachments/assets/6b8d3d11-7bf5-4fa4-a73e-5109019dab85)
+
+

@@ -2,360 +2,290 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/gorilla/websocket"
+	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
+	cmap "github.com/orcaman/concurrent-map/v2"
 )
 
-// DeviceMCPClient MCP客户端，接收MCP服务器的WebSocket连接
-type DeviceMCPClient struct {
-	deviceID  string
-	conn      *websocket.Conn
-	tools     map[string]tool.InvokableTool
-	mu        sync.RWMutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	connected bool
-	lastPing  time.Time
+type McpClientPool struct {
+	device2McpClient cmap.ConcurrentMap[string, *DeviceMcpSession]
 }
 
-// NewDeviceMCPClient 创建新的MCP客户端
-func NewDeviceMCPClient(deviceID string, conn *websocket.Conn) *DeviceMCPClient {
-	ctx, cancel := context.WithCancel(context.Background())
-	client := &DeviceMCPClient{
-		deviceID:  deviceID,
-		conn:      conn,
-		tools:     make(map[string]tool.InvokableTool),
-		ctx:       ctx,
-		cancel:    cancel,
-		connected: true,
-		lastPing:  time.Now(),
+var mcpClientPool *McpClientPool
+
+func init() {
+	mcpClientPool = &McpClientPool{
+		device2McpClient: cmap.New[*DeviceMcpSession](),
 	}
+	go mcpClientPool.checkOffline()
+}
 
-	// 启动消息处理
-	go client.handleMessages()
-	// 启动心跳检测
-	go client.keepAlive()
-	// 启动工具列表刷新
-	client.startToolsListRefresh()
-
-	// 发送初始化请求
-	if err := client.sendInitializeRequest(); err != nil {
-		logger.Errorf("发送初始化请求失败: %v", err)
-		client.closeConnection()
+func (p *McpClientPool) GetMcpClient(deviceID string) *DeviceMcpSession {
+	client, ok := p.device2McpClient.Get(deviceID)
+	if !ok {
 		return nil
 	}
-
 	return client
 }
 
-// sendInitializeRequest 发送初始化请求
-func (dc *DeviceMCPClient) sendInitializeRequest() error {
+func (p *McpClientPool) RemoveMcpClient(deviceID string) {
+	p.device2McpClient.Remove(deviceID)
+}
+
+func (p *McpClientPool) AddMcpClient(deviceID string, client *DeviceMcpSession) {
+	p.device2McpClient.Set(deviceID, client)
+}
+
+func (p *McpClientPool) GetToolByDeviceId(deviceId string, toolsName string) (tool.InvokableTool, bool) {
+	client := p.GetMcpClient(deviceId)
+	if client == nil {
+		return nil, false
+	}
+	return client.GetToolByName(toolsName)
+}
+
+func (p *McpClientPool) GetAllToolsByDeviceId(deviceId string) (map[string]tool.InvokableTool, error) {
+	client := p.GetMcpClient(deviceId)
+	if client == nil {
+		return nil, fmt.Errorf("client not found")
+	}
+	return client.GetTools(), nil
+}
+
+func (p *McpClientPool) checkOffline() {
+	for _, client := range p.device2McpClient.Items() {
+		if time.Since(client.wsEndPointMcp.lastPing) > 2*time.Minute {
+			client.wsEndPointMcp.connected = false
+			client.wsEndPointMcp.cancel()
+		}
+		if time.Since(client.iotOverMcp.lastPing) > 2*time.Minute {
+			client.iotOverMcp.connected = false
+			client.iotOverMcp.cancel()
+		}
+		if !client.wsEndPointMcp.connected && !client.iotOverMcp.connected {
+			p.RemoveMcpClient(client.deviceID)
+		}
+	}
+}
+
+// DeviceMcpSession 代表一个设备的MCP会话，聚合了多种MCP连接
+type DeviceMcpSession struct {
+	deviceID      string
+	Ctx           context.Context
+	cancel        context.CancelFunc
+	wsEndPointMcp *McpClientInstance
+	iotOverMcp    *McpClientInstance
+}
+
+func (dcs *DeviceMcpSession) SetWsEndPointMcp(mcpClient *McpClientInstance) {
+	dcs.wsEndPointMcp = mcpClient
+	dcs.refreshToolsAndPing()
+}
+
+func (dcs *DeviceMcpSession) SetIotOverMcp(mcpClient *McpClientInstance) {
+	dcs.iotOverMcp = mcpClient
+	dcs.refreshToolsAndPing()
+}
+
+// McpClientInstance 代表一个具体的MCP客户端连接
+type McpClientInstance struct {
+	serverName string
+	mcpClient  *client.Client // 是从ws endpoint连上来的mcp server
+	tools      map[string]tool.InvokableTool
+	serverInfo *mcp.InitializeResult
+	lastPing   time.Time
+	ctx        context.Context
+	cancel     context.CancelFunc
+	connected  bool
+	conn       ConnInterface
+}
+
+// NewDeviceMCPClient 创建新的MCP客户端
+func NewDeviceMCPSession(deviceID string) *DeviceMcpSession {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	deviceMcpClient := &DeviceMcpSession{
+		deviceID: deviceID,
+		Ctx:      ctx,
+		cancel:   cancel,
+	}
+
+	go deviceMcpClient.refreshToolsAndPing()
+
+	return deviceMcpClient
+}
+
+func NewWsEndPointMcpClient(ctx context.Context, deviceID string, conn *websocket.Conn) *McpClientInstance {
+	ctx, cancel := context.WithCancel(ctx)
+
+	wsTransport, err := NewWebsocketTransport(conn)
+	if err != nil {
+		logger.Errorf("创建MCP客户端失败: %v", err)
+		return nil
+	}
+	mcpClient := client.NewClient(wsTransport)
+
+	wsEndPointMcp := &McpClientInstance{
+		serverName: fmt.Sprintf("ws_endpoint_mcp_%s", deviceID),
+		mcpClient:  mcpClient,
+		tools:      make(map[string]tool.InvokableTool),
+		ctx:        ctx,
+		cancel:     cancel,
+		connected:  true,
+		lastPing:   time.Now(),
+	}
+	wsTransport.SetNotificationHandler(wsEndPointMcp.handleJSONRPCNotification)
+
+	wsEndPointMcp.sendInitlize(ctx)
+	wsEndPointMcp.mcpClient.Start(ctx)
+	return wsEndPointMcp
+}
+
+func NewIotOverMcpClient(deviceID string, conn ConnInterface) *McpClientInstance {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	wsTransport, err := NewIotOverMcpTransport(conn)
+	if err != nil {
+		logger.Errorf("创建MCP客户端失败: %v", err)
+		return nil
+	}
+	mcpClient := client.NewClient(wsTransport)
+
+	iotOverMcp := &McpClientInstance{
+		serverName: fmt.Sprintf("iot_over_mcp_%s", deviceID),
+		mcpClient:  mcpClient,
+		tools:      make(map[string]tool.InvokableTool),
+		ctx:        ctx,
+		cancel:     cancel,
+		connected:  true,
+		lastPing:   time.Now(),
+	}
+	wsTransport.SetNotificationHandler(iotOverMcp.handleJSONRPCNotification)
+	iotOverMcp.sendInitlize(ctx)
+	iotOverMcp.mcpClient.Start(ctx)
+
+	return iotOverMcp
+}
+
+func (dc *DeviceMcpSession) refreshToolsAndPing() {
+	tick := time.NewTicker(60 * time.Second)
+	defer tick.Stop()
+
+	pingTick := time.NewTicker(30 * time.Second)
+	defer pingTick.Stop()
+
+	findTools := func(mcpInstance *McpClientInstance) {
+		if mcpInstance == nil {
+			return
+		}
+		tools, err := mcpInstance.mcpClient.ListTools(mcpInstance.ctx, mcp.ListToolsRequest{})
+		if err != nil {
+			logger.Errorf("获取工具列表失败: %v", err)
+			return
+		}
+		mcpInstance.tools = ConvertMcpToolListToInvokableToolList(tools.Tools, mcpInstance.serverName, mcpInstance.mcpClient)
+		logger.Infof("设备 %s 获取工具列表成功: %v", mcpInstance.serverName, mcpInstance.tools)
+	}
+
+	ping := func(mcpInstance *McpClientInstance) {
+		if mcpInstance == nil {
+			return
+		}
+		err := mcpInstance.mcpClient.Ping(mcpInstance.ctx)
+		if err == nil {
+			mcpInstance.lastPing = time.Now()
+		}
+	}
+
+	findTools(dc.wsEndPointMcp)
+	findTools(dc.iotOverMcp)
+	for {
+		select {
+		/*case <-dc.wsEndPointMcp.ctx.Done():
+		return*/
+		case <-tick.C:
+			findTools(dc.wsEndPointMcp)
+			findTools(dc.iotOverMcp)
+		case <-pingTick.C:
+			ping(dc.wsEndPointMcp)
+			ping(dc.iotOverMcp)
+		}
+	}
+}
+
+func (dc *McpClientInstance) sendInitlize(ctx context.Context) error {
 	initRequest := mcp.InitializeRequest{
-		Request: mcp.Request{
-			Method: string(mcp.MethodInitialize),
-		},
 		Params: mcp.InitializeParams{
 			ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
 			ClientInfo: mcp.Implementation{
-				Name:    "xiaozhi-esp32-client",
-				Version: "1.0.0",
+				Name:    "mcp-go",
+				Version: "0.1.0",
 			},
-			Capabilities: mcp.ClientCapabilities{
-				Experimental: make(map[string]any),
-			},
+			Capabilities: mcp.ClientCapabilities{},
 		},
 	}
 
-	jsonRPCRequest := mcp.JSONRPCRequest{
-		JSONRPC: mcp.JSONRPC_VERSION,
-		ID:      mcp.NewRequestId(1),
-		Request: initRequest.Request,
-		Params:  initRequest.Params,
-	}
-
-	return dc.conn.WriteJSON(jsonRPCRequest)
-}
-
-// handleMessages 处理来自MCP服务器的消息
-func (dc *DeviceMCPClient) handleMessages() {
-	defer dc.closeConnection()
-
-	for {
-		var msg mcp.JSONRPCMessage
-		err := dc.conn.ReadJSON(&msg)
-		if err != nil {
-			logger.Errorf("读取MCP消息失败: %v", err)
-			return
-		}
-
-		if err := dc.handleJSONRPCMessage(msg); err != nil {
-			logger.Errorf("处理MCP消息失败: %v", err)
-			continue
-		}
-	}
-}
-
-// handleJSONRPCMessage 处理JSON-RPC消息
-func (dc *DeviceMCPClient) handleJSONRPCMessage(msg mcp.JSONRPCMessage) error {
-	switch typedMsg := msg.(type) {
-	case mcp.JSONRPCRequest:
-		return dc.handleJSONRPCRequest(typedMsg)
-	case mcp.JSONRPCResponse:
-		return dc.handleJSONRPCResponse(typedMsg)
-	case mcp.JSONRPCNotification:
-		return dc.handleJSONRPCNotification(typedMsg)
-	case mcp.JSONRPCError:
-		return dc.handleJSONRPCError(typedMsg)
-	default:
-		return fmt.Errorf("未知的消息类型")
-	}
-}
-
-// handleJSONRPCRequest 处理来自MCP服务器的JSON-RPC请求
-func (dc *DeviceMCPClient) handleJSONRPCRequest(req mcp.JSONRPCRequest) error {
-	switch req.Method {
-	case string(mcp.MethodToolsList):
-		return dc.handleToolsListRequest(req)
-	case string(mcp.MethodToolsCall):
-		return dc.handleToolsCallRequest(req)
-	default:
-		return dc.sendJSONRPCError(req.ID, mcp.METHOD_NOT_FOUND, "方法未找到")
-	}
-}
-
-// handleToolsListRequest 处理工具列表请求
-func (dc *DeviceMCPClient) handleToolsListRequest(req mcp.JSONRPCRequest) error {
-	dc.mu.RLock()
-	tools := make([]mcp.Tool, 0, len(dc.tools))
-	for _, invokableTool := range dc.tools {
-		toolInfo, err := invokableTool.Info(context.Background())
-		if err != nil {
-			continue
-		}
-		tool := mcp.NewTool(
-			toolInfo.Name,
-			mcp.WithDescription(toolInfo.Desc),
-		)
-		tools = append(tools, tool)
-	}
-	dc.mu.RUnlock()
-
-	result := mcp.NewListToolsResult(tools, "")
-	response := mcp.JSONRPCResponse{
-		JSONRPC: mcp.JSONRPC_VERSION,
-		ID:      req.ID,
-		Result:  result,
-	}
-
-	return dc.conn.WriteJSON(response)
-}
-
-// handleToolsCallRequest 处理工具调用请求
-func (dc *DeviceMCPClient) handleToolsCallRequest(req mcp.JSONRPCRequest) error {
-	var callToolReq mcp.CallToolRequest
-	if paramsBytes, err := json.Marshal(req.Params); err == nil {
-		if err := json.Unmarshal(paramsBytes, &callToolReq.Params); err != nil {
-			return dc.sendJSONRPCError(req.ID, mcp.INVALID_PARAMS, "无效的参数")
-		}
-	} else {
-		return dc.sendJSONRPCError(req.ID, mcp.INVALID_PARAMS, "无效的参数")
-	}
-
-	toolName := callToolReq.Params.Name
-	if toolName == "" {
-		return dc.sendJSONRPCError(req.ID, mcp.INVALID_PARAMS, "缺少工具名称")
-	}
-
-	dc.mu.RLock()
-	tool, exists := dc.tools[toolName]
-	dc.mu.RUnlock()
-
-	if !exists {
-		return dc.sendJSONRPCError(req.ID, mcp.METHOD_NOT_FOUND, "工具未找到")
-	}
-
-	var arguments string
-	if args, ok := callToolReq.Params.Arguments.(string); ok {
-		arguments = args
-	}
-
-	result, err := tool.InvokableRun(context.Background(), arguments)
+	serverInfo, err := dc.mcpClient.Initialize(ctx, initRequest)
 	if err != nil {
-		return dc.sendJSONRPCError(req.ID, mcp.INTERNAL_ERROR, fmt.Sprintf("工具执行失败: %v", err))
+		fmt.Println("Failed to initialize: %v", err)
+		return err
 	}
-
-	toolResult := mcp.NewToolResultText(result)
-	response := mcp.JSONRPCResponse{
-		JSONRPC: mcp.JSONRPC_VERSION,
-		ID:      req.ID,
-		Result:  toolResult,
-	}
-
-	return dc.conn.WriteJSON(response)
+	dc.serverInfo = serverInfo
+	return nil
 }
 
-// handleJSONRPCResponse 处理JSON-RPC响应
-func (dc *DeviceMCPClient) handleJSONRPCResponse(resp mcp.JSONRPCResponse) error {
-	logger.Infof("收到MCP服务器响应: %+v", resp)
-	return nil
+func (dc *McpClientInstance) findTools() (*mcp.ListToolsResult, error) {
+	tools, err := dc.mcpClient.ListTools(dc.ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		logger.Errorf("获取工具列表失败: %v", err)
+		return nil, err
+	}
+	return tools, nil
 }
 
 // handleJSONRPCNotification 处理JSON-RPC通知
-func (dc *DeviceMCPClient) handleJSONRPCNotification(notif mcp.JSONRPCNotification) error {
+func (dc *McpClientInstance) handleJSONRPCNotification(notif mcp.JSONRPCNotification) {
 	logger.Infof("收到MCP服务器通知: %s", notif.Method)
-	return nil
+	return
 }
 
 // handleJSONRPCError 处理JSON-RPC错误
-func (dc *DeviceMCPClient) handleJSONRPCError(errMsg mcp.JSONRPCError) error {
+func (dc *McpClientInstance) handleJSONRPCError(errMsg mcp.JSONRPCError) error {
 	logger.Errorf("收到MCP服务器错误: %+v", errMsg.Error)
 	return nil
 }
 
-// sendJSONRPCError 发送JSON-RPC错误响应
-func (dc *DeviceMCPClient) sendJSONRPCError(id mcp.RequestId, code int, message string) error {
-	errorResponse := mcp.JSONRPCError{
-		JSONRPC: mcp.JSONRPC_VERSION,
-		ID:      id,
-		Error: struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-			Data    any    `json:"data,omitempty"`
-		}{
-			Code:    code,
-			Message: message,
-		},
-	}
-	return dc.conn.WriteJSON(errorResponse)
-}
-
-// keepAlive 保持连接活跃
-func (dc *DeviceMCPClient) keepAlive() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-dc.ctx.Done():
-			return
-		case <-ticker.C:
-			dc.mu.RLock()
-			if !dc.connected {
-				dc.mu.RUnlock()
-				continue
-			}
-			dc.mu.RUnlock()
-
-			if err := dc.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				logger.Errorf("发送ping消息失败: %v", err)
-				dc.closeConnection()
-				return
-			}
-		}
-	}
-}
-
-// closeConnection 关闭连接
-func (dc *DeviceMCPClient) closeConnection() {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
-
-	if dc.conn != nil {
-		dc.conn.Close()
-		dc.conn = nil
-	}
-	dc.connected = false
-}
-
-// RegisterTool 注册工具
-func (dc *DeviceMCPClient) RegisterTool(name string, tool tool.InvokableTool) {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
-	dc.tools[name] = tool
-}
-
-// UnregisterTool 注销工具
-func (dc *DeviceMCPClient) UnregisterTool(name string) {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
-	delete(dc.tools, name)
-}
-
-// Stop 停止MCP客户端
-func (dc *DeviceMCPClient) Stop() error {
-	dc.cancel()
-	dc.closeConnection()
-	logger.Info("MCP客户端已停止")
-	return nil
-}
-
 // GetTools 获取工具列表
-func (dc *DeviceMCPClient) GetTools() map[string]tool.InvokableTool {
-	dc.mu.RLock()
-	defer dc.mu.RUnlock()
-
+func (dc *DeviceMcpSession) GetTools() map[string]tool.InvokableTool {
 	tools := make(map[string]tool.InvokableTool)
-	for name, tool := range dc.tools {
-		tools[name] = tool
+	if dc.wsEndPointMcp != nil {
+		tools = dc.wsEndPointMcp.tools
+	}
+	if dc.iotOverMcp != nil {
+		for k, v := range dc.iotOverMcp.tools {
+			tools[k] = v
+		}
 	}
 	return tools
 }
 
-// Context 获取客户端的上下文
-func (dc *DeviceMCPClient) Context() context.Context {
-	return dc.ctx
-}
-
-// IsConnected 检查是否已连接
-func (dc *DeviceMCPClient) IsConnected() bool {
-	dc.mu.RLock()
-	defer dc.mu.RUnlock()
-	return dc.connected
-}
-
-// sendToolsListRequest 发送工具列表请求
-func (dc *DeviceMCPClient) sendToolsListRequest() error {
-	request := mcp.JSONRPCRequest{
-		JSONRPC: mcp.JSONRPC_VERSION,
-		ID:      mcp.NewRequestId(1),
-		Request: mcp.Request{
-			Method: string(mcp.MethodToolsList),
-		},
-		Params: struct{}{},
+func (dc *DeviceMcpSession) GetToolByName(toolName string) (tool.InvokableTool, bool) {
+	if dc.wsEndPointMcp != nil {
+		if tool, ok := dc.wsEndPointMcp.tools[toolName]; ok {
+			return tool, true
+		}
 	}
-	return dc.conn.WriteJSON(request)
-}
-
-// startToolsListRefresh 启动定期刷新工具列表
-func (dc *DeviceMCPClient) startToolsListRefresh() {
-	go func() {
-		ticker := time.NewTicker(30 * time.Second) // 每30秒刷新一次
-		defer ticker.Stop()
-
-		// 立即发送一次请求
-		if err := dc.sendToolsListRequest(); err != nil {
-			logger.Errorf("初始工具列表请求失败: %v", err)
+	if dc.iotOverMcp != nil {
+		if tool, ok := dc.iotOverMcp.tools[toolName]; ok {
+			return tool, true
 		}
-
-		for {
-			select {
-			case <-dc.ctx.Done():
-				return
-			case <-ticker.C:
-				if err := dc.sendToolsListRequest(); err != nil {
-					logger.Errorf("刷新工具列表失败: %v", err)
-				} else {
-					logger.Debugf("已发送工具列表请求")
-				}
-			}
-		}
-	}()
+	}
+	return nil, false
 }
