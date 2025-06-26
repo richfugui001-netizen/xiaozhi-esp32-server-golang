@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,7 +73,6 @@ func initConfig(configFile string) error {
 }
 
 func initLog() error {
-	// 不再检查stdout配置，统一输出到文件
 	// 输出到文件
 	binPath, _ := os.Executable()
 	baseDir := filepath.Dir(binPath)
@@ -96,11 +96,24 @@ func initLog() error {
 		os.Exit(1)
 		return err
 	}
-	logrus.SetOutput(writer)
-	logrus.SetFormatter(&logrus.TextFormatter{
-		TimestampFormat: "2006-01-02 15:04:05.000", //时间格式化，添加毫秒
-		ForceColors:     false,                     // 文件输出不启用颜色
-	})
+
+	// 根据配置决定输出目标
+	if viper.GetBool("log.stdout") {
+		// 同时输出到文件和标准输出
+		multiWriter := io.MultiWriter(writer, os.Stdout)
+		logrus.SetOutput(multiWriter)
+		logrus.SetFormatter(&logrus.TextFormatter{
+			TimestampFormat: "2006-01-02 15:04:05.000", //时间格式化，添加毫秒
+			ForceColors:     true,                      // 标准输出启用颜色
+		})
+	} else {
+		// 只输出到文件
+		logrus.SetOutput(writer)
+		logrus.SetFormatter(&logrus.TextFormatter{
+			TimestampFormat: "2006-01-02 15:04:05.000", //时间格式化，添加毫秒
+			ForceColors:     false,                     // 文件输出不启用颜色
+		})
+	}
 
 	// 禁用默认的调用者报告，使用自定义的caller字段
 	logrus.SetReportCaller(false)

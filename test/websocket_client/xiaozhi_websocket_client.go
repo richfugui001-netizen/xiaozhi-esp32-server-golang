@@ -509,7 +509,7 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 
 		detectStartTs = time.Now().UnixMilli()
 
-		emptyFrame := make([]byte, 320)
+		emptyFrame := make([]byte, 50)
 		for i := 0; i <= count; i++ {
 			conn.WriteMessage(websocket.BinaryMessage, emptyFrame)
 			time.Sleep(time.Duration(FrameDurationMs) * time.Millisecond)
@@ -538,7 +538,7 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 				continue
 			}
 			sendListenStart(conn, deviceID, mode)
-			genAndSendAudio(input, 50)
+			genAndSendAudio(input, 20)
 			if mode != "auto" {
 				sendListenStop(conn, deviceID)
 			}

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"os"
@@ -167,6 +168,29 @@ func main() {
 		} else {
 			fmt.Println("结论: 未检测到语音活动")
 		}
+	}
+
+	pcmData, err := ioutil.ReadFile("/tmp/temp.pcm")
+	if err != nil {
+		log.Fatalf("无法读取PCM文件: %v", err)
+	}
+	//将pcmData转换为float32，按20ms分帧（320个样本/帧）
+	frameSize := 320                 // 16000Hz * 0.02s = 320 samples per 20ms frame
+	totalSamples := len(pcmData) / 4 // 每个float32占4字节
+	pcmFloat32 = make([][]float32, 0)
+
+	for frameStart := 0; frameStart < totalSamples; frameStart += frameSize {
+		frameEnd := frameStart + frameSize
+		if frameEnd > totalSamples {
+			frameEnd = totalSamples // 处理最后一帧可能不足320样本的情况
+		}
+
+		frame := make([]float32, frameEnd-frameStart)
+		for i := frameStart; i < frameEnd; i++ {
+			byteOffset := i * 4
+			frame[i-frameStart] = math.Float32frombits(binary.LittleEndian.Uint32(pcmData[byteOffset : byteOffset+4]))
+		}
+		pcmFloat32 = append(pcmFloat32, frame)
 	}
 
 	//emptyFrame := make([]float32, 50)

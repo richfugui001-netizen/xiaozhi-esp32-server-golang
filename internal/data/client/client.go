@@ -676,6 +676,7 @@ type Asr struct {
 	AsrResultChannel chan asr_types.StreamingResult //流式输出asr识别到的结果片断
 	AsrResult        bytes.Buffer                   //保存此次识别到的最终文本
 	Statue           int                            //0:初始化 1:识别中 2:识别结束
+	AutoEnd          bool                           //auto_end是指使用asr自动判断结束，不再使用vad模块
 }
 
 func (a *Asr) Reset() {
@@ -693,7 +694,7 @@ func (a *Asr) RetireAsrResult(ctx context.Context) (string, error) {
 		case result, ok := <-a.AsrResultChannel:
 			log.Debugf("asr result: %s, ok: %+v, isFinal: %+v", result.Text, ok, result.IsFinal)
 			a.AsrResult.WriteString(result.Text)
-			if result.IsFinal {
+			if a.AutoEnd || result.IsFinal {
 				text := a.AsrResult.String()
 				return text, nil
 			}

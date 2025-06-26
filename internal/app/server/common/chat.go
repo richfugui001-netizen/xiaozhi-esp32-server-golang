@@ -99,6 +99,9 @@ func Restart(state *ClientState) error {
 				// 重置重试计数器
 				emptyRetryCount = 0
 
+				//当获取到asr结果时, 结束语音输入
+				state.OnVoiceSilence()
+
 				//发送asr消息
 				response := ServerMessage{
 					Type:      ServerMessageTypeStt,
