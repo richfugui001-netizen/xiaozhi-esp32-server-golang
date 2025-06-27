@@ -47,8 +47,7 @@ go build cmd/mqtt/*.go
 ### docker化部署
 
 
-![群二维码_0618(1)](https://github.com/user-attachments/assets/9f92a149-14f2-425f-bc8c-565e1ce73703)
-
+![微信图片_20250627135948(1)](https://github.com/user-attachments/assets/e2f42ec3-ffb3-4757-86ed-10f3131b3206)
 
 
 
