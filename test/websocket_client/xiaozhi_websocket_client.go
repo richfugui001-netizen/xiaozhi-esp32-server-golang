@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"xiaozhi-esp32-server-golang/internal/domain/audio"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/common"
 
@@ -450,6 +451,27 @@ func sendAudioFile(conn *websocket.Conn, filePath string) error {
 	return nil
 }
 
+func genEmptyOpusData(sampleRate int, channels int, frameDurationMs int, count int) []byte {
+	audioProcesser, err := audio.GetAudioProcesser(sampleRate, channels, frameDurationMs)
+	if err != nil {
+		return nil
+	}
+
+	frameSize := sampleRate * channels * frameDurationMs / 1000
+
+	pcmFrame := make([]int16, frameSize)
+	opusFrame := make([]byte, 1000)
+
+	n, err := audioProcesser.Encoder(pcmFrame, opusFrame)
+	if err != nil {
+		return nil
+	}
+
+	tmp := make([]byte, n)
+	copy(tmp, opusFrame)
+	return tmp
+}
+
 // 调用tts服务生成语音, 并编码至opus发送至服务端
 func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 	cosyVoiceConfig := map[string]interface{}{
@@ -494,6 +516,8 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 		}
 	*/
 
+	emptyOpusData := genEmptyOpusData(SampleRate, 1, FrameDurationMs, 1000)
+
 	genAndSendAudio := func(msg string, count int) error {
 		audioChan, err := ttsProvider.TextToSpeechStream(context.Background(), msg, SampleRate, 1, FrameDurationMs)
 		if err != nil {
@@ -509,9 +533,8 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 
 		detectStartTs = time.Now().UnixMilli()
 
-		emptyFrame := make([]byte, 50)
 		for i := 0; i <= count; i++ {
-			conn.WriteMessage(websocket.BinaryMessage, emptyFrame)
+			conn.WriteMessage(websocket.BinaryMessage, emptyOpusData)
 			time.Sleep(time.Duration(FrameDurationMs) * time.Millisecond)
 		}
 

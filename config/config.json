@@ -207,14 +207,16 @@
         "url": "ws://192.168.208.214:8989/xiaozhi/v1/"
       },
       "mqtt": {
+        "enable": false,
         "endpoint": "192.168.208.214"
       }
     },
     "external": {
       "websocket": {
-        "url": "wss://www.youdomain.cn/go_ws/xiaozhi/v1/"
+        "url": "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
       },
       "mqtt": {
+        "enable": false,
         "endpoint": "www.youdomain.cn"
       }
     }

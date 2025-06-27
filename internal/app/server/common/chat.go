@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"time"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	log "xiaozhi-esp32-server-golang/logger"
@@ -75,8 +76,11 @@ func Restart(state *ClientState) error {
 			}
 		}()
 
-		maxEmptyRetries := 5 // 最大空结果重试次数
-		emptyRetryCount := 0
+		//最大空闲 60s
+
+		var startIdleTime, maxIdleTime int64
+		startIdleTime = time.Now().Unix()
+		maxIdleTime = 60
 
 		for {
 			select {
@@ -97,7 +101,7 @@ func Restart(state *ClientState) error {
 
 			if text != "" {
 				// 重置重试计数器
-				emptyRetryCount = 0
+				startIdleTime = 0
 
 				//当获取到asr结果时, 结束语音输入
 				state.OnVoiceSilence()
@@ -127,16 +131,17 @@ func Restart(state *ClientState) error {
 				log.Debugf("ready Restart Asr, state.Status: %s", state.Status)
 				if state.Status == ClientStatusListening || state.Status == ClientStatusListenStop {
 					// text 为空，检查是否需要重新启动ASR
-					if emptyRetryCount < maxEmptyRetries {
-						log.Warnf("ASR识别结果为空，尝试重启ASR识别 (重试 %d/%d)", emptyRetryCount+1, maxEmptyRetries)
-						emptyRetryCount++
+					diffTs := time.Now().Unix() - startIdleTime
+					if startIdleTime > 0 && diffTs <= maxIdleTime {
+						log.Warnf("ASR识别结果为空，尝试重启ASR识别, diff ts: %s", diffTs)
 						if restartErr := restartAsrRecognition(ctx, state); restartErr != nil {
 							log.Errorf("重启ASR识别失败: %v", restartErr)
 							return
 						}
 						continue
 					} else {
-						log.Warnf("ASR识别结果为空，已达到最大重试次数 (%d)，停止重试", maxEmptyRetries)
+						log.Warnf("ASR识别结果为空，已达到最大空闲时间: %d", maxIdleTime)
+						state.Conn.Close()
 						return
 					}
 				}

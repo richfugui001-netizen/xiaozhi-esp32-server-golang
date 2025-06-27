@@ -316,18 +316,6 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 	if ip == "" {
 		ip = r.RemoteAddr
 	}
-	userName := struct {
-		Ip string `json:"ip"`
-	}{
-		Ip: ip,
-	}
-	userNameJson, err := json.Marshal(userName)
-	if err != nil {
-		log.Errorf("用户名序列化失败: %v", err)
-		http.Error(w, "内部服务器错误", http.StatusInternalServerError)
-		return
-	}
-	base64UserName := base64.StdEncoding.EncodeToString(userNameJson)
 
 	//从header头部获取Device-Id和Client-Id
 	deviceId := r.Header.Get("Device-Id")
@@ -340,9 +328,6 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deviceId = strings.ReplaceAll(deviceId, ":", "_")
-
-	mqttClientId := fmt.Sprintf("GID_test@@@%s@@@%s", deviceId, clientId)
-	pwd := util.Sha256Digest([]byte(mqttClientId))
 
 	//根据ip选择不同的配置
 	clientIp := r.Header.Get("X-Real-IP")
@@ -361,20 +346,14 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 		otaConfigPrefix = "ota.external."
 	}
 
+	mqttInfo := getMqttInfo(deviceId, clientId, otaConfigPrefix, ip)
 	//密码
 	respData := &OtaResponse{
 		Websocket: WebsocketInfo{
 			Url:   viper.GetString(otaConfigPrefix + "websocket.url"),
 			Token: viper.GetString(otaConfigPrefix + "websocket.token"),
 		},
-		Mqtt: MqttInfo{
-			Endpoint:       viper.GetString(otaConfigPrefix + "mqtt.endpoint"),
-			ClientId:       mqttClientId,
-			Username:       base64UserName,
-			Password:       pwd,
-			PublishTopic:   client.DeviceMockPubTopicPrefix,
-			SubscribeTopic: client.DeviceMockSubTopicPrefix,
-		},
+		Mqtt: mqttInfo,
 		ServerTime: ServerTimeInfo{
 			Timestamp:      time.Now().UnixMilli(),
 			TimezoneOffset: 480,
@@ -393,6 +372,35 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	return
+}
+
+func getMqttInfo(deviceId, clientId, otaConfigPrefix, ip string) *MqttInfo {
+	if !viper.GetBool(otaConfigPrefix + "mqtt.enable") {
+		return nil
+	}
+	userName := struct {
+		Ip string `json:"ip"`
+	}{
+		Ip: ip,
+	}
+	userNameJson, err := json.Marshal(userName)
+	if err != nil {
+		log.Errorf("用户名序列化失败: %v", err)
+		return nil
+	}
+	base64UserName := base64.StdEncoding.EncodeToString(userNameJson)
+
+	mqttClientId := fmt.Sprintf("GID_test@@@%s@@@%s", deviceId, clientId)
+	pwd := util.Sha256Digest([]byte(mqttClientId))
+
+	return &MqttInfo{
+		Endpoint:       viper.GetString(otaConfigPrefix + "mqtt.endpoint"),
+		ClientId:       mqttClientId,
+		Username:       base64UserName,
+		Password:       pwd,
+		PublishTopic:   client.DeviceMockPubTopicPrefix,
+		SubscribeTopic: client.DeviceMockSubTopicPrefix,
+	}
 }
 
 // handleVisionAPI 处理图片识别API

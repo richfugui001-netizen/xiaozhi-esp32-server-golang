@@ -46,3 +46,10 @@ func (a *AudioProcesser) DecoderFloat32(audio []byte, pcmData []float32) (int, e
 	}
 	return a.decoder.DecodeFloat32(audio, pcmData)
 }
+
+func (a *AudioProcesser) Encoder(pcmData []int16, audio []byte) (int, error) {
+	if a.encoder == nil {
+		return 0, errors.New("encoder is nil")
+	}
+	return a.encoder.Encode(pcmData, audio)
+}

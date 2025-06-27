@@ -2,11 +2,9 @@ package main
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math"
 	"os"
@@ -39,17 +37,6 @@ func genFloat32Empty(sampleRate int, durationMs int, channels int, count int) []
 func genOpusFloat32Empty(sampleRate int, durationMs int, channels int, count int) [][]float32 {
 	// 计算样本数
 	numSamples := int(float64(sampleRate) * float64(durationMs) / 1000.0)
-	// 创建静音缓冲区
-	var buf bytes.Buffer
-	// 32位浮点静音值为0.0
-	for i := 0; i < numSamples*channels; i++ {
-		binary.Write(&buf, binary.LittleEndian, float32(0.0))
-	}
-	//将数据转换为float32
-	float32Data := make([]float32, numSamples*channels)
-	for i := 0; i < numSamples*channels; i++ {
-		float32Data[i] = float32(buf.Bytes()[i])
-	}
 
 	audioProcesser, err := audio.GetAudioProcesser(sampleRate, channels, 20)
 	if err != nil {
@@ -57,19 +44,25 @@ func genOpusFloat32Empty(sampleRate int, durationMs int, channels int, count int
 		return nil
 	}
 
-	pcmFrame := make([]float32, numSamples)
+	pcmFrame := make([]int16, numSamples)
 
-	opusFrame := make([]byte, 50)
-	n, err := audioProcesser.DecoderFloat32(opusFrame, pcmFrame)
+	opusFrame := make([]byte, 1000)
+	n, err := audioProcesser.Encoder(pcmFrame, opusFrame)
 	if err != nil {
 		fmt.Printf("解码失败: %v", err)
 		return nil
 	}
 
+	//将opus数据转换为float32
+	pcmFloat32 := make([]float32, n)
+	for i := 0; i < n; i++ {
+		pcmFloat32[i] = float32(opusFrame[i])
+	}
+
 	result := make([][]float32, 0)
 	for i := 0; i < count; i++ {
 		tmp := make([]float32, n)
-		copy(tmp, pcmFrame[:n])
+		copy(tmp, pcmFloat32)
 		result = append(result, tmp)
 	}
 	return result
@@ -130,14 +123,11 @@ func main() {
 	fmt.Println("开始进行语音活动检测...")
 
 	// 对每一帧PCM数据进行VAD检测
-	speechFrames := 0
-	totalFrames := len(pcmFloat32)
 
 	detectVoice := func(voiceFloat32 [][]float32) {
+		speechFrames := 0
+		totalFrames := len(voiceFloat32)
 		for i, pcmFrame := range voiceFloat32 {
-			//进行pcmFrame做md5
-			byteData := float32ToByte(pcmFrame)
-			md5 := md5.Sum(byteData)
 			// 进行VAD检测
 			isVoice, err := vadImpl.IsVADExt(pcmFrame, sampleRate, 320)
 			if err != nil {
@@ -151,9 +141,9 @@ func main() {
 
 			if isVoice {
 				speechFrames++
-				fmt.Printf("第%d帧: 检测到语音活动, md5: %x\n", i+1, md5)
+				fmt.Printf("第%d帧: 检测到语音活动\n", i+1)
 			} else {
-				fmt.Printf("第%d帧: 无语音活动, md5: %x\n", i+1, md5)
+				fmt.Printf("第%d帧: 无语音活动\n", i+1)
 			}
 		}
 		// 输出统计结果
@@ -170,32 +160,9 @@ func main() {
 		}
 	}
 
-	pcmData, err := ioutil.ReadFile("/tmp/temp.pcm")
-	if err != nil {
-		log.Fatalf("无法读取PCM文件: %v", err)
-	}
-	//将pcmData转换为float32，按20ms分帧（320个样本/帧）
-	frameSize := 320                 // 16000Hz * 0.02s = 320 samples per 20ms frame
-	totalSamples := len(pcmData) / 4 // 每个float32占4字节
-	pcmFloat32 = make([][]float32, 0)
-
-	for frameStart := 0; frameStart < totalSamples; frameStart += frameSize {
-		frameEnd := frameStart + frameSize
-		if frameEnd > totalSamples {
-			frameEnd = totalSamples // 处理最后一帧可能不足320样本的情况
-		}
-
-		frame := make([]float32, frameEnd-frameStart)
-		for i := frameStart; i < frameEnd; i++ {
-			byteOffset := i * 4
-			frame[i-frameStart] = math.Float32frombits(binary.LittleEndian.Uint32(pcmData[byteOffset : byteOffset+4]))
-		}
-		pcmFloat32 = append(pcmFloat32, frame)
-	}
-
 	//emptyFrame := make([]float32, 50)
 	//pcmFloat32 = [][]float32{emptyFrame}
-	//pcmFloat32 = genFloat32Empty(sampleRate, 20, channels, 30)
+	pcmFloat32 = genOpusFloat32Empty(sampleRate, 20, channels, 1000)
 	detectVoice(pcmFloat32)
 }
 

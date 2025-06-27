@@ -163,7 +163,7 @@ type Board struct {
 */
 //如果已经注册了, 不会返回activation
 type OtaResponse struct {
-	Mqtt       MqttInfo        `json:"mqtt"`
+	Mqtt       *MqttInfo       `json:"mqtt,omitempty"`
 	ServerTime ServerTimeInfo  `json:"server_time"`
 	Firmware   FirmwareInfo    `json:"firmware"`
 	Activation *ActivationInfo `json:"activation,omitempty"`
