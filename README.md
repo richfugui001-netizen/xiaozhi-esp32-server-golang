@@ -9,6 +9,7 @@
 - 外部资源连接池复用，减少耗时
 - 支持 全局mcp、websocket接入点mcp、端侧mcp
 - 支持 视觉mcp
+- 基于eino框架进行llm处理
 
 # 快速开始
 [docker 快速开始](doc/docker.md)
@@ -47,8 +48,7 @@ go build cmd/mqtt/*.go
 ### docker化部署
 
 
-![群二维码_0618(1)](https://github.com/user-attachments/assets/9f92a149-14f2-425f-bc8c-565e1ce73703)
-
+![微信图片_20250627135948(1)](https://github.com/user-attachments/assets/e2f42ec3-ffb3-4757-86ed-10f3131b3206)
 
 
 
