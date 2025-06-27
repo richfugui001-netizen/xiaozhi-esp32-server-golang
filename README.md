@@ -9,6 +9,7 @@
 - 外部资源连接池复用，减少耗时
 - 支持 全局mcp、websocket接入点mcp、端侧mcp
 - 支持 视觉mcp
+- 基于eino框架进行llm处理
 
 # 快速开始
 [docker 快速开始](doc/docker.md)
