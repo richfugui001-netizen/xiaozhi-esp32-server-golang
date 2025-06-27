@@ -37,7 +37,7 @@ func (c *McpTransport) SendMcpMsg(payload []byte) error {
 					return err
 				}
 				initParams.Capabilities["vision"] = mcp.Vision{
-					Url:   viper.GetString("chat.vision_url"),
+					Url:   viper.GetString("vision.vision_url"),
 					Token: "1234567890",
 				}
 				request.Params = initParams
