@@ -198,4 +198,5 @@ type ActivationInfo struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	Challenge string `json:"challenge"`
+	TimeoutMs int    `json:"timeout_ms"`
 }
