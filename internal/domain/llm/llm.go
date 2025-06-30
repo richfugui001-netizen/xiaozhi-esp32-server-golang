@@ -62,7 +62,7 @@ func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, 
 		for {
 			select {
 			case <-ctx.Done():
-				log.Infof("上下文已取消，停止LLM响应处理: %v", ctx.Err())
+				log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
 				return
 			default:
 				msgChan, ok := llmResponse.(chan *schema.Message)
@@ -71,7 +71,11 @@ func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, 
 					return
 				}
 				select {
-				case message, ok := <-msgChan:
+				case <-ctx.Done():
+					log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
+					return
+				default:
+					message, ok := <-msgChan
 					if !ok {
 						remaining := buffer.String()
 						if remaining != "" {
@@ -134,8 +138,6 @@ func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, 
 							IsEnd:     false,
 						}
 					}
-				default:
-					// 防止阻塞
 				}
 			}
 		}

@@ -12,7 +12,7 @@ import (
 
 	"github.com/gopxl/beep"
 	"github.com/gorilla/websocket"
-	"github.com/jolestar/go-commons-pool/v2"
+	pool "github.com/jolestar/go-commons-pool/v2"
 )
 
 var (
@@ -288,6 +288,7 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 		for {
 			select {
 			case <-ctx.Done():
+				log.Debugf("TextToSpeechStream context done, exit")
 				p.returnConnection(wrapper)
 				return
 			default:

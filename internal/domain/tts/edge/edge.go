@@ -140,16 +140,32 @@ func (p *EdgeTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 	pipeReader, pipeWriter := io.Pipe()
 	// MP3转Opus解码器
 	go func() {
-		defer pipeWriter.Close()
-		for chunk := range chunkChan {
-			if chunk.Type == "audio" {
-				_, _ = pipeWriter.Write(chunk.Data)
+		defer func() {
+			pipeWriter.Close()
+			log.Debugf("EdgeTTS流式合成结束, 耗时: %d ms", time.Now().UnixMilli()-startTs)
+			if err := <-errChan; err != nil {
+				log.Errorf("EdgeTTS流式合成出错: %v", err)
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				log.Debugf("EdgeTTS Stream context done, exit")
+				return
+			default:
+				select {
+				case chunk, ok := <-chunkChan:
+					if !ok {
+						log.Debugf("EdgeTTS Stream channel closed, exit")
+						return
+					}
+					if chunk.Type == "audio" {
+						_, _ = pipeWriter.Write(chunk.Data)
+					}
+				}
 			}
 		}
-		log.Debugf("EdgeTTS流式合成结束, 耗时: %d ms", time.Now().UnixMilli()-startTs)
-		if err := <-errChan; err != nil {
-			log.Errorf("EdgeTTS流式合成出错: %v", err)
-		}
+
 	}()
 	// 启动MP3→Opus解码
 	go func() {

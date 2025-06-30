@@ -533,29 +533,41 @@ func (state *ClientState) SendTTSAudio(ctx context.Context, audioChan chan []byt
 	// 收集前180ms音频
 	for totalFrames < firstFrameCount {
 		select {
-		case frame, ok := <-audioChan:
-			if isStart && isStatistic {
-				log.Debugf("从接收音频结束 asr->llm->tts首帧 整体 耗时: %d ms", state.GetAsrLlmTtsDuration())
-				isStatistic = false
-			}
-			if !ok {
-				// 通道已关闭，发送已收集的帧并返回
-				for _, f := range preBuffer {
-					if err := state.actionSendAudioData(f); err != nil {
-						return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(f), err)
-					}
+		case <-ctx.Done():
+			log.Debugf("SendTTSAudio context done, exit, totalFrames: %d", totalFrames)
+			return nil
+		default:
+			select {
+			case frame, ok := <-audioChan:
+				if isStart && isStatistic {
+					log.Debugf("从接收音频结束 asr->llm->tts首帧 整体 耗时: %d ms", state.GetAsrLlmTtsDuration())
+					isStatistic = false
 				}
+				if !ok {
+					// 通道已关闭，发送已收集的帧并返回
+					for _, f := range preBuffer {
+						if err := state.actionSendAudioData(f); err != nil {
+							return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(f), err)
+						}
+					}
+					return nil
+				}
+				select {
+				case <-ctx.Done():
+					log.Debugf("SendTTSAudio context done, exit, totalFrames: %d", totalFrames)
+					return nil
+				default:
+					if err := state.actionSendAudioData(frame); err != nil {
+						return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
+					}
+					log.Debugf("发送 TTS 音频: %d 帧, len: %d", totalFrames, len(frame))
+					totalFrames++
+				}
+			case <-ctx.Done():
+				// 上下文已取消
+				log.Infof("SendTTSAudio context done, exit, totalFrames: %d", totalFrames)
 				return nil
 			}
-			if err := state.actionSendAudioData(frame); err != nil {
-				return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
-			}
-			log.Debugf("发送 TTS 音频: %d 帧, len: %d", totalFrames, len(frame))
-			totalFrames++
-		case <-ctx.Done():
-			// 上下文已取消
-			log.Infof("连接已关闭，终止音频发送，已发送 %d 帧", totalFrames)
-			return nil
 		}
 	}
 
@@ -575,20 +587,24 @@ func (state *ClientState) SendTTSAudio(ctx context.Context, audioChan chan []byt
 					return nil
 				}
 
-				// 发送当前帧
-				if err := state.actionSendAudioData(frame); err != nil {
-					return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
+				select {
+				case <-ctx.Done():
+					log.Debugf("SendTTSAudio context done, exit")
+					return nil
+				default:
+					// 发送当前帧
+					if err := state.actionSendAudioData(frame); err != nil {
+						return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
+					}
+					totalFrames++
+					//log.Debugf("发送 TTS 音频: %d 帧, len: %d", totalFrames, len(frame))
 				}
-				totalFrames++
-				//log.Debugf("发送 TTS 音频: %d 帧, len: %d", totalFrames, len(frame))
-
 			default:
 				// 没有帧可获取，等待下一个周期
 			}
-
 		case <-ctx.Done():
 			// 上下文已取消
-			log.Infof("连接已关闭，终止音频发送，已发送 %d 帧", totalFrames)
+			log.Infof("SendTTSAudio context done, exit, totalFrames: %d", totalFrames)
 			return nil
 		}
 	}

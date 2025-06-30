@@ -56,7 +56,7 @@ func Restart(state *ClientState) error {
 	ctx := state.GetSessionCtx()
 
 	//初始化asr相关
-	if state.ListenMode != "auto" {
+	if state.ListenMode == "manual" {
 		state.VoiceStatus.SetClientHaveVoice(true)
 	}
 
