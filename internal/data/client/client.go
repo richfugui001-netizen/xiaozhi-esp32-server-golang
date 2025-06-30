@@ -171,6 +171,10 @@ func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientStat
 		log.Errorf("创建 TTS 提供者失败: %v", err)
 		return nil, err
 	}
+	if ttsProvider == nil {
+		log.Errorf("创建 TTS 提供者失败: %v", err)
+		return nil, fmt.Errorf("创建 TTS 提供者失败: %v", err)
+	}
 	clientState.TTSProvider = ttsProvider
 
 	if err := clientState.Init(); err != nil {
@@ -592,6 +596,10 @@ func (state *ClientState) SendTTSAudio(ctx context.Context, audioChan chan []byt
 			return nil
 		}
 	}
+}
+
+func (state *ClientState) OnManualStop() {
+	state.OnVoiceSilence()
 }
 
 func (state *ClientState) OnVoiceSilence() {
