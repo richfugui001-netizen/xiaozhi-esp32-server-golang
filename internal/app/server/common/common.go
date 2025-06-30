@@ -75,15 +75,12 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 		sendTtsStartEndFunc(true)
 	}
 
-	defer func() {
-		sendTtsStartEndFunc(false)
-	}()
-
 	for {
 		select {
 		case <-ctx.Done():
 			// 上下文已取消，优先处理取消逻辑
 			log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
+			sendTtsStartEndFunc(false)
 			return false, nil
 		default:
 			// 非阻塞检查，如果ctx没有Done，继续处理LLM响应
@@ -128,10 +125,10 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 							if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
 								return true, err
 							}
-							//sendTtsStartEndFunc(false)
+							sendTtsStartEndFunc(false)
 						}
 					} else {
-						//sendTtsStartEndFunc(false)
+						sendTtsStartEndFunc(false)
 					}
 
 					return ok, nil
@@ -139,6 +136,7 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 			case <-ctx.Done():
 				// 上下文已取消，退出协程
 				log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
+				sendTtsStartEndFunc(false)
 				return false, nil
 			}
 		}
