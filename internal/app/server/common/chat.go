@@ -27,13 +27,10 @@ func handleListenStop(state *ClientState) error {
 	if state.ListenMode == "auto" {
 		state.CancelSessionCtx()
 	}
-	// 停止录音
-	state.SetClientHaveVoice(true)
-	state.SetClientVoiceStop(true)
-	state.SetClientHaveVoiceLastTime(0)
-	state.Destroy()
-	state.SetStartAsrTs()
-	state.SetStatus(ClientStatusListenStop)
+
+	//调用
+	state.OnManualStop()
+
 	return nil
 }
 
