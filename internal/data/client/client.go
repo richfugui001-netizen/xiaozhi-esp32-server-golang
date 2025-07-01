@@ -530,7 +530,7 @@ func (state *ClientState) SendTTSAudio(ctx context.Context, audioChan chan []byt
 
 	isStatistic := true
 	//首次发送180ms音频, 根据outputAudioFormat.FrameDuration计算
-	firstFrameCount := 180 / state.OutputAudioFormat.FrameDuration
+	firstFrameCount := 60 / state.OutputAudioFormat.FrameDuration
 	if firstFrameCount > 20 || firstFrameCount < 3 {
 		firstFrameCount = 5
 	}

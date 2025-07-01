@@ -110,6 +110,9 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 					//延迟50ms毫秒再发stop
 					//time.Sleep(50 * time.Millisecond)
 					//写到redis中
+					if len(requestEinoMessages) > 0 {
+						llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.User, requestEinoMessages[len(requestEinoMessages)-1].Content)
+					}
 					strFullText := fullText.String()
 					if strFullText != "" {
 						llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.Assistant, strFullText)
@@ -492,9 +495,9 @@ func handleListenMessage(clientState *ClientState, msg *ClientMessage) error {
 				log.Infof("唤醒词: %s", text)
 			} else {
 				// 否则开始对话
-				if err := startChat(clientState.GetSessionCtx(), clientState, text); err != nil {
+				/*if err := startChat(clientState.GetSessionCtx(), clientState, text); err != nil {
 					log.Errorf("开始对话失败: %v", err)
-				}
+				}*/
 			}
 		}
 	}
@@ -636,7 +639,7 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 	requestMessages = append(requestMessages, *userMessage)
 
 	// 添加用户消息到对话历史
-	llm_memory.Get().AddMessage(ctx, clientState.DeviceID, schema.User, text)
+	//llm_memory.Get().AddMessage(ctx, clientState.DeviceID, schema.User, text)
 
 	// 直接传递Eino原生消息，无需转换
 	requestEinoMessages := make([]*schema.Message, len(requestMessages))
