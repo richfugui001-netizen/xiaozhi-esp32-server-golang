@@ -219,6 +219,7 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 		for {
 			select {
 			case <-ctx.Done():
+				log.Debugf("DoubaoWs TextToSpeechStream context done, exit")
 				return
 			default:
 				_, message, err := conn.ReadMessage()

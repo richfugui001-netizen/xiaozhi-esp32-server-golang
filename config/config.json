@@ -1,4 +1,10 @@
 {
+  "server": {
+    "pprof": {
+      "enable": false,
+      "port": 6060
+    }
+  },
   "auth": {
     "enable": false
   },
