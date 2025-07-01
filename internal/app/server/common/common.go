@@ -495,9 +495,9 @@ func handleListenMessage(clientState *ClientState, msg *ClientMessage) error {
 				log.Infof("唤醒词: %s", text)
 			} else {
 				// 否则开始对话
-				/*if err := startChat(clientState.GetSessionCtx(), clientState, text); err != nil {
+				if err := startChat(clientState.GetSessionCtx(), clientState, text); err != nil {
 					log.Errorf("开始对话失败: %v", err)
-				}*/
+				}
 			}
 		}
 	}
