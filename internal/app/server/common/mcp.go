@@ -10,7 +10,6 @@ import (
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	log "xiaozhi-esp32-server-golang/logger"
 
-	"github.com/gorilla/websocket"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/spf13/viper"
 )
@@ -46,16 +45,7 @@ func (c *McpTransport) SendMcpMsg(payload []byte) error {
 		}
 	}
 
-	serverMsg := ServerMessage{
-		Type:      MessageTypeMcp,
-		SessionID: c.Client.SessionID,
-		PayLoad:   payload,
-	}
-	msg, err := json.Marshal(serverMsg)
-	if err != nil {
-		return err
-	}
-	return c.Client.Conn.WriteMessage(websocket.TextMessage, msg)
+	return SendMcpMsg(c.Client, payload)
 }
 
 func (c *McpTransport) RecvMcpMsg(timeOut int) ([]byte, error) {

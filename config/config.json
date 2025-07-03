@@ -227,7 +227,7 @@
       }
     }
   },
-  "wakeup_words": ["小智", "小知", "你好小智"],
+
   "mcp": {
     "global": {
       "enabled": true,
@@ -252,5 +252,6 @@
       "max_connections_per_device": 5
     }
   },
-  "enable_greeting": true
+  "enable_greeting": true,
+  "wakeup_words": ["小智", "小知", "你好小智"],
 }

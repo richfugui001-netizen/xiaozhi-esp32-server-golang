@@ -23,6 +23,7 @@ import (
 
 var detectStartTs int64
 var waitInput = make(chan struct{}, 1)
+var status = "idle"
 
 // 消息类型常量
 const (
@@ -344,6 +345,19 @@ func sendListenStop(conn *websocket.Conn, deviceID string) error {
 	return nil
 }
 
+func sendAbort(conn *websocket.Conn, deviceID string) error {
+	// 发送listen start消息
+	listenStartMsg := ClientMessage{
+		Type:     MessageTypeAbort,
+		DeviceID: deviceID,
+	}
+
+	if err := sendJSONMessage(conn, listenStartMsg); err != nil {
+		return fmt.Errorf("发送listen start消息失败: %v", err)
+	}
+	return nil
+}
+
 func sendListenDetect(conn *websocket.Conn, deviceID string, text string) error {
 	// 发送listen start消息
 	listenStartMsg := ClientMessage{
@@ -546,25 +560,33 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
+		fmt.Print("请输入要合成的文本（回车发送，直接回车退出）：")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Printf("读取输入失败: %v\n", err)
+			continue
+		}
+		input = strings.TrimSpace(input)
+		if input == "" {
+			//发送abort
+			sendAbort(conn, deviceID)
+			select {
+			case waitInput <- struct{}{}:
+				status = "idle"
+			default:
+			}
+			continue
+		}
+
 		select {
 		case <-waitInput:
-			fmt.Print("请输入要合成的文本（回车发送，直接回车退出）：")
-			input, err := reader.ReadString('\n')
-			if err != nil {
-				fmt.Printf("读取输入失败: %v\n", err)
-				continue
-			}
-			input = strings.TrimSpace(input)
-			if input == "" {
-				fmt.Println("输入为空，退出发送。")
-				waitInput <- struct{}{}
-				continue
-			}
-			sendListenStart(conn, deviceID, mode)
-			genAndSendAudio(input, 20)
-			if mode != "auto" {
-				sendListenStop(conn, deviceID)
-			}
+			go func() {
+				sendListenStart(conn, deviceID, mode)
+				genAndSendAudio(input, 20)
+				if mode != "auto" {
+					sendListenStop(conn, deviceID)
+				}
+			}()
 		}
 	}
 

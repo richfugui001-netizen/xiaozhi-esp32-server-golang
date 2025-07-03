@@ -291,7 +291,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			// 同时通过音频处理器处理
-			if ok := common.RecvAudio(clientState, message); !ok {
+			if ok := common.HandleAudioMessage(clientState, message); !ok {
 				log.Errorf("音频缓冲区已满: %v", err)
 			}
 		} else if messageType == websocket.CloseMessage {

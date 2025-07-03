@@ -1,5 +1,11 @@
 package msg
 
+import (
+	"encoding/json"
+
+	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
+)
+
 const (
 	MDeviceMockPubTopicPrefix = "device-server"
 	MDeviceMockSubTopicPrefix = "null"
@@ -11,11 +17,12 @@ const (
 
 // 消息类型常量
 const (
-	MessageTypeHello  = "hello"  // 握手消息
-	MessageTypeAbort  = "abort"  // 中止消息
-	MessageTypeListen = "listen" // 监听消息
-	MessageTypeIot    = "iot"    // 物联网消息
-	MessageTypeMcp    = "mcp"    // MCP消息
+	MessageTypeHello   = "hello"   // 握手消息
+	MessageTypeAbort   = "abort"   // 中止消息
+	MessageTypeListen  = "listen"  // 监听消息
+	MessageTypeIot     = "iot"     // 物联网消息
+	MessageTypeMcp     = "mcp"     // MCP消息
+	MessageTypeGoodBye = "goodbye" // 再见消息
 )
 
 // 服务器消息类型常量
@@ -38,3 +45,16 @@ const (
 	MessageStateAbort         = "abort"          // 中止状态
 	MessageStateSuccess       = "success"        // 成功状态
 )
+
+// ServerMessage 表示服务器消息
+type ServerMessage struct {
+	Type        string                   `json:"type"`
+	Text        string                   `json:"text,omitempty"`
+	SessionID   string                   `json:"session_id,omitempty"`
+	Version     int                      `json:"version"`
+	State       string                   `json:"state,omitempty"`
+	Transport   string                   `json:"transport,omitempty"`
+	AudioFormat *types_audio.AudioFormat `json:"audio_params,omitempty"`
+	Emotion     string                   `json:"emotion,omitempty"`
+	PayLoad     json.RawMessage          `json:"payload,omitempty"`
+}

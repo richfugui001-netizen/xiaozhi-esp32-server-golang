@@ -148,7 +148,7 @@ func (s *UdpServer) processPacket(addr *net.UDPAddr, data []byte) {
 		return
 	}
 	// 同时通过音频处理器处理
-	if ok := common.RecvAudio(clientState, decrypted); !ok {
+	if ok := common.HandleAudioMessage(clientState, decrypted); !ok {
 		Errorf("音频缓冲区已满: %v", err)
 	}
 }
