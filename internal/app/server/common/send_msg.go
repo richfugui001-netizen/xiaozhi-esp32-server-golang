@@ -76,6 +76,8 @@ func SendSentenceStart(clientState *ClientState, text string) error {
 		return err
 	}
 	clientState.SetStatus(ClientStatusTTSStart)
+
+	return nil
 }
 
 func SendSentenceEnd(clientState *ClientState, text string) error {
@@ -90,6 +92,7 @@ func SendSentenceEnd(clientState *ClientState, text string) error {
 		return err
 	}
 	clientState.SetStatus(ClientStatusTTSStart)
+	return nil
 }
 
 func SendMcpMsg(clientState *ClientState, payload []byte) error {

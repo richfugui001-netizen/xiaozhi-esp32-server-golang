@@ -83,7 +83,7 @@ func handleHelloMessage(clientState *ClientState, msg *ClientMessage) error {
 	ProcessVadAudio(clientState)
 
 	// 发送 hello 响应
-	return SendHello(clientState, "欢迎连接到小智服务器", session.ID, "websocket", &clientState.OutputAudioFormat)
+	return SendHello(clientState, "websocket", &clientState.OutputAudioFormat)
 }
 
 // handleListenMessage 处理监听消息
@@ -145,7 +145,7 @@ func handleAbortMessage(clientState *ClientState, msg *ClientMessage) error {
 // handleIoTMessage 处理物联网消息
 func handleIoTMessage(clientState *ClientState, msg *ClientMessage) error {
 	// 获取客户端状态
-	sessionID := clientState.SessionID
+	//sessionID := clientState.SessionID
 
 	// 验证设备ID
 	/*
