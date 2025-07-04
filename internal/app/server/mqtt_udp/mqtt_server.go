@@ -116,11 +116,14 @@ func (s *MqttServer) checkClientActive() error {
 }
 
 func (s *MqttServer) SetClient(clientState *ClientState) {
+	Debugf("SetClient, deviceId: %s", clientState.DeviceID)
 	s.deviceId2ClientState.Store(clientState.DeviceID, clientState)
 }
 
 func (s *MqttServer) getClient(deviceId string) *ClientState {
+	Debugf("getClient, deviceId: %s", deviceId)
 	if clientState, ok := s.deviceId2ClientState.Load(deviceId); ok {
+		Debugf("getClient, clientState: %+v", clientState)
 		return clientState.(*ClientState)
 	}
 	return nil
@@ -135,13 +138,22 @@ func (s *MqttServer) handleMessage(client mqtt.Client, msg mqtt.Message) {
 		return
 	}
 
-	deviceId := s.getDeviceIdByTopic(msg.Topic())
+	if clientMsg.Type == MessageTypeHello {
+		s.handleHello(msg, clientMsg)
+		return
+	}
+
+	_, deviceId := s.getDeviceIdByTopic(msg.Topic())
 	if deviceId == "" {
 		Errorf("deviceId is empty, msg: %+v", msg)
 		return
 	}
 
 	clientState := s.getClient(deviceId)
+	if clientState == nil {
+		Errorf("mqtt handleMessage, clientState is nil, deviceId: %s", deviceId)
+		return
+	}
 
 	if clientState != nil {
 		clientState.UpdateLastActiveTs()
@@ -163,15 +175,15 @@ func (s *MqttServer) handleMessage(client mqtt.Client, msg mqtt.Message) {
 	}
 }
 
-func (s *MqttServer) getDeviceIdByTopic(topic string) string {
-	var macAddr string
+func (s *MqttServer) getDeviceIdByTopic(topic string) (string, string) {
+	var topicMacAddr, deviceId string
 	//根据topic(/p2p/device_public/mac_addr)解析出来mac_addr
 	strList := strings.Split(topic, "/")
 	if len(strList) == 4 {
-		macAddr = strList[3]
-		macAddr = strings.ReplaceAll(macAddr, "_", ":")
+		topicMacAddr = strList[3]
+		deviceId = strings.ReplaceAll(topicMacAddr, "_", ":")
 	}
-	return macAddr
+	return topicMacAddr, deviceId
 }
 
 // handleHello 处理hello消息
@@ -189,16 +201,16 @@ func (s *MqttServer) handleHello(msg mqtt.Message, clientMsg client.ClientMessag
 		return
 	}
 
-	macAddr := s.getDeviceIdByTopic(msg.Topic())
-	if macAddr == "" {
+	topicMacAddr, deviceId := s.getDeviceIdByTopic(msg.Topic())
+	if deviceId == "" {
 		Errorf("mac_addr解析失败: %v", msg.Topic())
 		return
 	}
 
-	publicTopic := fmt.Sprintf("%s%s", client.ServerPubTopicPrefix, macAddr)
+	publicTopic := fmt.Sprintf("%s%s", client.ServerPubTopicPrefix, topicMacAddr)
 
 	//生成clientState结构
-	clientState, err := client.GenMqttUdpClientState(macAddr, publicTopic, s.client, session, &clientMsg)
+	clientState, err := client.GenMqttUdpClientState(deviceId, publicTopic, s.client, session, &clientMsg)
 	if err != nil {
 		Errorf("生成clientState失败: %v", err)
 		return
