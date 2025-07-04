@@ -169,6 +169,7 @@ func (s *MqttServer) getDeviceIdByTopic(topic string) string {
 	strList := strings.Split(topic, "/")
 	if len(strList) == 4 {
 		macAddr = strList[3]
+		macAddr = strings.ReplaceAll(macAddr, "_", ":")
 	}
 	return macAddr
 }
