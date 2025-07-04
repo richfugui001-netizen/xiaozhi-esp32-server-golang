@@ -1,33 +1,38 @@
-// xiaozhi-esp32-server-golang 配置文件说明
-//
-// 本配置文件为 AI 语音物联网后端服务的主配置，涵盖了服务启动、协议接入、AI能力、日志、MCP等所有核心参数。
-// 主要配置项说明如下：
-//
-// 1. server/pprof：性能分析相关配置，建议开发/调试时开启。
-// 2. chat：聊天相关参数，控制会话空闲和静默时长。
-// 3. auth：用户认证开关，后续可扩展权限体系。
-// 4. system_prompt：全局系统提示词，影响 LLM 聊天风格。
-// 5. log：日志路径、级别、轮转等配置。
-// 6. redis：如需使用 Redis 存储，需配置此项。
-// 7. websocket：WebSocket 服务监听的 IP 和端口。
-// 8. mqtt：外部 MQTT 服务器连接参数。
-// 9. mqtt_server：内置 MQTT 服务器参数（可选 TLS）。
-// 10. udp：UDP 服务器相关参数。
-// 11. vad：语音活动检测（VAD）相关配置，支持 webrtc_vad/silero_vad。
-// 12. asr：自动语音识别（ASR）配置，支持 funasr。
-// 13. tts：语音合成（TTS）配置，支持多种引擎（doubao, edge, xiaozhi等）。
-// 14. llm：大语言模型（LLM）配置，支持多种 OpenAI 兼容模型。
-// 15. vision：视觉模型相关配置。
-// 16. ota：OTA 接口返回信息，适配不同环境。
-// 17. wakeup_words：唤醒词列表。
-// 18. mcp：MCP 多协议接入配置，支持全局和设备端。
-// 19. enable_greeting：是否启用启动问候语。
-//
-// 修改建议：
-// - 仅需根据实际部署环境调整 IP、端口、密钥、API Key 等参数。
-// - 详细参数释义请参考每个模块的注释。
-// - 如需扩展 AI 能力，可在 llm/tts/vad/asr/vision 等模块补充 provider 及参数。
-//
+# xiaozhi-esp32-server-golang 配置文件说明
+
+本配置文件为 AI 语音物联网后端服务的主配置，涵盖了服务启动、协议接入、AI能力、日志、MCP等所有核心参数。
+
+## 主要配置项说明
+
+- **server/pprof**：性能分析相关配置，建议开发/调试时开启。
+- **chat**：聊天相关参数，控制会话空闲和静默时长。
+- **auth**：用户认证开关，后续可扩展权限体系。
+- **system_prompt**：全局系统提示词，影响 LLM 聊天风格。
+- **log**：日志路径、级别、轮转等配置。
+- **redis**：如需使用 Redis 存储，需配置此项。
+- **websocket**：WebSocket 服务监听的 IP 和端口。
+- **mqtt**：外部 MQTT 服务器连接参数。
+- **mqtt_server**：内置 MQTT 服务器参数（可选 TLS）。
+- **udp**：UDP 服务器相关参数。
+- **vad**：语音活动检测（VAD）相关配置，支持 webrtc_vad/silero_vad。
+- **asr**：自动语音识别（ASR）配置，支持 funasr。
+- **tts**：语音合成（TTS）配置，支持多种引擎（doubao, edge, xiaozhi等）。
+- **llm**：大语言模型（LLM）配置，支持多种 OpenAI 兼容模型。
+- **vision**：视觉模型相关配置。
+- **ota**：OTA 接口返回信息，适配不同环境。
+- **wakeup_words**：唤醒词列表。
+- **mcp**：MCP 多协议接入配置，支持全局和设备端。
+- **enable_greeting**：是否启用启动问候语。
+
+### 修改建议
+
+- 仅需根据实际部署环境调整 IP、端口、密钥、API Key 等参数。
+- 详细参数释义请参考每个模块的注释。
+- 如需扩展 AI 能力，可在 llm/tts/vad/asr/vision 等模块补充 provider 及参数。
+
+## 配置文件示例
+
+```json
 {
   // 性能分析/pprof配置
   "server": {
