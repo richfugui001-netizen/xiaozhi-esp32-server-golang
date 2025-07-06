@@ -3,6 +3,7 @@ package mqtt_udp
 import (
 	"crypto/aes"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -90,8 +91,8 @@ func (s *UdpServer) handlePackets() {
 	}
 }
 
-func (s *UdpServer) getSession(nonce string) *UdpSession {
-	val, ok := s.nonce2Session.Load(nonce)
+func (s *UdpServer) getSession(connID string) *UdpSession {
+	val, ok := s.nonce2Session.Load(connID)
 	if ok {
 		return val.(*UdpSession)
 	}
@@ -112,11 +113,10 @@ func (s *UdpServer) processPacket(addr *net.UDPAddr, data []byte) {
 	if clientState == nil {
 		// 获取会话ID
 		fullNonce := data[:16]
-		realNonce := fullNonce[4:12]
-
-		strRealNonce := hex.EncodeToString(realNonce)
-		Infof("收到数据包, fullNonce: %s, realNonce: %s", hex.EncodeToString(fullNonce), strRealNonce)
-		session := s.getSession(strRealNonce)
+		connID := fullNonce[4:8] // 取5-8字节作为连接id
+		strConnID := hex.EncodeToString(connID)
+		Infof("收到数据包, fullNonce: %s, connID: %s", hex.EncodeToString(fullNonce), strConnID)
+		session := s.getSession(strConnID)
 		if session == nil {
 			Warnf("session不存在 addr: %s", addr)
 			return
@@ -174,11 +174,20 @@ func (s *UdpServer) CreateSession(clientID string) *UdpSession {
 	// 生成会话ID
 	sessionID := generateSessionID()
 
-	// 生成AES密钥和nonce
+	// 生成AES密钥
 	key := make([]byte, 16)
-	nonce := make([]byte, 8)
 	rand.Read(key)
-	rand.Read(nonce)
+
+	// 生成4字节连接id
+	connID := make([]byte, 4)
+	rand.Read(connID)
+
+	// 4字节时间戳
+	timestamp := make([]byte, 4)
+	binary.BigEndian.PutUint32(timestamp, uint32(time.Now().Unix()))
+
+	// 拼接nonce: 4字节连接id + 4字节时间戳
+	nonce := append(connID, timestamp...)
 
 	// 创建AES块
 	block, err := aes.NewCipher(key)
@@ -228,20 +237,26 @@ func (s *UdpServer) CreateSession(clientID string) *UdpSession {
 		}
 	}()
 
-	strNonce := hex.EncodeToString(nonceBytes[:])
-	s.nonce2Session.Store(strNonce, session)
+	// 只用连接id（前4字节）作为key
+	strConnID := hex.EncodeToString(connID)
+	s.SetNonce2Session(strConnID, session)
 
 	return session
 }
 
 // CloseSession 关闭会话
-func (s *UdpServer) CloseSession(sessionID string) {
-	s.nonce2Session.Delete(sessionID)
+func (s *UdpServer) CloseSession(connID string) {
+	s.nonce2Session.Delete(connID)
+}
+
+func (s *UdpServer) SetNonce2Session(connID string, session *UdpSession) {
+	Debugf("SetNonce2Session, connID: %s, session: %+v", connID, session)
+	s.nonce2Session.Store(connID, session)
 }
 
 // GetSession 获取会话信息
-func (s *UdpServer) GetNonce(nonce string) *UdpSession {
-	val, ok := s.nonce2Session.Load(nonce)
+func (s *UdpServer) GetNonce(connID string) *UdpSession {
+	val, ok := s.nonce2Session.Load(connID)
 	if ok {
 		return val.(*UdpSession)
 	}
