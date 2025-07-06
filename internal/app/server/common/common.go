@@ -41,6 +41,7 @@ type ServerMessage struct {
 	PayLoad     json.RawMessage          `json:"payload,omitempty"`
 }
 
+// HandleLLMResponse 处理LLM响应
 func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
 	log.Debugf("HandleLLMResponse start")
 	defer log.Debugf("HandleLLMResponse end")
@@ -76,58 +77,71 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 
 	for {
 		select {
-		case llmResponse, ok := <-llmResponseChannel:
-			if !ok {
-				// 通道已关闭，退出协程
-				log.Infof("LLM 响应通道已关闭，退出协程")
-				return true, nil
-			}
-
-			log.Debugf("LLM 响应: %+v", llmResponse)
-
-			if len(llmResponse.ToolCalls) > 0 {
-				log.Debugf("获取到工具: %+v", llmResponse.ToolCalls)
-				toolCalls = append(toolCalls, llmResponse.ToolCalls...)
-			}
-
-			if llmResponse.Text != "" {
-				// 处理文本内容响应
-				if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
-					return true, err
+		case <-ctx.Done():
+			// 上下文已取消，优先处理取消逻辑
+			log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
+			sendTtsStartEndFunc(false)
+			return false, nil
+		default:
+			// 非阻塞检查，如果ctx没有Done，继续处理LLM响应
+			select {
+			case llmResponse, ok := <-llmResponseChannel:
+				if !ok {
+					// 通道已关闭，退出协程
+					log.Infof("LLM 响应通道已关闭，退出协程")
+					return true, nil
 				}
-			}
 
-			if llmResponse.IsEnd {
-				//延迟50ms毫秒再发stop
-				//time.Sleep(50 * time.Millisecond)
-				//写到redis中
-				strFullText := fullText.String()
-				if strFullText != "" {
-					llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.Assistant, strFullText)
+				log.Debugf("LLM 响应: %+v", llmResponse)
+
+				if len(llmResponse.ToolCalls) > 0 {
+					log.Debugf("获取到工具: %+v", llmResponse.ToolCalls)
+					toolCalls = append(toolCalls, llmResponse.ToolCalls...)
 				}
-				if len(toolCalls) > 0 {
-					invokeToolSuccess, err := handleToolCallResponse(ctx, state, requestEinoMessages, toolCalls)
-					if err != nil {
-						log.Errorf("处理工具调用响应失败: %v", err)
-						return true, fmt.Errorf("处理工具调用响应失败: %v", err)
+
+				if llmResponse.Text != "" {
+					// 处理文本内容响应
+					if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
+						return true, err
 					}
-					if !invokeToolSuccess {
-						//工具调用失败
-						if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
-							return true, err
+				}
+
+				if llmResponse.IsEnd {
+					//延迟50ms毫秒再发stop
+					//time.Sleep(50 * time.Millisecond)
+					//写到redis中
+					if len(requestEinoMessages) > 0 {
+						llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.User, requestEinoMessages[len(requestEinoMessages)-1].Content)
+					}
+					strFullText := fullText.String()
+					if strFullText != "" {
+						llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.Assistant, strFullText)
+					}
+					if len(toolCalls) > 0 {
+						invokeToolSuccess, err := handleToolCallResponse(ctx, state, requestEinoMessages, toolCalls)
+						if err != nil {
+							log.Errorf("处理工具调用响应失败: %v", err)
+							return true, fmt.Errorf("处理工具调用响应失败: %v", err)
 						}
+						if !invokeToolSuccess {
+							//工具调用失败
+							if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
+								return true, err
+							}
+							sendTtsStartEndFunc(false)
+						}
+					} else {
 						sendTtsStartEndFunc(false)
 					}
-				} else {
-					sendTtsStartEndFunc(false)
-				}
 
-				return ok, nil
+					return ok, nil
+				}
+			case <-ctx.Done():
+				// 上下文已取消，退出协程
+				log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
+				sendTtsStartEndFunc(false)
+				return false, nil
 			}
-		case <-ctx.Done():
-			// 上下文已取消，退出协程
-			log.Infof("设备 %s 连接已关闭，停止处理LLM响应", state.DeviceID)
-			return false, nil
 		}
 	}
 }
@@ -139,7 +153,7 @@ func handleTextResponse(ctx context.Context, state *ClientState, llmResponse llm
 	}
 
 	// 使用带上下文的TTS处理
-	outputChan, err := state.TTSProvider.TextToSpeechStream(state.Ctx, llmResponse.Text, state.OutputAudioFormat.SampleRate, state.OutputAudioFormat.Channels, state.OutputAudioFormat.FrameDuration)
+	outputChan, err := state.TTSProvider.TextToSpeechStream(ctx, llmResponse.Text, state.OutputAudioFormat.SampleRate, state.OutputAudioFormat.Channels, state.OutputAudioFormat.FrameDuration)
 	if err != nil {
 		log.Errorf("生成 TTS 音频失败: %v", err)
 		return fmt.Errorf("生成 TTS 音频失败: %v", err)
@@ -625,10 +639,7 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 	requestMessages = append(requestMessages, *userMessage)
 
 	// 添加用户消息到对话历史
-	llm_memory.Get().AddMessage(ctx, clientState.DeviceID, schema.User, text)
-
-	ctx, cancel := context.WithCancel(ctx)
-	_ = cancel
+	//llm_memory.Get().AddMessage(ctx, clientState.DeviceID, schema.User, text)
 
 	// 直接传递Eino原生消息，无需转换
 	requestEinoMessages := make([]*schema.Message, len(requestMessages))
@@ -689,12 +700,14 @@ func DoLLmRequest(ctx context.Context, clientState *ClientState, requestEinoMess
 	}
 
 	go func() {
+		log.Debugf("DoLLmRequest goroutine开始 - SessionID: %s, context状态: %v", sessionID, ctx.Err())
 		ok, err := HandleLLMResponse(ctx, clientState, requestEinoMessages, responseSentences)
 		if err != nil {
 			log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", sessionID, err)
 			clientState.CancelSessionCtx()
 		}
 
+		log.Debugf("DoLLmRequest goroutine结束 - SessionID: %s, ok: %v", sessionID, ok)
 		_ = ok
 		/*
 			if ok {

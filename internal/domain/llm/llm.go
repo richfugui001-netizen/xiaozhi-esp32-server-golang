@@ -59,17 +59,17 @@ func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, 
 			log.Debugf("full Response with %d tools, fullText: %s", len(tools), fullText)
 			close(sentenceChannel)
 		}()
+		msgChan, ok := llmResponse.(chan *schema.Message)
+		if !ok {
+			log.Errorf("llmResponse 断言为 chan *schema.Message 失败")
+			return
+		}
 		for {
 			select {
 			case <-ctx.Done():
-				log.Infof("上下文已取消，停止LLM响应处理: %v", ctx.Err())
+				log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
 				return
 			default:
-				msgChan, ok := llmResponse.(chan *schema.Message)
-				if !ok {
-					log.Errorf("llmResponse 断言为 chan *schema.Message 失败")
-					return
-				}
 				select {
 				case message, ok := <-msgChan:
 					if !ok {
@@ -135,7 +135,7 @@ func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, 
 						}
 					}
 				default:
-					// 防止阻塞
+
 				}
 			}
 		}

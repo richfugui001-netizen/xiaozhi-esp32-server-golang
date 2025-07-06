@@ -218,6 +218,7 @@ func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
 	for {
 		select {
 		case <-d.ctx.Done():
+			log.Debugf("wavDecoder context done, exit")
 			return nil
 		default:
 			// 读取PCM数据
@@ -326,6 +327,7 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 	for {
 		select {
 		case <-d.ctx.Done():
+			log.Debugf("mp3Decoder context done, exit")
 			return nil
 		default:
 			// 从MP3读取PCM数据
