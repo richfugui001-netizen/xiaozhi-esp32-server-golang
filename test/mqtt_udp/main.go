@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -129,13 +130,15 @@ func main1() {
 }
 
 func main() {
+	otaUrl := flag.String("ota", "https://api.tenclass.net/xiaozhi/ota/", "OTA服务器地址")
+	deviceID := flag.String("device", "ba:8f:17:de:94:94", "设备ID")
+	flag.Parse()
 
-	deviceID := "ba:8f:17:de:94:94"
 	clientID := "e4b0c442-98fc-4e1b-8c3d-6a5b6a5b6a6d"
 	boardName := "lc-esp32-s3"
 
 	// Get device configuration
-	deviceInfo := CreateDefaultDeviceInfo(clientID, deviceID, boardName)
+	deviceInfo := CreateDefaultDeviceInfo(clientID, *deviceID, boardName)
 
 	// 生成序列号和HMAC密钥
 	uuid1 := strings.ReplaceAll(uuid.New().String(), "-", "")
@@ -149,7 +152,7 @@ func main() {
 	fmt.Printf("生成的序列号: %s\n", serialNumber)
 	fmt.Printf("生成的HMAC密钥: %s\n", hmacKey)
 
-	config, err := GetDeviceConfig(deviceInfo, deviceID, clientID)
+	config, err := GetDeviceConfig(deviceInfo, *deviceID, clientID, *otaUrl)
 	if err != nil {
 		fmt.Println("获取设备配置失败:", err)
 		os.Exit(1)
@@ -159,7 +162,7 @@ func main() {
 	if config.Activation.Code != "" {
 		fmt.Println("设备激活中, 验证码: ", config.Activation.Code)
 		// 进行激活请求
-		_, err := activateDevice(deviceID, clientID, serialNumber, hmacKey, config.Activation.Challenge)
+		_, err := activateDevice(*deviceID, clientID, serialNumber, hmacKey, config.Activation.Challenge, *otaUrl)
 		if err != nil {
 			fmt.Println("设备激活失败:", err)
 			os.Exit(1)
@@ -195,13 +198,29 @@ func main() {
 func connectMQTT(config *ServerResponse) (mqtt.Client, bool) {
 	// Setup MQTT client with configuration from server
 	opts := mqtt.NewClientOptions()
+
+	endpoint := config.MQTT.Endpoint
+	port := "8883"
+	protocol := "tls"
+	if strings.Contains(endpoint, ":") {
+		parts := strings.Split(endpoint, ":")
+		endpoint = parts[0]
+		port = parts[1]
+	}
+	if port != "8883" {
+		protocol = "tcp"
+	}
+	brokerUrl := fmt.Sprintf("%s://%s:%s", protocol, endpoint, port)
+
 	// 设置 TLS 配置
 	tlsConfig := &tls.Config{
-		ServerName: config.MQTT.Endpoint,
+		ServerName: endpoint,
 		//InsecureSkipVerify: true, // 跳过证书验证，仅用于测试环境
 	}
-	opts.SetTLSConfig(tlsConfig)
-	opts.AddBroker(fmt.Sprintf("tcp://%s:2883", config.MQTT.Endpoint))
+	if protocol == "tls" {
+		opts.SetTLSConfig(tlsConfig)
+	}
+	opts.AddBroker(brokerUrl)
 	opts.SetClientID(config.MQTT.ClientID)
 	opts.SetUsername(config.MQTT.Username)
 	opts.SetPassword(config.MQTT.Password)
@@ -600,7 +619,7 @@ func sendIotMessage(mqttClient mqtt.Client, sessionID string) error {
 // 调用tts服务生成语音, 并编码至opus发送至服务端
 func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDPClient, udpConfig *UDPConfig) error {
 	cosyVoiceConfig := map[string]interface{}{
-		"api_url":        "https://tts.linkerai.top/tts",
+		"api_url":        "https://tts.linkerai.cn/tts",
 		"spk_id":         "OUeAo1mhq6IBExi",
 		"frame_duration": frameDuration,
 		"target_sr":      audioRate,

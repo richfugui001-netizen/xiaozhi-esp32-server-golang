@@ -40,7 +40,7 @@ type MqttServer struct {
 	client               mqtt.Client
 	udpServer            *UdpServer
 	mqttConfig           *MqttConfig
-	deviceId2ClientState *sync.Map
+	deviceId2ChatManager *sync.Map
 	sync.RWMutex
 }
 
@@ -49,7 +49,7 @@ func NewMqttServer(config *MqttConfig, udpServer *UdpServer) *MqttServer {
 	return &MqttServer{
 		udpServer:            udpServer,
 		mqttConfig:           config,
-		deviceId2ClientState: &sync.Map{},
+		deviceId2ChatManager: &sync.Map{},
 	}
 }
 
@@ -95,14 +95,15 @@ func (s *MqttServer) checkClientActive() error {
 		for {
 			select {
 			case <-ticker.C:
-				s.deviceId2ClientState.Range(func(key, value interface{}) bool {
-					clientState := value.(*ClientState)
+				s.deviceId2ChatManager.Range(func(key, value interface{}) bool {
+					chatManager := value.(*common.ChatManager)
+					clientState := chatManager.GetClientState()
 					if !clientState.IsActive() {
 						Infof("clientState is not active, clear deviceId: %s", clientState.DeviceID)
 						//解除udp会话
 						s.udpServer.CloseSession(clientState.UdpInfo.ID)
 						//删除mqtt关联关系
-						s.deviceId2ClientState.Delete(key)
+						s.deviceId2ChatManager.Delete(key)
 						//销毁clientState
 						clientState.Cancel()
 						clientState.Destroy()
@@ -115,16 +116,13 @@ func (s *MqttServer) checkClientActive() error {
 	return nil
 }
 
-func (s *MqttServer) SetClient(clientState *ClientState) {
-	Debugf("SetClient, deviceId: %s", clientState.DeviceID)
-	s.deviceId2ClientState.Store(clientState.DeviceID, clientState)
+func (s *MqttServer) SetChatManager(chatManager *common.ChatManager) {
+	s.deviceId2ChatManager.Store(chatManager.GetDeviceId(), chatManager)
 }
 
-func (s *MqttServer) getClient(deviceId string) *ClientState {
-	Debugf("getClient, deviceId: %s", deviceId)
-	if clientState, ok := s.deviceId2ClientState.Load(deviceId); ok {
-		Debugf("getClient, clientState: %+v", clientState)
-		return clientState.(*ClientState)
+func (s *MqttServer) getChatManager(deviceId string) *common.ChatManager {
+	if chatManager, ok := s.deviceId2ChatManager.Load(deviceId); ok {
+		return chatManager.(*common.ChatManager)
 	}
 	return nil
 }
@@ -149,29 +147,16 @@ func (s *MqttServer) handleMessage(client mqtt.Client, msg mqtt.Message) {
 		return
 	}
 
-	clientState := s.getClient(deviceId)
-	if clientState == nil {
-		Errorf("mqtt handleMessage, clientState is nil, deviceId: %s", deviceId)
-		return
-	}
-
-	if clientState != nil {
-		clientState.UpdateLastActiveTs()
+	chatManager := s.getChatManager(deviceId)
+	if chatManager != nil {
+		chatManager.GetClientState().UpdateLastActiveTs()
 	}
 
 	switch clientMsg.Type {
 	case MessageTypeHello:
 		s.handleHello(msg, clientMsg)
-	case MessageTypeListen:
-		common.HandleTextMessage(clientState, msg.Payload())
-	case MessageTypeAbort:
-		common.HandleTextMessage(clientState, msg.Payload())
-	case MessageTypeIot:
-		common.HandleTextMessage(clientState, msg.Payload())
-	case "goodbye":
-		s.handleGoodbye(msg, clientMsg)
 	default:
-		Warnf("未知的消息类型: %s", clientMsg.Type)
+		chatManager.HandleTextMessage(msg.Payload())
 	}
 }
 
@@ -216,11 +201,14 @@ func (s *MqttServer) handleHello(msg mqtt.Message, clientMsg client.ClientMessag
 		return
 	}
 
+	chatManager := common.NewChatManager(clientState)
+
 	//赋值给session
 	session.ClientState = clientState
 
-	//保存至deviceId2ClientState
-	s.SetClient(clientState)
+	//保存至deviceId2ChatManager
+	s.SetChatManager(chatManager)
+
 	clientState.InputAudioFormat = *clientMsg.AudioParams
 	clientState.SetAsrPcmFrameSize(clientState.InputAudioFormat.SampleRate, clientState.InputAudioFormat.Channels, clientState.InputAudioFormat.FrameDuration)
 

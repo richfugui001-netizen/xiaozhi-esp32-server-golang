@@ -27,24 +27,24 @@ type UDPServer struct {
 }*/
 
 type UdpServer struct {
-	conn          *net.UDPConn
-	udpPort       int      //udp server listen port
-	externalHost  string   //udp server external host
-	externalPort  int      //udp server external port
-	nonce2Session sync.Map //nonce => UdpSession
-	addr2Client   sync.Map //addr => UdpSession
-	mqttServer    *MqttServer
+	conn             *net.UDPConn
+	udpPort          int      //udp server listen port
+	externalHost     string   //udp server external host
+	externalPort     int      //udp server external port
+	nonce2Session    sync.Map //nonce => UdpSession
+	addr2ChatManager sync.Map //addr => UdpSession
+	mqttServer       *MqttServer
 	sync.RWMutex
 }
 
 // NewUDPServer 创建新的UDP服务器
 func NewUDPServer(udpPort int, externalHost string, externalPort int) *UdpServer {
 	return &UdpServer{
-		udpPort:       udpPort,
-		externalHost:  externalHost,
-		externalPort:  externalPort,
-		nonce2Session: sync.Map{},
-		addr2Client:   sync.Map{},
+		udpPort:          udpPort,
+		externalHost:     externalHost,
+		externalPort:     externalPort,
+		nonce2Session:    sync.Map{},
+		addr2ChatManager: sync.Map{},
 	}
 }
 
@@ -107,10 +107,10 @@ func (s *UdpServer) processPacket(addr *net.UDPAddr, data []byte) {
 		return
 	}
 
-	var clientState *ClientState
+	var chatManager *common.ChatManager
 	//从addr
-	clientState = s.getClient(addr)
-	if clientState == nil {
+	chatManager = s.getChatManager(addr)
+	if chatManager == nil {
 		// 获取会话ID
 		fullNonce := data[:16]
 		connID := fullNonce[4:8] // 取5-8字节作为连接id
@@ -121,17 +121,17 @@ func (s *UdpServer) processPacket(addr *net.UDPAddr, data []byte) {
 			Warnf("session不存在 addr: %s", addr)
 			return
 		}
-		clientState = session.ClientState
+		chatManager = common.NewChatManager(session.ClientState)
 		session.RemoteAddr = addr
-		s.addClient(addr, clientState)
+		s.addChatManager(addr, chatManager)
 	}
 
-	if clientState == nil {
-		Warnf("clientState不存在 addr: %s", addr)
+	if chatManager == nil {
+		Warnf("chatManager不存在 addr: %s", addr)
 		return
 	}
 
-	udpSession := clientState.UdpInfo
+	udpSession := chatManager.GetClientState().UdpInfo
 
 	// 更新最后活动时间
 	udpSession.LastActive = time.Now()
@@ -143,12 +143,12 @@ func (s *UdpServer) processPacket(addr *net.UDPAddr, data []byte) {
 	}
 
 	Infof("收到音频数据，大小: %d 字节", len(decrypted))
-	if clientState.GetClientVoiceStop() {
+	if chatManager.GetClientState().GetClientVoiceStop() {
 		//log.Debug("客户端停止说话, 跳过音频数据")
 		return
 	}
 	// 同时通过音频处理器处理
-	if ok := common.HandleAudioMessage(clientState, decrypted); !ok {
+	if ok := chatManager.HandleAudioMessage(decrypted); !ok {
 		Errorf("音频缓冲区已满: %v", err)
 	}
 }
@@ -270,18 +270,18 @@ func generateSessionID() string {
 	return hex.EncodeToString(b)
 }
 
-func (s *UdpServer) getClient(addr *net.UDPAddr) *ClientState {
-	val, ok := s.addr2Client.Load(addr.String())
+func (s *UdpServer) getChatManager(addr *net.UDPAddr) *common.ChatManager {
+	val, ok := s.addr2ChatManager.Load(addr.String())
 	if ok {
-		return val.(*ClientState)
+		return val.(*common.ChatManager)
 	}
 	return nil
 }
 
-func (s *UdpServer) addClient(addr *net.UDPAddr, clientState *ClientState) {
-	s.addr2Client.Store(addr.String(), clientState)
+func (s *UdpServer) addChatManager(addr *net.UDPAddr, chatManager *common.ChatManager) {
+	s.addr2ChatManager.Store(addr.String(), chatManager)
 }
 
-func (s *UdpServer) removeClient(addr *net.UDPAddr) {
-	s.addr2Client.Delete(addr.String())
+func (s *UdpServer) removeChatManager(addr *net.UDPAddr) {
+	s.addr2ChatManager.Delete(addr.String())
 }

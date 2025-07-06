@@ -77,7 +77,9 @@ func startChat(ctx context.Context, clientState *ClientState, text string) error
 	// 发送带工具的LLM请求
 	log.Infof("使用 %d 个MCP工具发送LLM请求, tools: %+v", len(einoTools), toolNameList)
 
-	err = DoLLmRequest(ctx, clientState, requestEinoMessages, sessionID, einoTools)
+	llmManager := NewLLMManager(ctx, clientState)
+
+	err = llmManager.DoLLmRequest(requestEinoMessages, einoTools)
 	if err != nil {
 		log.Errorf("发送带工具的 LLM 请求失败, seesionID: %s, error: %v", sessionID, err)
 		return fmt.Errorf("发送带工具的 LLM 请求失败: %v", err)

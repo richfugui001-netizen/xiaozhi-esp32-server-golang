@@ -17,11 +17,24 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+type LLMManager struct {
+	ctx         context.Context
+	clientState *ClientState
+}
+
+func NewLLMManager(ctx context.Context, clientState *ClientState) *LLMManager {
+	return &LLMManager{
+		ctx:         ctx,
+		clientState: clientState,
+	}
+}
+
 // HandleLLMResponse 处理LLM响应
-func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
+func (l *LLMManager) HandleLLMResponse(requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
 	log.Debugf("HandleLLMResponse start")
 	defer log.Debugf("HandleLLMResponse end")
 
+	state := l.clientState
 	var toolCalls []schema.ToolCall
 	var fullText bytes.Buffer
 
@@ -32,13 +45,13 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 		}
 
 		if msgState == MessageStateStart {
-			err := SendTtsStart(state)
+			err := SendTtsStart(l.clientState)
 			if err != nil {
 				log.Errorf("发送tts start失败: %+v", err)
 				return err
 			}
 		}
-		err := SendTtsStop(state)
+		err := SendTtsStop(l.clientState)
 		if err != nil {
 			log.Errorf("发送tts stop失败: %+v", err)
 			return err
@@ -53,7 +66,7 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-l.ctx.Done():
 			// 上下文已取消，优先处理取消逻辑
 			log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
 			sendTtsStartEndFunc(false)
@@ -77,7 +90,7 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 
 				if llmResponse.Text != "" {
 					// 处理文本内容响应
-					if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
+					if err := handleTextResponse(l.ctx, state, llmResponse, &fullText); err != nil {
 						return true, err
 					}
 				}
@@ -87,21 +100,21 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 					//time.Sleep(50 * time.Millisecond)
 					//写到redis中
 					if len(requestEinoMessages) > 0 {
-						llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.User, requestEinoMessages[len(requestEinoMessages)-1].Content)
+						llm_memory.Get().AddMessage(l.ctx, state.DeviceID, schema.User, requestEinoMessages[len(requestEinoMessages)-1].Content)
 					}
 					strFullText := fullText.String()
 					if strFullText != "" {
-						llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.Assistant, strFullText)
+						llm_memory.Get().AddMessage(l.ctx, state.DeviceID, schema.Assistant, strFullText)
 					}
 					if len(toolCalls) > 0 {
-						invokeToolSuccess, err := handleToolCallResponse(ctx, state, requestEinoMessages, toolCalls)
+						invokeToolSuccess, err := l.handleToolCallResponse(requestEinoMessages, toolCalls)
 						if err != nil {
 							log.Errorf("处理工具调用响应失败: %v", err)
 							return true, fmt.Errorf("处理工具调用响应失败: %v", err)
 						}
 						if !invokeToolSuccess {
 							//工具调用失败
-							if err := handleTextResponse(ctx, state, llmResponse, &fullText); err != nil {
+							if err := handleTextResponse(l.ctx, state, llmResponse, &fullText); err != nil {
 								return true, err
 							}
 							sendTtsStartEndFunc(false)
@@ -112,7 +125,7 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 
 					return ok, nil
 				}
-			case <-ctx.Done():
+			case <-l.ctx.Done():
 				// 上下文已取消，退出协程
 				log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
 				sendTtsStartEndFunc(false)
@@ -123,10 +136,12 @@ func HandleLLMResponse(ctx context.Context, state *ClientState, requestEinoMessa
 }
 
 // handleToolCallResponse 处理工具调用响应
-func handleToolCallResponse(ctx context.Context, state *ClientState, requestEinoMessages []*schema.Message, tools []schema.ToolCall) (bool, error) {
+func (l *LLMManager) handleToolCallResponse(requestEinoMessages []*schema.Message, tools []schema.ToolCall) (bool, error) {
 	if len(tools) == 0 {
 		return false, nil
 	}
+
+	state := l.clientState
 
 	log.Infof("处理 %d 个工具调用", len(tools))
 
@@ -166,36 +181,37 @@ func handleToolCallResponse(ctx context.Context, state *ClientState, requestEino
 	if invokeToolSuccess {
 		requestEinoMessages = append(requestEinoMessages, msgList...)
 		//不需要带tool进行调用
-		DoLLmRequest(ctx, state, requestEinoMessages, state.SessionID, nil)
+		l.DoLLmRequest(ctx, requestEinoMessages, state.SessionID, nil)
 	}
 
 	return invokeToolSuccess, nil
 }
 
-func DoLLmRequest(ctx context.Context, clientState *ClientState, requestEinoMessages []*schema.Message, sessionID string, einoTools []*schema.ToolInfo) error {
-	log.Debugf("发送带工具的 LLM 请求, seesionID: %s, requestEinoMessages: %+v", sessionID, requestEinoMessages)
+func (l *LLMManager) DoLLmRequest(requestEinoMessages []*schema.Message, einoTools []*schema.ToolInfo) error {
+	log.Debugf("发送带工具的 LLM 请求, seesionID: %s, requestEinoMessages: %+v", l.clientState.SessionID, requestEinoMessages)
+	clientState := l.clientState
+
 	clientState.SetStatus(ClientStatusLLMStart)
 	responseSentences, err := llm.HandleLLMWithContextAndTools(
-		ctx,
 		clientState.LLMProvider,
 		requestEinoMessages,
 		einoTools,
-		sessionID,
+		l.clientState.SessionID,
 	)
 	if err != nil {
-		log.Errorf("发送带工具的 LLM 请求失败, seesionID: %s, error: %v", sessionID, err)
+		log.Errorf("发送带工具的 LLM 请求失败, seesionID: %s, error: %v", l.clientState.SessionID, err)
 		return fmt.Errorf("发送带工具的 LLM 请求失败: %v", err)
 	}
 
 	go func() {
-		log.Debugf("DoLLmRequest goroutine开始 - SessionID: %s, context状态: %v", sessionID, ctx.Err())
-		ok, err := HandleLLMResponse(ctx, clientState, requestEinoMessages, responseSentences)
+		log.Debugf("DoLLmRequest goroutine开始 - SessionID: %s, context状态: %v", l.clientState.SessionID, ctx.Err())
+		ok, err := l.HandleLLMResponse(requestEinoMessages, responseSentences)
 		if err != nil {
-			log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", sessionID, err)
+			log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", l.clientState.SessionID, err)
 			clientState.CancelSessionCtx()
 		}
 
-		log.Debugf("DoLLmRequest goroutine结束 - SessionID: %s, ok: %v", sessionID, ok)
+		log.Debugf("DoLLmRequest goroutine结束 - SessionID: %s, ok: %v", l.clientState.SessionID, ok)
 		_ = ok
 	}()
 

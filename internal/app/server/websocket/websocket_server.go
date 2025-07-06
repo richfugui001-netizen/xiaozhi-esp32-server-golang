@@ -244,8 +244,6 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		log.Errorf("WebSocket 升级失败: %v", err)
 		return
 	}
-	// 设置初始超时时间，比如60秒
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	// 初始化客户端状态
 	clientState, err := client.GenWebsocketClientState(deviceID, conn)
@@ -254,16 +252,14 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	chatManager := common.NewChatManager(clientState)
+
 	s.clientStates.Store(clientState.Conn, clientState)
 
 	// 连接关闭时从列表中移除
 	defer func() {
-		log.Infof("设备 %s 断开连接", deviceID)
-		// 关闭done通道通知所有goroutine退出
-		clientState.Cancel()
-		clientState.Destroy()
-		clientState.Conn.Close()
-		s.clientStates.Delete(conn)
+		chatManager.OnClose()
+		s.clientStates.Delete(clientState.Conn)
 	}()
 
 	// 处理消息
@@ -280,7 +276,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		// 处理文本消息
 		if messageType == websocket.TextMessage {
 			log.Infof("收到文本消息: %s", string(message))
-			if err := common.HandleTextMessage(clientState, message); err != nil {
+			if err := chatManager.HandleTextMessage(message); err != nil {
 				log.Errorf("处理文本消息失败: %v", err)
 				continue
 			}
@@ -291,7 +287,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			// 同时通过音频处理器处理
-			if ok := common.HandleAudioMessage(clientState, message); !ok {
+			if ok := chatManager.HandleAudioMessage(message); !ok {
 				log.Errorf("音频缓冲区已满: %v", err)
 			}
 		} else if messageType == websocket.CloseMessage {

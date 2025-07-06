@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -92,9 +93,9 @@ type ActivationRequest struct {
 	Payload ActivationPayload `json:"Payload"`
 }
 
-func GetDeviceConfig(deviceInfo *DeviceInfo, deviceID, clientID string) (*ServerResponse, error) {
-	//url := "https://api.tenclass.net/xiaozhi/ota/"
-	url := "http://192.168.208.214:8989/xiaozhi/ota/"
+func GetDeviceConfig(deviceInfo *DeviceInfo, deviceID, clientID string, otaUrl string) (*ServerResponse, error) {
+	url := otaUrl
+	//url := "http://192.168.208.214:8989/xiaozhi/ota/"
 
 	jsonData, err := json.Marshal(deviceInfo)
 	if err != nil {
@@ -186,9 +187,11 @@ func CreateDefaultDeviceInfo(uuid string, mac string, boardName string) *DeviceI
 	return deviceInfo
 }
 
-func activateDevice(deviceID, clientID, serialNumber, hmacKey, challenge string) (*ServerResponse, error) {
-	//url := "https://api.tenclass.net/xiaozhi/ota/activate"
-	url := "http://192.168.208.214:8989/xiaozhi/ota/activate"
+func activateDevice(deviceID, clientID, serialNumber, hmacKey, challenge string, otaUrl string) (*ServerResponse, error) {
+	url := otaUrl
+	if !strings.HasSuffix(url, "/activate") {
+		url = strings.TrimRight(url, "/") + "/activate"
+	}
 
 	// 创建 HMAC
 	h := hmac.New(sha256.New, []byte(hmacKey))
