@@ -1,24 +1,27 @@
-package client
+package mqtt_udp
 
 import (
 	"crypto/cipher"
 	"encoding/binary"
 	"net"
 	"time"
+	"xiaozhi-esp32-server-golang/internal/app/server/common"
 )
 
 // Session 表示一个UDP会话
 type UdpSession struct {
 	ID          string
 	Conn        *net.UDPConn //udp conn
-	ClientID    string
+	ConnId      string
+	ClientId    string
+	DeviceId    string
 	AesKey      [16]byte // 随机32位
 	Nonce       [8]byte  // 存储原始nonce模板 16位
 	CreatedAt   time.Time
 	LastActive  time.Time
 	RemoteAddr  *net.UDPAddr //remote addr
 	LocalSeq    uint32
-	ClientState *ClientState
+	ChatManager *common.ChatManager
 	Block       cipher.Block
 	RemoteSeq   uint32
 	RecvChannel chan []byte //发送的音频数据

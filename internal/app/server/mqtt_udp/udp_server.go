@@ -10,9 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"xiaozhi-esp32-server-golang/internal/app/server/common"
-	. "xiaozhi-esp32-server-golang/internal/data/client"
-
 	. "xiaozhi-esp32-server-golang/logger"
 )
 
@@ -27,24 +24,24 @@ type UDPServer struct {
 }*/
 
 type UdpServer struct {
-	conn             *net.UDPConn
-	udpPort          int      //udp server listen port
-	externalHost     string   //udp server external host
-	externalPort     int      //udp server external port
-	nonce2Session    sync.Map //nonce => UdpSession
-	addr2ChatManager sync.Map //addr => UdpSession
-	mqttServer       *MqttServer
+	conn          *net.UDPConn
+	udpPort       int      //udp server listen port
+	externalHost  string   //udp server external host
+	externalPort  int      //udp server external port
+	nonce2Session sync.Map //nonce => UdpSession
+	addr2Session  sync.Map //addr => UdpSession
+	mqttServer    *MqttServer
 	sync.RWMutex
 }
 
 // NewUDPServer 创建新的UDP服务器
 func NewUDPServer(udpPort int, externalHost string, externalPort int) *UdpServer {
 	return &UdpServer{
-		udpPort:          udpPort,
-		externalHost:     externalHost,
-		externalPort:     externalPort,
-		nonce2Session:    sync.Map{},
-		addr2ChatManager: sync.Map{},
+		udpPort:       udpPort,
+		externalHost:  externalHost,
+		externalPort:  externalPort,
+		nonce2Session: sync.Map{},
+		addr2Session:  sync.Map{},
 	}
 }
 
@@ -91,7 +88,7 @@ func (s *UdpServer) handlePackets() {
 	}
 }
 
-func (s *UdpServer) getSession(connID string) *UdpSession {
+func (s *UdpServer) getSessionByNonce(connID string) *UdpSession {
 	val, ok := s.nonce2Session.Load(connID)
 	if ok {
 		return val.(*UdpSession)
@@ -107,31 +104,28 @@ func (s *UdpServer) processPacket(addr *net.UDPAddr, data []byte) {
 		return
 	}
 
-	var chatManager *common.ChatManager
+	var udpSession *UdpSession
 	//从addr
-	chatManager = s.getChatManager(addr)
-	if chatManager == nil {
+	udpSession = s.getUdpSession(addr)
+	if udpSession == nil {
 		// 获取会话ID
 		fullNonce := data[:16]
 		connID := fullNonce[4:8] // 取5-8字节作为连接id
 		strConnID := hex.EncodeToString(connID)
-		Infof("收到数据包, fullNonce: %s, connID: %s", hex.EncodeToString(fullNonce), strConnID)
-		session := s.getSession(strConnID)
-		if session == nil {
+		//Debugf("收到数据包, fullNonce: %s, connID: %s", hex.EncodeToString(fullNonce), strConnID)
+		udpSession = s.getSessionByNonce(strConnID)
+		if udpSession == nil {
 			Warnf("session不存在 addr: %s", addr)
 			return
 		}
-		chatManager = common.NewChatManager(session.ClientState)
-		session.RemoteAddr = addr
-		s.addChatManager(addr, chatManager)
+		udpSession.RemoteAddr = addr
+		s.addUdpSession(addr, udpSession)
 	}
 
-	if chatManager == nil {
-		Warnf("chatManager不存在 addr: %s", addr)
+	if udpSession == nil {
+		Warnf("udpSession不存在 addr: %s", addr)
 		return
 	}
-
-	udpSession := chatManager.GetClientState().UdpInfo
 
 	// 更新最后活动时间
 	udpSession.LastActive = time.Now()
@@ -141,6 +135,8 @@ func (s *UdpServer) processPacket(addr *net.UDPAddr, data []byte) {
 		Errorf("addr: %s 解密失败: %v", addr, err)
 		return
 	}
+
+	chatManager := udpSession.ChatManager
 
 	Infof("收到音频数据，大小: %d 字节", len(decrypted))
 	if chatManager.GetClientState().GetClientVoiceStop() {
@@ -170,7 +166,7 @@ func (s *UdpServer) cleanupSessions() {
 }
 
 // CreateSession 创建新会话
-func (s *UdpServer) CreateSession(clientID string) *UdpSession {
+func (s *UdpServer) CreateSession(deviceId, clientId string) *UdpSession {
 	// 生成会话ID
 	sessionID := generateSessionID()
 
@@ -181,6 +177,7 @@ func (s *UdpServer) CreateSession(clientID string) *UdpSession {
 	// 生成4字节连接id
 	connID := make([]byte, 4)
 	rand.Read(connID)
+	strConnID := hex.EncodeToString(connID)
 
 	// 4字节时间戳
 	timestamp := make([]byte, 4)
@@ -207,7 +204,9 @@ func (s *UdpServer) CreateSession(clientID string) *UdpSession {
 	// 创建会话
 	session := &UdpSession{
 		ID:          sessionID,
-		ClientID:    clientID,
+		ConnId:      strConnID,
+		ClientId:    clientId,
+		DeviceId:    deviceId,
 		AesKey:      aesKey,
 		Nonce:       nonceBytes, // 保存原始nonce模板
 		CreatedAt:   time.Now(),
@@ -238,7 +237,6 @@ func (s *UdpServer) CreateSession(clientID string) *UdpSession {
 	}()
 
 	// 只用连接id（前4字节）作为key
-	strConnID := hex.EncodeToString(connID)
 	s.SetNonce2Session(strConnID, session)
 
 	return session
@@ -270,18 +268,18 @@ func generateSessionID() string {
 	return hex.EncodeToString(b)
 }
 
-func (s *UdpServer) getChatManager(addr *net.UDPAddr) *common.ChatManager {
-	val, ok := s.addr2ChatManager.Load(addr.String())
+func (s *UdpServer) getUdpSession(addr *net.UDPAddr) *UdpSession {
+	val, ok := s.addr2Session.Load(addr.String())
 	if ok {
-		return val.(*common.ChatManager)
+		return val.(*UdpSession)
 	}
 	return nil
 }
 
-func (s *UdpServer) addChatManager(addr *net.UDPAddr, chatManager *common.ChatManager) {
-	s.addr2ChatManager.Store(addr.String(), chatManager)
+func (s *UdpServer) addUdpSession(addr *net.UDPAddr, session *UdpSession) {
+	s.addr2Session.Store(addr.String(), session)
 }
 
-func (s *UdpServer) removeChatManager(addr *net.UDPAddr) {
-	s.addr2ChatManager.Delete(addr.String())
+func (s *UdpServer) removeUdpSession(addr *net.UDPAddr) {
+	s.addr2Session.Delete(addr.String())
 }

@@ -8,6 +8,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	ConnTypeWebsocket = 0
+	ConnTypeMqtt      = 1
+)
+
 // *websocket.Conn  读: 不允许多个协程同时读   写: 不允许多个协程同时写   读写: 允许同时读写
 type Conn struct {
 	lock          sync.RWMutex
@@ -16,10 +21,18 @@ type Conn struct {
 	MqttConn      *MqttConn //mqtt连接
 }
 
+func NewConn(connType int, websocketConn *websocket.Conn, mqttConn *MqttConn) *Conn {
+	return &Conn{
+		connType:      connType,
+		websocketConn: websocketConn,
+		MqttConn:      mqttConn,
+	}
+}
+
 func (c *Conn) WriteJSON(message interface{}) error {
 	strMsg, _ := json.Marshal(message)
 	log.Debugf("WriteJSON 发送消息: %+v", string(strMsg))
-	if c.connType == 0 {
+	if c.connType == ConnTypeWebsocket {
 		c.lock.Lock()
 		defer c.lock.Unlock()
 		return c.websocketConn.WriteJSON(message)
@@ -29,7 +42,7 @@ func (c *Conn) WriteJSON(message interface{}) error {
 }
 
 func (c *Conn) ReadJSON(v interface{}) error {
-	if c.connType == 0 {
+	if c.connType == ConnTypeWebsocket {
 		c.lock.Lock()
 		defer c.lock.Unlock()
 		return c.websocketConn.ReadJSON(v)
@@ -45,7 +58,7 @@ func (c *Conn) WriteMessage(messageType int, message []byte) error {
 	} else {
 		//log.Debugf("WriteMessage Binary 消息: %d", len(message))
 	}
-	if c.connType == 0 {
+	if c.connType == ConnTypeWebsocket {
 		c.lock.Lock()
 		defer c.lock.Unlock()
 		return c.websocketConn.WriteMessage(messageType, message)
@@ -55,7 +68,7 @@ func (c *Conn) WriteMessage(messageType int, message []byte) error {
 }
 
 func (c *Conn) ReadMessage() (messageType int, message []byte, err error) {
-	if c.connType == 0 {
+	if c.connType == ConnTypeWebsocket {
 		return c.websocketConn.ReadMessage()
 	} else {
 		return c.MqttConn.ReadMessage()
@@ -66,7 +79,7 @@ func (c *Conn) Close() error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	if c.connType == 0 {
+	if c.connType == ConnTypeWebsocket {
 		return c.websocketConn.Close()
 	}
 	return nil

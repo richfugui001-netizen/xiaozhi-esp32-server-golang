@@ -18,7 +18,7 @@ const (
 )
 
 const (
-	ClientActiveTs = 20
+	ClientActiveTs = 120
 )
 
 type MqttConn struct {

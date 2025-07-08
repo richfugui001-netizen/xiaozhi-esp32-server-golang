@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/md5"
 	"crypto/tls"
@@ -26,6 +27,8 @@ var opusData [][]byte
 
 var audioRate = 16000
 var frameDuration = 60
+
+var allowChat = make(chan struct{}, 1)
 
 // ServerMessage 表示服务器消息
 type ServerMessage struct {
@@ -294,6 +297,7 @@ func publicHello(publishTopic string, client mqtt.Client) error {
 		return token.Error()
 	}
 	fmt.Println("✅ 发布消息成功")
+	allowChat <- struct{}{}
 	return nil
 }
 
@@ -557,6 +561,7 @@ func sendListenStop(mqttClient mqtt.Client, sessionID string) error {
 	if token.Wait() && token.Error() != nil {
 		return token.Error()
 	}
+	allowChat <- struct{}{}
 	return nil
 }
 
@@ -679,7 +684,7 @@ func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDP
 			os.WriteFile("mqtt_output_first_frame.wav", decryptedData, 0644)
 		}
 
-		fmt.Printf("收到音频数据, 长度: %d\n", len(decryptedData))
+		//fmt.Printf("收到音频数据, 长度: %d\n", len(decryptedData))
 		opusData = append(opusData, decryptedData)
 		//fmt.Println("收到音频数据", len(decryptedData))
 	})
@@ -693,7 +698,7 @@ func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDP
 		}()
 		audioChan, err := ttsProvider.TextToSpeechStream(context.Background(), msg, 16000, 1, 60)
 		if err != nil {
-			fmt.Printf("生成语音失败: %v\n", err)
+			//fmt.Printf("生成语音失败: %v\n", err)
 			return fmt.Errorf("生成语音失败: %v", err)
 		}
 
@@ -712,8 +717,34 @@ func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDP
 		return nil
 	}
 
-	genAndSendAudio("你好", 100)
-	time.Sleep(30 * time.Second)
+	// 新增：等待用户输入文本
+	reader := bufio.NewReader(os.Stdin)
+
+	f := func() bool {
+		fmt.Print("请输入要合成的文本（回车发送，直接回车退出）：")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Printf("读取输入失败: %v\n", err)
+			return false
+		}
+		input = strings.TrimSpace(input)
+		if input == "" {
+			return false
+		}
+		genAndSendAudio(input, 50)
+		return true
+	}
+	for {
+		_ = <-allowChat
+		for {
+			if f() {
+				break
+			}
+		}
+	}
+
+	//genAndSendAudio("你好", 100)
+	//time.Sleep(30 * time.Second)
 	/*genAndSendAudio("再来一个", 20)
 	time.Sleep(30 * time.Second)
 	genAndSendAudio("你今天穿的衣服真好看", 20)

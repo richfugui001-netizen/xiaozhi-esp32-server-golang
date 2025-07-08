@@ -5,24 +5,66 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 	"github.com/spf13/viper"
 
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
-	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
+	"xiaozhi-esp32-server-golang/internal/domain/llm"
+	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	log "xiaozhi-esp32-server-golang/logger"
 )
 
 type Protocol struct {
 	clientState *ClientState
+
+	chatTextQueue chan string
 }
 
 func NewProtocol(clientState *ClientState) *Protocol {
-	return &Protocol{
-		clientState: clientState,
+	p := &Protocol{
+		clientState:   clientState,
+		chatTextQueue: make(chan string, 10),
 	}
+	p.processChatText()
+	return p
+}
+
+func (p *Protocol) HandleMqttHelloMessage(msg *ClientMessage, strAesKey string, strFullNonce string) error {
+	p.HandleCommonHelloMessage(msg)
+
+	clientState := p.clientState
+
+	udpExternalHost := viper.GetString("udp.external_host")
+	udpExternalPort := viper.GetInt("udp.external_port")
+
+	udpConfig := &UdpConfig{
+		Server: udpExternalHost,
+		Port:   udpExternalPort,
+		Key:    strAesKey,
+		Nonce:  strFullNonce,
+	}
+
+	// 发送响应
+	return SendHello(clientState, "udp", &clientState.OutputAudioFormat, udpConfig)
+}
+
+func (p *Protocol) HandleCommonHelloMessage(msg *ClientMessage) error {
+	if isMcp, ok := msg.Features["mcp"]; ok && isMcp {
+		go initMcp(p.clientState)
+	}
+
+	clientState := p.clientState
+
+	clientState.InputAudioFormat = *msg.AudioParams
+	clientState.SetAsrPcmFrameSize(clientState.InputAudioFormat.SampleRate, clientState.InputAudioFormat.Channels, clientState.InputAudioFormat.FrameDuration)
+
+	ProcessVadAudio(clientState)
+
+	return nil
 }
 
 // handleHelloMessage 处理 hello 消息
@@ -36,24 +78,10 @@ func (p *Protocol) HandleHelloMessage(msg *ClientMessage) error {
 	// 更新客户端状态
 	p.clientState.SessionID = session.ID
 
-	if isMcp, ok := msg.Features["mcp"]; ok && isMcp {
-		go initMcp(p.clientState)
-	}
-
-	p.clientState.InputAudioFormat = types_audio.AudioFormat{
-		SampleRate:    msg.AudioParams.SampleRate,
-		Channels:      msg.AudioParams.Channels,
-		FrameDuration: msg.AudioParams.FrameDuration,
-		Format:        msg.AudioParams.Format,
-	}
-
-	// 设置asr pcm帧大小, 输入音频格式, 给vad, asr使用
-	p.clientState.SetAsrPcmFrameSize(p.clientState.InputAudioFormat.SampleRate, p.clientState.InputAudioFormat.Channels, p.clientState.InputAudioFormat.FrameDuration)
-
-	ProcessVadAudio(p.clientState)
+	p.HandleCommonHelloMessage(msg)
 
 	// 发送 hello 响应
-	return SendHello(p.clientState, "websocket", &p.clientState.OutputAudioFormat)
+	return SendHello(p.clientState, "websocket", &p.clientState.OutputAudioFormat, nil)
 }
 
 // handleListenMessage 处理监听消息
@@ -96,7 +124,7 @@ func (p *Protocol) HandleListenDetect(msg *ClientMessage) error {
 		}
 		if needStartChat {
 			// 否则开始对话
-			if err := startChat(p.clientState.GetSessionCtx(), p.clientState, text); err != nil {
+			if err := p.startChat(text); err != nil {
 				log.Errorf("开始对话失败: %v", err)
 			}
 		}
@@ -254,7 +282,7 @@ func (p *Protocol) OnListenStart() error {
 					return
 				}
 
-				err = startChat(ctx, p.clientState, text)
+				err = p.startChat(text)
 				if err != nil {
 					log.Errorf("开始对话失败: %v", err)
 					return
@@ -288,5 +316,104 @@ func (p *Protocol) OnListenStart() error {
 			return
 		}
 	}()
+	return nil
+}
+
+// startChat 开始对话
+func (p *Protocol) startChat(text string) error {
+	select {
+	case p.chatTextQueue <- text:
+	default:
+		log.Warnf("chatTextQueue 已满, 丢弃消息")
+	}
+	return nil
+}
+
+func (p *Protocol) processChatText() {
+	log.Debugf("processChatText start")
+	defer log.Debugf("processChatText end")
+
+	go func() {
+		for {
+			select {
+			case <-p.clientState.Ctx.Done():
+				return
+			default:
+				select {
+				case text := <-p.chatTextQueue:
+					err := p.actionDoChat(text)
+					if err != nil {
+						log.Errorf("处理对话失败: %v", err)
+						return
+					}
+				default:
+				}
+			}
+		}
+	}()
+}
+
+func (p *Protocol) actionDoChat(text string) error {
+	ctx := p.clientState.GetSessionCtx()
+	clientState := p.clientState
+
+	sessionID := clientState.SessionID
+
+	requestMessages, err := llm_memory.Get().GetMessagesForLLM(ctx, clientState.DeviceID, 10)
+	if err != nil {
+		log.Errorf("获取对话历史失败: %v", err)
+	}
+
+	// 直接创建Eino原生消息
+	userMessage := &schema.Message{
+		Role:    schema.User,
+		Content: text,
+	}
+	requestMessages = append(requestMessages, *userMessage)
+
+	// 添加用户消息到对话历史
+	//llm_memory.Get().AddMessage(ctx, clientState.DeviceID, schema.User, text)
+
+	// 直接传递Eino原生消息，无需转换
+	requestEinoMessages := make([]*schema.Message, len(requestMessages))
+	for i, msg := range requestMessages {
+		requestEinoMessages[i] = &msg
+	}
+
+	// 获取全局MCP工具列表
+	mcpTools, err := mcp.GetToolsByDeviceId(clientState.DeviceID)
+	if err != nil {
+		log.Errorf("获取设备 %s 的工具失败: %v", clientState.DeviceID, err)
+		mcpTools = make(map[string]tool.InvokableTool)
+	}
+
+	// 将MCP工具转换为接口格式以便传递给转换函数
+	mcpToolsInterface := make(map[string]interface{})
+	for name, tool := range mcpTools {
+		mcpToolsInterface[name] = tool
+	}
+
+	// 转换MCP工具为Eino ToolInfo格式
+	einoTools, err := llm.ConvertMCPToolsToEinoTools(ctx, mcpToolsInterface)
+	if err != nil {
+		log.Errorf("转换MCP工具失败: %v", err)
+		einoTools = nil
+	}
+
+	toolNameList := make([]string, 0)
+	for _, tool := range einoTools {
+		toolNameList = append(toolNameList, tool.Name)
+	}
+
+	// 发送带工具的LLM请求
+	log.Infof("使用 %d 个MCP工具发送LLM请求, tools: %+v", len(einoTools), toolNameList)
+
+	llmManager := NewLLMManager(ctx, clientState)
+
+	err = llmManager.DoLLmRequest(requestEinoMessages, einoTools)
+	if err != nil {
+		log.Errorf("发送带工具的 LLM 请求失败, seesionID: %s, error: %v", sessionID, err)
+		return fmt.Errorf("发送带工具的 LLM 请求失败: %v", err)
+	}
 	return nil
 }

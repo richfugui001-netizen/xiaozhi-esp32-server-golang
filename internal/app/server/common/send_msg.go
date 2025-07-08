@@ -34,13 +34,14 @@ func SendTtsStop(clientState *ClientState) error {
 	return nil
 }
 
-func SendHello(clientState *ClientState, transport string, audioFormat *types_audio.AudioFormat) error {
+func SendHello(clientState *ClientState, transport string, audioFormat *types_audio.AudioFormat, udpConfig *UdpConfig) error {
 	msg := ServerMessage{
 		Type:        MessageTypeHello,
 		Text:        "欢迎使用小智服务器",
 		SessionID:   clientState.SessionID,
 		Transport:   transport,
 		AudioFormat: audioFormat,
+		Udp:         udpConfig,
 	}
 	return clientState.SendMsg(msg)
 }

@@ -37,19 +37,19 @@ type MqttSession struct {
 
 // MqttServer MQTT服务器结构
 type MqttServer struct {
-	client               mqtt.Client
-	udpServer            *UdpServer
-	mqttConfig           *MqttConfig
-	deviceId2ChatManager *sync.Map
+	client              mqtt.Client
+	udpServer           *UdpServer
+	mqttConfig          *MqttConfig
+	deviceId2UdpSession *sync.Map
 	sync.RWMutex
 }
 
 // NewMqttServer 创建新的MQTT服务器
 func NewMqttServer(config *MqttConfig, udpServer *UdpServer) *MqttServer {
 	return &MqttServer{
-		udpServer:            udpServer,
-		mqttConfig:           config,
-		deviceId2ChatManager: &sync.Map{},
+		udpServer:           udpServer,
+		mqttConfig:          config,
+		deviceId2UdpSession: &sync.Map{},
 	}
 }
 
@@ -95,18 +95,18 @@ func (s *MqttServer) checkClientActive() error {
 		for {
 			select {
 			case <-ticker.C:
-				s.deviceId2ChatManager.Range(func(key, value interface{}) bool {
-					chatManager := value.(*common.ChatManager)
-					clientState := chatManager.GetClientState()
+				s.deviceId2UdpSession.Range(func(key, value interface{}) bool {
+					udpSession := value.(*UdpSession)
+					clientState := udpSession.ChatManager.GetClientState()
 					if !clientState.IsActive() {
 						Infof("clientState is not active, clear deviceId: %s", clientState.DeviceID)
+						//主动关闭断开连接
+						udpSession.ChatManager.Close()
+
 						//解除udp会话
-						s.udpServer.CloseSession(clientState.UdpInfo.ID)
+						s.udpServer.CloseSession(udpSession.ConnId)
 						//删除mqtt关联关系
-						s.deviceId2ChatManager.Delete(key)
-						//销毁clientState
-						clientState.Cancel()
-						clientState.Destroy()
+						s.deviceId2UdpSession.Delete(key)
 					}
 					return true
 				})
@@ -116,13 +116,15 @@ func (s *MqttServer) checkClientActive() error {
 	return nil
 }
 
-func (s *MqttServer) SetChatManager(chatManager *common.ChatManager) {
-	s.deviceId2ChatManager.Store(chatManager.GetDeviceId(), chatManager)
+func (s *MqttServer) SetUdpSession(udpSession *UdpSession) {
+	Debugf("SetUdpSession, deviceId: %s", udpSession.DeviceId)
+	s.deviceId2UdpSession.Store(udpSession.DeviceId, udpSession)
 }
 
-func (s *MqttServer) getChatManager(deviceId string) *common.ChatManager {
-	if chatManager, ok := s.deviceId2ChatManager.Load(deviceId); ok {
-		return chatManager.(*common.ChatManager)
+func (s *MqttServer) getUdpSession(deviceId string) *UdpSession {
+	Debugf("getUdpSession, deviceId: %s", deviceId)
+	if udpSession, ok := s.deviceId2UdpSession.Load(deviceId); ok {
+		return udpSession.(*UdpSession)
 	}
 	return nil
 }
@@ -147,17 +149,16 @@ func (s *MqttServer) handleMessage(client mqtt.Client, msg mqtt.Message) {
 		return
 	}
 
-	chatManager := s.getChatManager(deviceId)
-	if chatManager != nil {
-		chatManager.GetClientState().UpdateLastActiveTs()
+	udpSession := s.getUdpSession(deviceId)
+	if udpSession == nil {
+		Warnf("udpSession is nil, msg: %+v", msg)
+		return
 	}
 
-	switch clientMsg.Type {
-	case MessageTypeHello:
-		s.handleHello(msg, clientMsg)
-	default:
-		chatManager.HandleTextMessage(msg.Payload())
-	}
+	chatManager := udpSession.ChatManager
+
+	chatManager.GetClientState().UpdateLastActiveTs()
+	chatManager.HandleTextMessage(msg.Payload())
 }
 
 func (s *MqttServer) getDeviceIdByTopic(topic string) (string, string) {
@@ -179,41 +180,59 @@ func (s *MqttServer) handleHello(msg mqtt.Message, clientMsg client.ClientMessag
 		return
 	}
 
-	// 从UDP服务端获取会话信息
-	session := s.udpServer.CreateSession(msg.Topic())
-	if session == nil {
-		Error("创建会话失败")
-		return
-	}
-
 	topicMacAddr, deviceId := s.getDeviceIdByTopic(msg.Topic())
 	if deviceId == "" {
 		Errorf("mac_addr解析失败: %v", msg.Topic())
 		return
 	}
 
-	publicTopic := fmt.Sprintf("%s%s", client.ServerPubTopicPrefix, topicMacAddr)
-
-	//生成clientState结构
-	clientState, err := client.GenMqttUdpClientState(deviceId, publicTopic, s.client, session, &clientMsg)
-	if err != nil {
-		Errorf("生成clientState失败: %v", err)
+	// 从UDP服务端获取会话信息
+	session := s.udpServer.CreateSession(deviceId, "")
+	if session == nil {
+		Error("创建会话失败")
 		return
 	}
 
-	chatManager := common.NewChatManager(clientState)
+	publicTopic := fmt.Sprintf("%s%s", client.ServerPubTopicPrefix, topicMacAddr)
+
+	mqttConn := &MqttConn{
+		Conn:     s.client,
+		PubTopic: publicTopic,
+	}
+
+	sendAudioFunc := func(audioData []byte) error {
+		select {
+		case session.SendChannel <- audioData:
+			return nil
+		default:
+			return fmt.Errorf("发送音频数据失败, 通道已满")
+		}
+	}
+
+	chatManager, err := common.NewChatManager(
+		common.WithDeviceID(deviceId),
+		common.WithMqttConn(mqttConn),
+		common.WithUdpSendAudioData(sendAudioFunc),
+	)
+	if err != nil {
+		Errorf("创建chatManager失败: %v", err)
+		return
+	}
 
 	//赋值给session
-	session.ClientState = clientState
+	session.ChatManager = chatManager
 
-	//保存至deviceId2ChatManager
-	s.SetChatManager(chatManager)
+	//保存至deviceId2UdpSession
+	s.SetUdpSession(session)
 
-	clientState.InputAudioFormat = *clientMsg.AudioParams
-	clientState.SetAsrPcmFrameSize(clientState.InputAudioFormat.SampleRate, clientState.InputAudioFormat.Channels, clientState.InputAudioFormat.FrameDuration)
+	strAesKey, strFullNonce := s.getAesKeyAndNonce(session)
+	//调用handleMqttHelloMessage处理hello消息通用逻辑
+	chatManager.HandleMqttHelloMessage(&clientMsg, strAesKey, strFullNonce)
 
-	common.ProcessVadAudio(clientState)
+}
 
+func (s *MqttServer) getAesKeyAndNonce(session *UdpSession) (string, string) {
+	//处理
 	strAesKey := hex.EncodeToString(session.AesKey[:])
 
 	// 构造 fullNonce: 前缀2字节0100 + 长度2字节0000 + 真实nonce(8字节) + seq(4字节00000000)
@@ -222,28 +241,8 @@ func (s *MqttServer) handleHello(msg mqtt.Message, clientMsg client.ClientMessag
 	seq := []byte{0x00, 0x00, 0x00, 0x00}
 	fullNonce := append(append(append(prefix, length...), session.Nonce[:]...), seq...)
 	strFullNonce := hex.EncodeToString(fullNonce)
-	// 构建响应
-	response := map[string]interface{}{
-		"type":       MessageTypeHello,
-		"version":    3,
-		"session_id": session.ID,
-		"transport":  "udp",
-		"udp": map[string]interface{}{
-			"server": s.udpServer.externalHost,
-			"port":   s.udpServer.externalPort,
-			"key":    strAesKey,
-			"nonce":  strFullNonce,
-		},
-		"audio_params": map[string]interface{}{
-			"format":         clientState.OutputAudioFormat.Format,
-			"sample_rate":    clientState.OutputAudioFormat.SampleRate,
-			"channels":       clientState.OutputAudioFormat.Channels,
-			"frame_duration": clientState.OutputAudioFormat.FrameDuration, // 固定20ms帧长
-		},
-	}
 
-	// 发送响应
-	clientState.Conn.WriteJSON(response)
+	return strAesKey, strFullNonce
 }
 
 // handleGoodbye 处理goodbye消息

@@ -5,27 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"time"
 
 	"sync"
 
 	"xiaozhi-esp32-server-golang/internal/domain/asr"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
 	utypes "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
-	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
-
-	"xiaozhi-esp32-server-golang/internal/domain/vad/silero_vad"
 
 	. "xiaozhi-esp32-server-golang/internal/data/audio"
 
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/schema"
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
 )
@@ -35,185 +29,6 @@ type Dialogue struct {
 	Messages []schema.Message
 }
 
-func GenWebsocketClientState(deviceID string, conn *websocket.Conn) (*ClientState, error) {
-	configProvider, err := userconfig.GetProvider()
-	if err != nil {
-		log.Errorf("获取 用户配置提供者失败: %+v", err)
-		return nil, err
-	}
-	deviceConfig, err := configProvider.GetUserConfig(context.Background(), deviceID)
-	if err != nil {
-		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
-		return nil, err
-	}
-
-	if deviceConfig.Vad.Provider == "silero_vad" {
-		silero_vad.InitVadPool(deviceConfig.Vad.Config)
-	}
-
-	// 创建带取消功能的上下文
-	ctx, cancel := context.WithCancel(context.Background())
-
-	maxSilenceDuration := viper.GetInt64("chat.chat_max_silence_duration")
-	if maxSilenceDuration == 0 {
-		maxSilenceDuration = 200
-	}
-
-	systemPrompt, _ := llm_memory.Get().GetSystemPrompt(ctx, deviceID)
-	clientState := &ClientState{
-		Dialogue:     &Dialogue{},
-		Abort:        false,
-		ListenMode:   "auto",
-		DeviceID:     deviceID,
-		Conn:         &Conn{websocketConn: conn, connType: 0},
-		Ctx:          ctx,
-		Cancel:       cancel,
-		SystemPrompt: systemPrompt.Content,
-		DeviceConfig: deviceConfig,
-		OutputAudioFormat: AudioFormat{
-			SampleRate:    SampleRate,
-			Channels:      Channels,
-			FrameDuration: FrameDuration,
-			Format:        Format,
-		},
-		OpusAudioBuffer: make(chan []byte, 100),
-		AsrAudioBuffer: &AsrAudioBuffer{
-			PcmData:          make([]float32, 0),
-			AudioBufferMutex: sync.RWMutex{},
-			PcmFrameSize:     0,
-		},
-		VoiceStatus: VoiceStatus{
-			HaveVoice:            false,
-			HaveVoiceLastTime:    0,
-			VoiceStop:            false,
-			SilenceThresholdTime: maxSilenceDuration,
-		},
-		SessionCtx:     Ctx{},
-		McpRecvMsgChan: make(chan []byte, 10),
-	}
-
-	ttsType := clientState.DeviceConfig.Tts.Provider
-	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
-	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
-		clientState.OutputAudioFormat.SampleRate = 24000
-		clientState.OutputAudioFormat.FrameDuration = 20
-	}
-
-	ttsProvider, err := getTTSProvider(clientState.DeviceConfig.Tts)
-	if err != nil {
-		log.Errorf("创建 TTS 提供者失败: %v", err)
-		return nil, err
-	}
-	if ttsProvider == nil {
-		log.Errorf("创建 TTS 提供者失败: %v", err)
-		return nil, fmt.Errorf("创建 TTS 提供者失败: %v", err)
-	}
-	clientState.TTSProvider = ttsProvider
-
-	if err := clientState.Init(); err != nil {
-		log.Errorf("初始化客户端状态失败: %v", err)
-		return nil, err
-	}
-
-	return clientState, nil
-}
-
-func GenMqttUdpClientState(deviceID string, pubTopic string, mqttClient mqtt.Client, udpSession *UdpSession, clientMsg *ClientMessage) (*ClientState, error) {
-	configProvider, err := userconfig.GetProvider()
-	if err != nil {
-		log.Errorf("获取 用户配置提供者失败: %+v", err)
-		return nil, err
-	}
-	deviceConfig, err := configProvider.GetUserConfig(context.Background(), deviceID)
-	if err != nil {
-		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
-		return nil, err
-	}
-
-	// 创建带取消功能的上下文
-	ctx, cancel := context.WithCancel(context.Background())
-
-	mqttConn := &MqttConn{
-		Conn:     mqttClient,
-		PubTopic: pubTopic,
-	}
-
-	systemPrompt, _ := llm_memory.Get().GetSystemPrompt(ctx, deviceID)
-
-	maxSilenceDuration := viper.GetInt64("chat.chat_max_silence_duration")
-	if maxSilenceDuration == 0 {
-		maxSilenceDuration = 200
-	}
-
-	clientState := &ClientState{
-		Dialogue:     &Dialogue{},
-		Abort:        false,
-		ListenMode:   "auto",
-		DeviceID:     deviceID,
-		Conn:         &Conn{MqttConn: mqttConn, connType: 1},
-		Ctx:          ctx,
-		Cancel:       cancel,
-		SystemPrompt: systemPrompt.Content,
-		DeviceConfig: deviceConfig,
-		OutputAudioFormat: AudioFormat{
-			SampleRate:    SampleRate,
-			Channels:      Channels,
-			FrameDuration: FrameDuration,
-			Format:        Format,
-		},
-		OpusAudioBuffer: make(chan []byte, 100),
-		AsrAudioBuffer: &AsrAudioBuffer{
-			PcmData:          make([]float32, 0),
-			AudioBufferMutex: sync.RWMutex{},
-			PcmFrameSize:     0,
-		},
-		VoiceStatus: VoiceStatus{
-			HaveVoice:            false,
-			HaveVoiceLastTime:    0,
-			VoiceStop:            false,
-			SilenceThresholdTime: maxSilenceDuration,
-		},
-		SessionCtx:     Ctx{},
-		UdpInfo:        udpSession,
-		McpRecvMsgChan: make(chan []byte, 10),
-	}
-
-	ttsType := clientState.DeviceConfig.Tts.Provider
-	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
-	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
-		clientState.OutputAudioFormat.SampleRate = 24000
-		clientState.OutputAudioFormat.FrameDuration = 20
-	}
-
-	clientState.StartMqttUdpClient()
-	return clientState, nil
-}
-
-// 在mqtt 收到type: listen, state: start后进行
-func (c *ClientState) StartMqttUdpClient() error {
-	ttsProvider, err := getTTSProvider(c.DeviceConfig.Tts)
-	if err != nil {
-		log.Errorf("创建 TTS 提供者失败: %v", err)
-		return err
-	}
-	c.TTSProvider = ttsProvider
-
-	if err := c.Init(); err != nil {
-		log.Errorf("初始化客户端状态失败: %v", err)
-		return err
-	}
-
-	return nil
-}
-
-func getTTSProvider(ttsConfig utypes.TtsConfig) (tts.TTSProvider, error) {
-	ttsProvider, err := tts.GetTTSProvider(ttsConfig.Provider, ttsConfig.Config)
-	if err != nil {
-		return nil, fmt.Errorf("创建 TTS 提供者失败: %v", err)
-	}
-	return ttsProvider, nil
-}
-
 const (
 	ClientStatusInit       = "init"
 	ClientStatusListening  = "listening"
@@ -221,6 +36,8 @@ const (
 	ClientStatusLLMStart   = "llmStart"
 	ClientStatusTTSStart   = "ttsStart"
 )
+
+type SendAudioData func(audioData []byte) error
 
 // ClientState 表示客户端状态
 type ClientState struct {
@@ -266,11 +83,11 @@ type ClientState struct {
 	VoiceStatus
 	SessionCtx Ctx
 
-	UdpInfo          *UdpSession //客户端udp地址
-	MqttInfo         *MqttConn   //mqtt连接
-	Statistic        Statistic   //耗时统计
-	MqttLastActiveTs int64       //最后活跃时间
-	VadLastActiveTs  int64       //vad最后活跃时间, 超过 60s && 没有在tts则断开连接
+	UdpSendAudioData SendAudioData //发送音频数据
+	MqttInfo         *MqttConn     //mqtt连接
+	Statistic        Statistic     //耗时统计
+	MqttLastActiveTs int64         //最后活跃时间
+	VadLastActiveTs  int64         //vad最后活跃时间, 超过 60s && 没有在tts则断开连接
 
 	Status string //状态 listening, llmStart, ttsStart
 
@@ -300,7 +117,8 @@ func (c *ClientState) UpdateLastActiveTs() {
 }
 
 func (c *ClientState) IsActive() bool {
-	return time.Now().Unix()-c.MqttLastActiveTs < ClientActiveTs
+	diff := time.Now().Unix() - c.MqttLastActiveTs
+	return c.MqttLastActiveTs > 0 && diff <= ClientActiveTs
 }
 
 func (c *ClientState) IsMqttUdp() bool {
@@ -313,11 +131,6 @@ func (c *ClientState) SetStatus(status string) {
 
 func (c *ClientState) GetStatus() string {
 	return c.Status
-}
-
-type UdpInfo struct {
-	UdpAddr *net.UDPAddr
-	Nonce   []byte //16位随机数
 }
 
 func (s *ClientState) ResetSessionCtx() {
@@ -403,18 +216,6 @@ func (s *ClientState) InitAsr() error {
 	return nil
 }
 
-func (c *ClientState) Init() error {
-	if err := c.InitLlm(); err != nil {
-		return fmt.Errorf("初始化LLM失败: %v", err)
-	}
-	if err := c.InitAsr(); err != nil {
-		return fmt.Errorf("初始化ASR失败: %v", err)
-	}
-	c.SetAsrPcmFrameSize(c.InputAudioFormat.SampleRate, c.InputAudioFormat.Channels, c.InputAudioFormat.FrameDuration)
-
-	return nil
-}
-
 func (c *ClientState) Destroy() {
 	c.Asr.Stop()
 	c.Vad.Reset()
@@ -438,17 +239,7 @@ func (state *ClientState) SendMsg(msg interface{}) error {
 
 func (state *ClientState) ActionSendAudioData(audioData []byte) error {
 	if state.IsMqttUdp() {
-		select {
-		case <-state.Ctx.Done():
-			return fmt.Errorf("上下文已取消")
-		default:
-			select {
-			case state.UdpInfo.SendChannel <- audioData:
-				return nil
-			default:
-				return fmt.Errorf("udp 发送缓冲区已满")
-			}
-		}
+		return state.UdpSendAudioData(audioData)
 	}
 
 	return state.Conn.WriteMessage(websocket.BinaryMessage, audioData)

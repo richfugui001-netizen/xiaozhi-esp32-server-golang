@@ -46,6 +46,13 @@ const (
 	MessageStateSuccess       = "success"        // 成功状态
 )
 
+type UdpConfig struct {
+	Server string `json:"server"`
+	Port   int    `json:"port"`
+	Key    string `json:"key"`
+	Nonce  string `json:"nonce"`
+}
+
 // ServerMessage 表示服务器消息
 type ServerMessage struct {
 	Type        string                   `json:"type"`
@@ -56,5 +63,6 @@ type ServerMessage struct {
 	Transport   string                   `json:"transport,omitempty"`
 	AudioFormat *types_audio.AudioFormat `json:"audio_params,omitempty"`
 	Emotion     string                   `json:"emotion,omitempty"`
+	Udp         *UdpConfig               `json:"udp,omitempty"`
 	PayLoad     json.RawMessage          `json:"payload,omitempty"`
 }

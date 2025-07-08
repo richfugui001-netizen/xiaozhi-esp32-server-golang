@@ -50,14 +50,17 @@ func (l *LLMManager) HandleLLMResponse(requestEinoMessages []*schema.Message, ll
 				log.Errorf("发送tts start失败: %+v", err)
 				return err
 			}
-		}
-		err := SendTtsStop(l.clientState)
-		if err != nil {
-			log.Errorf("发送tts stop失败: %+v", err)
-			return err
+			return nil
+		} else if msgState == MessageStateStop {
+			err := SendTtsStop(l.clientState)
+			if err != nil {
+				log.Errorf("发送tts stop失败: %+v", err)
+				return err
+			}
+			return nil
 		}
 
-		return nil
+		return fmt.Errorf("msgState: %s", msgState)
 	}
 
 	if !state.GetTtsStart() {
@@ -156,7 +159,7 @@ func (l *LLMManager) handleToolCallResponse(requestEinoMessages []*schema.Messag
 		}
 		log.Infof("进行工具调用请求: %s, 参数: %+v", toolName, toolCall.Function.Arguments)
 		startTs := time.Now().UnixMilli()
-		result, err := tool.InvokableRun(ctx, toolCall.Function.Arguments)
+		result, err := tool.InvokableRun(l.ctx, toolCall.Function.Arguments)
 		if err != nil {
 			log.Errorf("工具调用失败: %v", err)
 			continue
@@ -181,7 +184,7 @@ func (l *LLMManager) handleToolCallResponse(requestEinoMessages []*schema.Messag
 	if invokeToolSuccess {
 		requestEinoMessages = append(requestEinoMessages, msgList...)
 		//不需要带tool进行调用
-		l.DoLLmRequest(ctx, requestEinoMessages, state.SessionID, nil)
+		l.DoLLmRequest(requestEinoMessages, nil)
 	}
 
 	return invokeToolSuccess, nil
@@ -193,6 +196,7 @@ func (l *LLMManager) DoLLmRequest(requestEinoMessages []*schema.Message, einoToo
 
 	clientState.SetStatus(ClientStatusLLMStart)
 	responseSentences, err := llm.HandleLLMWithContextAndTools(
+		l.ctx,
 		clientState.LLMProvider,
 		requestEinoMessages,
 		einoTools,
@@ -204,7 +208,7 @@ func (l *LLMManager) DoLLmRequest(requestEinoMessages []*schema.Message, einoToo
 	}
 
 	go func() {
-		log.Debugf("DoLLmRequest goroutine开始 - SessionID: %s, context状态: %v", l.clientState.SessionID, ctx.Err())
+		log.Debugf("DoLLmRequest goroutine开始 - SessionID: %s, context状态: %v", l.clientState.SessionID, l.ctx.Err())
 		ok, err := l.HandleLLMResponse(requestEinoMessages, responseSentences)
 		if err != nil {
 			log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", l.clientState.SessionID, err)
