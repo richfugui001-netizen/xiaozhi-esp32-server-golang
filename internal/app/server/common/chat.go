@@ -26,7 +26,7 @@ type ChatManager struct {
 	HandleUdpAudioData SendAudioData
 
 	clientState *ClientState
-	protocol    *Protocol
+	session     *ChatSession
 }
 
 type ChatManagerOption func(*ChatManager)
@@ -66,8 +66,12 @@ func NewChatManager(options ...ChatManagerOption) (*ChatManager, error) {
 		log.Errorf("初始化客户端状态失败: %v", err)
 		return nil, err
 	}
+
+	asrManager := NewASRManager(clientState)
+	ttsManager := NewTTSManager(clientState)
+
 	cm.clientState = clientState
-	cm.protocol = NewProtocol(clientState)
+	cm.session = NewChatSession(clientState, WithASRManager(asrManager), WithTTSManager(ttsManager))
 
 	cm.clientState.UdpSendAudioData = cm.HandleUdpAudioData
 
@@ -191,7 +195,7 @@ func (c *ChatManager) OnClose() error {
 }
 
 func (c *ChatManager) HandleMqttHelloMessage(clientMsg *ClientMessage, strAesKey string, strFullNonce string) error {
-	return c.protocol.HandleMqttHelloMessage(clientMsg, strAesKey, strFullNonce)
+	return c.session.HandleMqttHelloMessage(clientMsg, strAesKey, strFullNonce)
 }
 
 // handleTextMessage 处理文本消息
@@ -205,17 +209,17 @@ func (c *ChatManager) HandleTextMessage(message []byte) error {
 	// 处理不同类型的消息
 	switch clientMsg.Type {
 	case MessageTypeHello:
-		return c.protocol.HandleHelloMessage(&clientMsg)
+		return c.session.HandleHelloMessage(&clientMsg)
 	case MessageTypeListen:
-		return c.protocol.HandleListenMessage(&clientMsg)
+		return c.session.HandleListenMessage(&clientMsg)
 	case MessageTypeAbort:
-		return c.protocol.HandleAbortMessage(&clientMsg)
+		return c.session.HandleAbortMessage(&clientMsg)
 	case MessageTypeIot:
-		return c.protocol.HandleIoTMessage(&clientMsg)
+		return c.session.HandleIoTMessage(&clientMsg)
 	case MessageTypeMcp:
-		return c.protocol.HandleMcpMessage(&clientMsg)
+		return c.session.HandleMcpMessage(&clientMsg)
 	case MessageTypeGoodBye:
-		return c.protocol.HandleGoodByeMessage(&clientMsg)
+		return c.session.HandleGoodByeMessage(&clientMsg)
 	default:
 		// 未知消息类型，直接回显
 		return c.clientState.Conn.WriteMessage(websocket.TextMessage, message)

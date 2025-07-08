@@ -9,7 +9,25 @@ import (
 	log "xiaozhi-esp32-server-golang/logger"
 )
 
-func ProcessVadAudio(state *ClientState) {
+type ASRManagerOption func(*ASRManager)
+
+type ASRManager struct {
+	clientState *ClientState
+}
+
+func NewASRManager(clientState *ClientState, opts ...ASRManagerOption) *ASRManager {
+	asr := &ASRManager{
+		clientState: clientState,
+	}
+	for _, opt := range opts {
+		opt(asr)
+	}
+	return asr
+}
+
+// ProcessVadAudio 启动VAD音频处理
+func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
+	state := a.clientState
 	go func() {
 		audioFormat := state.InputAudioFormat
 		audioProcesser, err := audio.GetAudioProcesser(audioFormat.SampleRate, audioFormat.Channels, audioFormat.FrameDuration)
@@ -26,7 +44,6 @@ func ProcessVadAudio(state *ClientState) {
 		}
 
 		for {
-			//sessionCtx := state.GetSessionCtx()
 			select {
 			case opusFrame, ok := <-state.OpusAudioBuffer:
 				log.Debugf("processAsrAudio 收到音频数据, len: %d", len(opusFrame))
@@ -136,7 +153,7 @@ func ProcessVadAudio(state *ClientState) {
 					}
 				}
 
-			case <-state.Ctx.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -144,7 +161,8 @@ func ProcessVadAudio(state *ClientState) {
 }
 
 // restartAsrRecognition 重启ASR识别
-func restartAsrRecognition(ctx context.Context, state *ClientState) error {
+func (a *ASRManager) RestartAsrRecognition(ctx context.Context) error {
+	state := a.clientState
 	log.Debugf("重启ASR识别开始")
 
 	// 取消当前ASR上下文

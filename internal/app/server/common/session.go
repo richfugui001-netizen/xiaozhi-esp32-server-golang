@@ -18,25 +18,44 @@ import (
 	log "xiaozhi-esp32-server-golang/logger"
 )
 
-type Protocol struct {
+type ChatSession struct {
 	clientState *ClientState
+	asrManager  *ASRManager
+	ttsManager  *TTSManager
 
 	chatTextQueue chan string
 }
 
-func NewProtocol(clientState *ClientState) *Protocol {
-	p := &Protocol{
+type ChatSessionOption func(*ChatSession)
+
+func WithASRManager(asr *ASRManager) ChatSessionOption {
+	return func(s *ChatSession) {
+		s.asrManager = asr
+	}
+}
+
+func WithTTSManager(tts *TTSManager) ChatSessionOption {
+	return func(s *ChatSession) {
+		s.ttsManager = tts
+	}
+}
+
+func NewChatSession(clientState *ClientState, opts ...ChatSessionOption) *ChatSession {
+	s := &ChatSession{
 		clientState:   clientState,
 		chatTextQueue: make(chan string, 10),
 	}
-	p.processChatText()
-	return p
+	for _, opt := range opts {
+		opt(s)
+	}
+	s.processChatText()
+	return s
 }
 
-func (p *Protocol) HandleMqttHelloMessage(msg *ClientMessage, strAesKey string, strFullNonce string) error {
-	p.HandleCommonHelloMessage(msg)
+func (s *ChatSession) HandleMqttHelloMessage(msg *ClientMessage, strAesKey string, strFullNonce string) error {
+	s.HandleCommonHelloMessage(msg)
 
-	clientState := p.clientState
+	clientState := s.clientState
 
 	udpExternalHost := viper.GetString("udp.external_host")
 	udpExternalPort := viper.GetInt("udp.external_port")
@@ -52,23 +71,23 @@ func (p *Protocol) HandleMqttHelloMessage(msg *ClientMessage, strAesKey string, 
 	return SendHello(clientState, "udp", &clientState.OutputAudioFormat, udpConfig)
 }
 
-func (p *Protocol) HandleCommonHelloMessage(msg *ClientMessage) error {
+func (s *ChatSession) HandleCommonHelloMessage(msg *ClientMessage) error {
 	if isMcp, ok := msg.Features["mcp"]; ok && isMcp {
-		go initMcp(p.clientState)
+		go initMcp(s.clientState)
 	}
 
-	clientState := p.clientState
+	clientState := s.clientState
 
 	clientState.InputAudioFormat = *msg.AudioParams
 	clientState.SetAsrPcmFrameSize(clientState.InputAudioFormat.SampleRate, clientState.InputAudioFormat.Channels, clientState.InputAudioFormat.FrameDuration)
 
-	ProcessVadAudio(clientState)
+	s.asrManager.ProcessVadAudio(clientState.GetSessionCtx())
 
 	return nil
 }
 
 // handleHelloMessage 处理 hello 消息
-func (p *Protocol) HandleHelloMessage(msg *ClientMessage) error {
+func (s *ChatSession) HandleHelloMessage(msg *ClientMessage) error {
 	// 创建新会话
 	session, err := auth.A().CreateSession(msg.DeviceID)
 	if err != nil {
@@ -76,24 +95,24 @@ func (p *Protocol) HandleHelloMessage(msg *ClientMessage) error {
 	}
 
 	// 更新客户端状态
-	p.clientState.SessionID = session.ID
+	s.clientState.SessionID = session.ID
 
-	p.HandleCommonHelloMessage(msg)
+	s.HandleCommonHelloMessage(msg)
 
 	// 发送 hello 响应
-	return SendHello(p.clientState, "websocket", &p.clientState.OutputAudioFormat, nil)
+	return SendHello(s.clientState, "websocket", &s.clientState.OutputAudioFormat, nil)
 }
 
 // handleListenMessage 处理监听消息
-func (p *Protocol) HandleListenMessage(msg *ClientMessage) error {
+func (s *ChatSession) HandleListenMessage(msg *ClientMessage) error {
 	// 根据状态处理
 	switch msg.State {
 	case MessageStateStart:
-		p.HandleListenStart(msg)
+		s.HandleListenStart(msg)
 	case MessageStateStop:
-		p.HandleListenStop()
+		s.HandleListenStop()
 	case MessageStateDetect:
-		p.HandleListenDetect(msg)
+		s.HandleListenDetect(msg)
 	}
 
 	// 记录日志
@@ -101,9 +120,9 @@ func (p *Protocol) HandleListenMessage(msg *ClientMessage) error {
 	return nil
 }
 
-func (p *Protocol) HandleListenDetect(msg *ClientMessage) error {
+func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 	// 唤醒词检测
-	StopSpeaking(p.clientState, false)
+	StopSpeaking(s.clientState, false)
 
 	// 如果有文本，处理唤醒词
 	if msg.Text != "" {
@@ -124,7 +143,7 @@ func (p *Protocol) HandleListenDetect(msg *ClientMessage) error {
 		}
 		if needStartChat {
 			// 否则开始对话
-			if err := p.startChat(text); err != nil {
+			if err := s.startChat(text); err != nil {
 				log.Errorf("开始对话失败: %v", err)
 			}
 		}
@@ -133,12 +152,12 @@ func (p *Protocol) HandleListenDetect(msg *ClientMessage) error {
 }
 
 // handleAbortMessage 处理中止消息
-func (p *Protocol) HandleAbortMessage(msg *ClientMessage) error {
+func (s *ChatSession) HandleAbortMessage(msg *ClientMessage) error {
 	// 设置打断状态
-	p.clientState.Abort = true
-	p.clientState.Dialogue.Messages = nil // 清空对话历史
+	s.clientState.Abort = true
+	s.clientState.Dialogue.Messages = nil // 清空对话历史
 
-	StopSpeaking(p.clientState, true)
+	StopSpeaking(s.clientState, true)
 
 	// 记录日志
 	log.Infof("设备 %s abort 会话", msg.DeviceID)
@@ -146,7 +165,7 @@ func (p *Protocol) HandleAbortMessage(msg *ClientMessage) error {
 }
 
 // handleIoTMessage 处理物联网消息
-func (p *Protocol) HandleIoTMessage(msg *ClientMessage) error {
+func (s *ChatSession) HandleIoTMessage(msg *ClientMessage) error {
 	// 获取客户端状态
 	//sessionID := clientState.SessionID
 
@@ -157,7 +176,7 @@ func (p *Protocol) HandleIoTMessage(msg *ClientMessage) error {
 		}*/
 
 	// 发送 IoT 响应
-	err := SendIot(p.clientState, msg)
+	err := SendIot(s.clientState, msg)
 	if err != nil {
 		return fmt.Errorf("发送响应失败: %v", err)
 	}
@@ -167,11 +186,11 @@ func (p *Protocol) HandleIoTMessage(msg *ClientMessage) error {
 	return nil
 }
 
-func (p *Protocol) HandleMcpMessage(msg *ClientMessage) error {
-	mcpSession := mcp.GetDeviceMcpClient(p.clientState.DeviceID)
+func (s *ChatSession) HandleMcpMessage(msg *ClientMessage) error {
+	mcpSession := mcp.GetDeviceMcpClient(s.clientState.DeviceID)
 	if mcpSession != nil {
 		select {
-		case p.clientState.McpRecvMsgChan <- msg.PayLoad:
+		case s.clientState.McpRecvMsgChan <- msg.PayLoad:
 		default:
 			log.Warnf("mcp 接收消息通道已满, 丢弃消息")
 		}
@@ -179,61 +198,61 @@ func (p *Protocol) HandleMcpMessage(msg *ClientMessage) error {
 	return nil
 }
 
-func (p *Protocol) HandleGoodByeMessage(msg *ClientMessage) error {
-	p.clientState.Conn.Close()
+func (s *ChatSession) HandleGoodByeMessage(msg *ClientMessage) error {
+	s.clientState.Conn.Close()
 	return nil
 }
 
-func (p *Protocol) HandleListenStart(msg *ClientMessage) error {
+func (s *ChatSession) HandleListenStart(msg *ClientMessage) error {
 	// 处理拾音模式
 	if msg.Mode != "" {
-		p.clientState.ListenMode = msg.Mode
+		s.clientState.ListenMode = msg.Mode
 		log.Infof("设备 %s 拾音模式: %s", msg.DeviceID, msg.Mode)
 	}
-	if p.clientState.ListenMode == "manual" {
-		StopSpeaking(p.clientState, false)
+	if s.clientState.ListenMode == "manual" {
+		StopSpeaking(s.clientState, false)
 	}
-	p.clientState.SetStatus(ClientStatusListening)
+	s.clientState.SetStatus(ClientStatusListening)
 
-	return p.OnListenStart()
+	return s.OnListenStart()
 }
 
-func (p *Protocol) HandleListenStop() error {
-	if p.clientState.ListenMode == "auto" {
-		p.clientState.CancelSessionCtx()
+func (s *ChatSession) HandleListenStop() error {
+	if s.clientState.ListenMode == "auto" {
+		s.clientState.CancelSessionCtx()
 	}
 
 	//调用
-	p.clientState.OnManualStop()
+	s.clientState.OnManualStop()
 
 	return nil
 }
 
-func (p *Protocol) OnListenStart() error {
+func (s *ChatSession) OnListenStart() error {
 	log.Debugf("OnListenStart start")
 	defer log.Debugf("OnListenStart end")
 
 	select {
-	case <-p.clientState.Ctx.Done():
+	case <-s.clientState.Ctx.Done():
 		log.Debugf("OnListenStart Ctx done, return")
 		return nil
 	default:
 	}
 
-	p.clientState.Destroy()
+	s.clientState.Destroy()
 
-	ctx := p.clientState.GetSessionCtx()
+	ctx := s.clientState.GetSessionCtx()
 
 	//初始化asr相关
-	if p.clientState.ListenMode == "manual" {
-		p.clientState.VoiceStatus.SetClientHaveVoice(true)
+	if s.clientState.ListenMode == "manual" {
+		s.clientState.VoiceStatus.SetClientHaveVoice(true)
 	}
 
 	// 启动asr流式识别，复用 restartAsrRecognition 函数
-	err := restartAsrRecognition(ctx, p.clientState)
+	err := s.asrManager.RestartAsrRecognition(ctx)
 	if err != nil {
 		log.Errorf("asr流式识别失败: %v", err)
-		p.clientState.Conn.Close()
+		s.clientState.Conn.Close()
 		return err
 	}
 
@@ -259,30 +278,30 @@ func (p *Protocol) OnListenStart() error {
 			default:
 			}
 
-			text, err := p.clientState.RetireAsrResult(ctx)
+			text, err := s.clientState.RetireAsrResult(ctx)
 			if err != nil {
 				log.Errorf("处理asr结果失败: %v", err)
 				return
 			}
 
 			//统计asr耗时
-			log.Debugf("处理asr结果: %s, 耗时: %d ms", text, p.clientState.GetAsrDuration())
+			log.Debugf("处理asr结果: %s, 耗时: %d ms", text, s.clientState.GetAsrDuration())
 
 			if text != "" {
 				// 重置重试计数器
 				startIdleTime = 0
 
 				//当获取到asr结果时, 结束语音输入
-				p.clientState.OnVoiceSilence()
+				s.clientState.OnVoiceSilence()
 
 				//发送asr消息
-				err = SendAsrResult(p.clientState, text)
+				err = SendAsrResult(s.clientState, text)
 				if err != nil {
 					log.Errorf("发送asr消息失败: %v", err)
 					return
 				}
 
-				err = p.startChat(text)
+				err = s.startChat(text)
 				if err != nil {
 					log.Errorf("开始对话失败: %v", err)
 					return
@@ -295,20 +314,20 @@ func (p *Protocol) OnListenStart() error {
 					return
 				default:
 				}
-				log.Debugf("ready Restart Asr, p.clientState.Status: %s", p.clientState.Status)
-				if p.clientState.Status == ClientStatusListening || p.clientState.Status == ClientStatusListenStop {
+				log.Debugf("ready Restart Asr, s.clientState.Status: %s", s.clientState.Status)
+				if s.clientState.Status == ClientStatusListening || s.clientState.Status == ClientStatusListenStop {
 					// text 为空，检查是否需要重新启动ASR
 					diffTs := time.Now().Unix() - startIdleTime
 					if startIdleTime > 0 && diffTs <= maxIdleTime {
 						log.Warnf("ASR识别结果为空，尝试重启ASR识别, diff ts: %s", diffTs)
-						if restartErr := restartAsrRecognition(ctx, p.clientState); restartErr != nil {
+						if restartErr := s.asrManager.RestartAsrRecognition(ctx); restartErr != nil {
 							log.Errorf("重启ASR识别失败: %v", restartErr)
 							return
 						}
 						continue
 					} else {
 						log.Warnf("ASR识别结果为空，已达到最大空闲时间: %d", maxIdleTime)
-						p.clientState.Conn.Close()
+						s.clientState.Conn.Close()
 						return
 					}
 				}
@@ -320,28 +339,28 @@ func (p *Protocol) OnListenStart() error {
 }
 
 // startChat 开始对话
-func (p *Protocol) startChat(text string) error {
+func (s *ChatSession) startChat(text string) error {
 	select {
-	case p.chatTextQueue <- text:
+	case s.chatTextQueue <- text:
 	default:
 		log.Warnf("chatTextQueue 已满, 丢弃消息")
 	}
 	return nil
 }
 
-func (p *Protocol) processChatText() {
+func (s *ChatSession) processChatText() {
 	log.Debugf("processChatText start")
 	defer log.Debugf("processChatText end")
 
 	go func() {
 		for {
 			select {
-			case <-p.clientState.Ctx.Done():
+			case <-s.clientState.Ctx.Done():
 				return
 			default:
 				select {
-				case text := <-p.chatTextQueue:
-					err := p.actionDoChat(text)
+				case text := <-s.chatTextQueue:
+					err := s.actionDoChat(text)
 					if err != nil {
 						log.Errorf("处理对话失败: %v", err)
 						return
@@ -353,9 +372,9 @@ func (p *Protocol) processChatText() {
 	}()
 }
 
-func (p *Protocol) actionDoChat(text string) error {
-	ctx := p.clientState.GetSessionCtx()
-	clientState := p.clientState
+func (s *ChatSession) actionDoChat(text string) error {
+	ctx := s.clientState.GetSessionCtx()
+	clientState := s.clientState
 
 	sessionID := clientState.SessionID
 

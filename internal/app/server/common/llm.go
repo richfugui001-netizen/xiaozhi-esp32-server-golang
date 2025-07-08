@@ -93,7 +93,8 @@ func (l *LLMManager) HandleLLMResponse(requestEinoMessages []*schema.Message, ll
 
 				if llmResponse.Text != "" {
 					// 处理文本内容响应
-					if err := handleTextResponse(l.ctx, state, llmResponse, &fullText); err != nil {
+					ttsManager := NewTTSManager(WithClientState(state))
+					if err := ttsManager.handleTextResponse(l.ctx, llmResponse, &fullText); err != nil {
 						return true, err
 					}
 				}
@@ -117,7 +118,8 @@ func (l *LLMManager) HandleLLMResponse(requestEinoMessages []*schema.Message, ll
 						}
 						if !invokeToolSuccess {
 							//工具调用失败
-							if err := handleTextResponse(l.ctx, state, llmResponse, &fullText); err != nil {
+							ttsManager := NewTTSManager(WithClientState(state))
+							if err := ttsManager.handleTextResponse(l.ctx, llmResponse, &fullText); err != nil {
 								return true, err
 							}
 							sendTtsStartEndFunc(false)
