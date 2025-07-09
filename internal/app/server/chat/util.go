@@ -1,4 +1,4 @@
-package common
+package chat
 
 import (
 	"strings"

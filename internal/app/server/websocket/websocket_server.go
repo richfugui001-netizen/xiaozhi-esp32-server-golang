@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/viper"
 
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
-	"xiaozhi-esp32-server-golang/internal/app/server/common"
+	"xiaozhi-esp32-server-golang/internal/app/server/types"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -27,11 +27,37 @@ type WebSocketServer struct {
 	port int
 	// MCP管理器
 	globalMCPManager *mcp.GlobalMCPManager
+
+	onNewConnection types.OnNewConnection
 }
 
-// NewWebSocketServer 创建新的 WebSocket 服务器
-func NewWebSocketServer(port int) *WebSocketServer {
-	return &WebSocketServer{
+// Option 类型定义
+// WebSocketServerOption 用于配置 WebSocketServer 的可选参数
+type WebSocketServerOption func(*WebSocketServer)
+
+// WithAuthManager 设置认证管理器
+func WithAuthManager(authManager *auth.AuthManager) WebSocketServerOption {
+	return func(s *WebSocketServer) {
+		s.authManager = authManager
+	}
+}
+
+// WithMCPManager 设置 MCP 管理器
+func WithMCPManager(mcpManager *mcp.GlobalMCPManager) WebSocketServerOption {
+	return func(s *WebSocketServer) {
+		s.globalMCPManager = mcpManager
+	}
+}
+
+func WithOnNewConnection(onNewConnection types.OnNewConnection) WebSocketServerOption {
+	return func(s *WebSocketServer) {
+		s.onNewConnection = onNewConnection
+	}
+}
+
+// NewWebSocketServer 创建新的 WebSocket 服务器（WithOption 方式）
+func NewWebSocketServer(port int, opts ...WebSocketServerOption) *WebSocketServer {
+	s := &WebSocketServer{
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -39,10 +65,15 @@ func NewWebSocketServer(port int) *WebSocketServer {
 				return true // 允许所有来源的连接
 			},
 		},
+		// 默认值
 		authManager:      auth.A(),
 		port:             port,
 		globalMCPManager: mcp.GetGlobalMCPManager(),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Start 启动 WebSocket 服务器
@@ -122,62 +153,10 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	chatManager, err := common.NewChatManager(
-		common.WithDeviceID(deviceID),
-		common.WithWebSocketConn(conn),
-	)
-	if err != nil {
-		log.Errorf("创建chatManager失败: %v", err)
-		return
+	// 适配为 IConn 接口
+	wsConn := NewWebSocketConn(conn, deviceID)
+	if s.onNewConnection != nil {
+		s.onNewConnection(wsConn)
 	}
 
-	clientState := chatManager.GetClientState()
-
-	s.clientStates.Store(clientState.Conn, clientState)
-
-	// 连接关闭时从列表中移除
-	defer func() {
-		chatManager.OnClose()
-		s.clientStates.Delete(clientState.Conn)
-	}()
-
-	// 处理消息
-	for {
-		// 每次收到消息都刷新超时时间, 空闲60秒就退出
-		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
-		messageType, message, err := conn.ReadMessage()
-		if err != nil {
-			// 这里会捕获到超时、断开等异常
-			log.Warnf("WebSocket连接异常断开: %v", err)
-			break
-		}
-
-		// 处理文本消息
-		if messageType == websocket.TextMessage {
-			log.Infof("收到文本消息: %s", string(message))
-			if err := chatManager.HandleTextMessage(message); err != nil {
-				log.Errorf("处理文本消息失败: %v", err)
-				continue
-			}
-		} else if messageType == websocket.BinaryMessage {
-			log.Infof("收到音频数据，大小: %d 字节", len(message))
-			if clientState.GetClientVoiceStop() {
-				//log.Debug("客户端停止说话, 跳过音频数据")
-				continue
-			}
-			// 同时通过音频处理器处理
-			if ok := chatManager.HandleAudioMessage(message); !ok {
-				log.Errorf("音频缓冲区已满: %v", err)
-			}
-		} else if messageType == websocket.CloseMessage {
-			log.Infof("收到关闭消息")
-			break
-		} else if messageType == websocket.PingMessage {
-			// 响应 Ping 消息
-			if err := conn.WriteMessage(websocket.PongMessage, nil); err != nil {
-				log.Errorf("发送 Pong 消息失败: %v", err)
-				break
-			}
-		}
-	}
 }

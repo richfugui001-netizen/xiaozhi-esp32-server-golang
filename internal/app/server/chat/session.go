@@ -1,4 +1,4 @@
-package common
+package chat
 
 import (
 	"fmt"
@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
+	types_conn "xiaozhi-esp32-server-golang/internal/app/server/types"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
@@ -19,9 +20,11 @@ import (
 )
 
 type ChatSession struct {
-	clientState *ClientState
-	asrManager  *ASRManager
-	ttsManager  *TTSManager
+	clientState     *ClientState
+	asrManager      *ASRManager
+	ttsManager      *TTSManager
+	llmManager      *LLMManager
+	serverTransport *ServerTransport
 
 	chatTextQueue chan string
 }
@@ -40,6 +43,18 @@ func WithTTSManager(tts *TTSManager) ChatSessionOption {
 	}
 }
 
+func WithServerTransport(serverTransport *ServerTransport) ChatSessionOption {
+	return func(s *ChatSession) {
+		s.serverTransport = serverTransport
+	}
+}
+
+func WithLLMManager(llm *LLMManager) ChatSessionOption {
+	return func(s *ChatSession) {
+		s.llmManager = llm
+	}
+}
+
 func NewChatSession(clientState *ClientState, opts ...ChatSessionOption) *ChatSession {
 	s := &ChatSession{
 		clientState:   clientState,
@@ -52,13 +67,41 @@ func NewChatSession(clientState *ClientState, opts ...ChatSessionOption) *ChatSe
 	return s
 }
 
-func (s *ChatSession) HandleMqttHelloMessage(msg *ClientMessage, strAesKey string, strFullNonce string) error {
+// handleHelloMessage 处理 hello 消息
+func (s *ChatSession) HandleHelloMessage(msg *ClientMessage) error {
+	if msg.Transport == types_conn.TransportTypeWebsocket {
+		return s.HandleWebsocketHelloMessage(msg)
+	} else if msg.Transport == types_conn.TransportTypeMqttUdp {
+		return s.HandleMqttHelloMessage(msg)
+	}
+	return fmt.Errorf("不支持的传输类型: %s", msg.Transport)
+}
+
+func (s *ChatSession) HandleMqttHelloMessage(msg *ClientMessage) error {
 	s.HandleCommonHelloMessage(msg)
 
 	clientState := s.clientState
 
 	udpExternalHost := viper.GetString("udp.external_host")
 	udpExternalPort := viper.GetInt("udp.external_port")
+
+	aesKey, err := s.serverTransport.GetData("aes_key")
+	if err != nil {
+		return fmt.Errorf("获取aes_key失败: %v", err)
+	}
+	fullNonce, err := s.serverTransport.GetData("full_nonce")
+	if err != nil {
+		return fmt.Errorf("获取full_nonce失败: %v", err)
+	}
+
+	strAesKey, ok := aesKey.(string)
+	if !ok {
+		return fmt.Errorf("aes_key不是字符串")
+	}
+	strFullNonce, ok := fullNonce.(string)
+	if !ok {
+		return fmt.Errorf("full_nonce不是字符串")
+	}
 
 	udpConfig := &UdpConfig{
 		Server: udpExternalHost,
@@ -68,26 +111,10 @@ func (s *ChatSession) HandleMqttHelloMessage(msg *ClientMessage, strAesKey strin
 	}
 
 	// 发送响应
-	return SendHello(clientState, "udp", &clientState.OutputAudioFormat, udpConfig)
+	return s.serverTransport.SendHello("udp", &clientState.OutputAudioFormat, udpConfig)
 }
 
 func (s *ChatSession) HandleCommonHelloMessage(msg *ClientMessage) error {
-	if isMcp, ok := msg.Features["mcp"]; ok && isMcp {
-		go initMcp(s.clientState)
-	}
-
-	clientState := s.clientState
-
-	clientState.InputAudioFormat = *msg.AudioParams
-	clientState.SetAsrPcmFrameSize(clientState.InputAudioFormat.SampleRate, clientState.InputAudioFormat.Channels, clientState.InputAudioFormat.FrameDuration)
-
-	s.asrManager.ProcessVadAudio(clientState.GetSessionCtx())
-
-	return nil
-}
-
-// handleHelloMessage 处理 hello 消息
-func (s *ChatSession) HandleHelloMessage(msg *ClientMessage) error {
 	// 创建新会话
 	session, err := auth.A().CreateSession(msg.DeviceID)
 	if err != nil {
@@ -97,10 +124,27 @@ func (s *ChatSession) HandleHelloMessage(msg *ClientMessage) error {
 	// 更新客户端状态
 	s.clientState.SessionID = session.ID
 
-	s.HandleCommonHelloMessage(msg)
+	if isMcp, ok := msg.Features["mcp"]; ok && isMcp {
+		go initMcp(s.clientState, s.serverTransport)
+	}
 
-	// 发送 hello 响应
-	return SendHello(s.clientState, "websocket", &s.clientState.OutputAudioFormat, nil)
+	clientState := s.clientState
+
+	clientState.InputAudioFormat = *msg.AudioParams
+	clientState.SetAsrPcmFrameSize(clientState.InputAudioFormat.SampleRate, clientState.InputAudioFormat.Channels, clientState.InputAudioFormat.FrameDuration)
+
+	s.asrManager.ProcessVadAudio(clientState.Ctx)
+
+	return nil
+}
+
+func (s *ChatSession) HandleWebsocketHelloMessage(msg *ClientMessage) error {
+	err := s.HandleCommonHelloMessage(msg)
+	if err != nil {
+		return err
+	}
+
+	return s.serverTransport.SendHello("websocket", &s.clientState.OutputAudioFormat, nil)
 }
 
 // handleListenMessage 处理监听消息
@@ -122,7 +166,7 @@ func (s *ChatSession) HandleListenMessage(msg *ClientMessage) error {
 
 func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 	// 唤醒词检测
-	StopSpeaking(s.clientState, false)
+	StopSpeaking(s.serverTransport, false)
 
 	// 如果有文本，处理唤醒词
 	if msg.Text != "" {
@@ -157,7 +201,7 @@ func (s *ChatSession) HandleAbortMessage(msg *ClientMessage) error {
 	s.clientState.Abort = true
 	s.clientState.Dialogue.Messages = nil // 清空对话历史
 
-	StopSpeaking(s.clientState, true)
+	StopSpeaking(s.serverTransport, true)
 
 	// 记录日志
 	log.Infof("设备 %s abort 会话", msg.DeviceID)
@@ -176,7 +220,7 @@ func (s *ChatSession) HandleIoTMessage(msg *ClientMessage) error {
 		}*/
 
 	// 发送 IoT 响应
-	err := SendIot(s.clientState, msg)
+	err := s.serverTransport.SendIot(msg)
 	if err != nil {
 		return fmt.Errorf("发送响应失败: %v", err)
 	}
@@ -190,7 +234,7 @@ func (s *ChatSession) HandleMcpMessage(msg *ClientMessage) error {
 	mcpSession := mcp.GetDeviceMcpClient(s.clientState.DeviceID)
 	if mcpSession != nil {
 		select {
-		case s.clientState.McpRecvMsgChan <- msg.PayLoad:
+		case s.serverTransport.McpRecvMsgChan <- msg.PayLoad:
 		default:
 			log.Warnf("mcp 接收消息通道已满, 丢弃消息")
 		}
@@ -199,7 +243,7 @@ func (s *ChatSession) HandleMcpMessage(msg *ClientMessage) error {
 }
 
 func (s *ChatSession) HandleGoodByeMessage(msg *ClientMessage) error {
-	s.clientState.Conn.Close()
+	s.serverTransport.Close()
 	return nil
 }
 
@@ -210,7 +254,7 @@ func (s *ChatSession) HandleListenStart(msg *ClientMessage) error {
 		log.Infof("设备 %s 拾音模式: %s", msg.DeviceID, msg.Mode)
 	}
 	if s.clientState.ListenMode == "manual" {
-		StopSpeaking(s.clientState, false)
+		StopSpeaking(s.serverTransport, false)
 	}
 	s.clientState.SetStatus(ClientStatusListening)
 
@@ -252,7 +296,7 @@ func (s *ChatSession) OnListenStart() error {
 	err := s.asrManager.RestartAsrRecognition(ctx)
 	if err != nil {
 		log.Errorf("asr流式识别失败: %v", err)
-		s.clientState.Conn.Close()
+		s.serverTransport.Close()
 		return err
 	}
 
@@ -295,7 +339,7 @@ func (s *ChatSession) OnListenStart() error {
 				s.clientState.OnVoiceSilence()
 
 				//发送asr消息
-				err = SendAsrResult(s.clientState, text)
+				err = s.serverTransport.SendAsrResult(text)
 				if err != nil {
 					log.Errorf("发送asr消息失败: %v", err)
 					return
@@ -327,7 +371,7 @@ func (s *ChatSession) OnListenStart() error {
 						continue
 					} else {
 						log.Warnf("ASR识别结果为空，已达到最大空闲时间: %d", maxIdleTime)
-						s.clientState.Conn.Close()
+						s.serverTransport.Close()
 						return
 					}
 				}
@@ -357,15 +401,18 @@ func (s *ChatSession) processChatText() {
 			select {
 			case <-s.clientState.Ctx.Done():
 				return
+			case <-s.clientState.GetSessionCtx().Done():
+				//清空chatTextQueue, 然后continue
+				s.chatTextQueue = make(chan string, 10)
+				continue
 			default:
 				select {
 				case text := <-s.chatTextQueue:
 					err := s.actionDoChat(text)
 					if err != nil {
 						log.Errorf("处理对话失败: %v", err)
-						return
+						continue
 					}
-				default:
 				}
 			}
 		}
@@ -427,9 +474,7 @@ func (s *ChatSession) actionDoChat(text string) error {
 	// 发送带工具的LLM请求
 	log.Infof("使用 %d 个MCP工具发送LLM请求, tools: %+v", len(einoTools), toolNameList)
 
-	llmManager := NewLLMManager(ctx, clientState)
-
-	err = llmManager.DoLLmRequest(requestEinoMessages, einoTools)
+	err = s.llmManager.DoLLmRequest(ctx, requestEinoMessages, einoTools)
 	if err != nil {
 		log.Errorf("发送带工具的 LLM 请求失败, seesionID: %s, error: %v", sessionID, err)
 		return fmt.Errorf("发送带工具的 LLM 请求失败: %v", err)

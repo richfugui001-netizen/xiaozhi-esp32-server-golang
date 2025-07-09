@@ -4,7 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"xiaozhi-esp32-server-golang/internal/app/server/common"
+	"xiaozhi-esp32-server-golang/internal/app/server/chat"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/spf13/viper"
@@ -38,7 +38,7 @@ func (s *WebSocketServer) handleVisionAPI(w http.ResponseWriter, r *http.Request
 		}
 		authToken = strings.TrimPrefix(authToken, "Bearer ")
 
-		err := common.VisvionAuth(authToken)
+		err := chat.VisvionAuth(authToken)
 		if err != nil {
 			log.Errorf("图片识别认证失败: %v", err)
 			http.Error(w, "图片识别认证失败", http.StatusUnauthorized)
@@ -68,7 +68,7 @@ func (s *WebSocketServer) handleVisionAPI(w http.ResponseWriter, r *http.Request
 
 	file.Close()
 
-	result, err := common.HandleVllm(deviceId, fileBytes, question)
+	result, err := chat.HandleVllm(deviceId, fileBytes, question)
 	if err != nil {
 		log.Errorf("图片识别失败: %v", err)
 		http.Error(w, "图片识别失败", http.StatusInternalServerError)

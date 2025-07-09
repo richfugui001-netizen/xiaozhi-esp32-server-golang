@@ -1,4 +1,4 @@
-package common
+package chat
 
 import (
 	"context"
@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
 
+	types_conn "xiaozhi-esp32-server-golang/internal/app/server/types"
 	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
@@ -20,76 +20,58 @@ import (
 )
 
 type ChatManager struct {
-	DeviceID           string
-	Conn               *websocket.Conn
-	MqttConn           *MqttConn
-	HandleUdpAudioData SendAudioData
+	DeviceID  string
+	transport types_conn.IConn
 
 	clientState *ClientState
 	session     *ChatSession
+	ctx         context.Context
 }
 
 type ChatManagerOption func(*ChatManager)
 
-func WithDeviceID(deviceID string) ChatManagerOption {
-	return func(cm *ChatManager) {
-		cm.DeviceID = deviceID
+func NewChatManager(deviceID string, transport types_conn.IConn, options ...ChatManagerOption) (*ChatManager, error) {
+	cm := &ChatManager{
+		DeviceID:  deviceID,
+		transport: transport,
+		ctx:       context.Background(),
 	}
-}
 
-func WithWebSocketConn(conn *websocket.Conn) ChatManagerOption {
-	return func(cm *ChatManager) {
-		cm.Conn = conn
-	}
-}
-
-func WithMqttConn(mqttConn *MqttConn) ChatManagerOption {
-	return func(cm *ChatManager) {
-		cm.MqttConn = mqttConn
-	}
-}
-
-func WithUdpSendAudioData(handleUdpAudioData SendAudioData) ChatManagerOption {
-	return func(cm *ChatManager) {
-		cm.HandleUdpAudioData = handleUdpAudioData
-	}
-}
-
-func NewChatManager(options ...ChatManagerOption) (*ChatManager, error) {
-	cm := &ChatManager{}
 	for _, option := range options {
 		option(cm)
 	}
 
-	clientState, err := GenClientState(cm.DeviceID, cm.Conn, cm.MqttConn)
+	clientState, err := GenClientState(cm.ctx, cm.DeviceID)
 	if err != nil {
 		log.Errorf("初始化客户端状态失败: %v", err)
 		return nil, err
 	}
-
-	asrManager := NewASRManager(clientState)
-	ttsManager := NewTTSManager(clientState)
-
 	cm.clientState = clientState
-	cm.session = NewChatSession(clientState, WithASRManager(asrManager), WithTTSManager(ttsManager))
 
-	cm.clientState.UdpSendAudioData = cm.HandleUdpAudioData
+	serverTransport := NewServerTransport(cm.transport, clientState)
 
-	err = cm.InitAsrLlmTts()
-	if err != nil {
-		log.Errorf("初始化ASR/LLM/TTS失败: %v", err)
-		return nil, err
-	}
+	asrManager := NewASRManager(clientState, serverTransport)
+	ttsManager := NewTTSManager(clientState, serverTransport)
+	llmManager := NewLLMManager(clientState, serverTransport, ttsManager)
+
+	cm.session = NewChatSession(
+		clientState,
+		WithASRManager(asrManager),
+		WithTTSManager(ttsManager),
+		WithServerTransport(serverTransport),
+		WithLLMManager(llmManager),
+	)
+
 	return cm, nil
 }
 
-func GenClientState(deviceID string, conn *websocket.Conn, mqttConn *MqttConn) (*ClientState, error) {
+func GenClientState(pctx context.Context, deviceID string) (*ClientState, error) {
 	configProvider, err := userconfig.GetProvider()
 	if err != nil {
 		log.Errorf("获取 用户配置提供者失败: %+v", err)
 		return nil, err
 	}
-	deviceConfig, err := configProvider.GetUserConfig(context.Background(), deviceID)
+	deviceConfig, err := configProvider.GetUserConfig(pctx, deviceID)
 	if err != nil {
 		log.Errorf("获取 设备 %s 配置失败: %+v", deviceID, err)
 		return nil, err
@@ -100,7 +82,7 @@ func GenClientState(deviceID string, conn *websocket.Conn, mqttConn *MqttConn) (
 	}
 
 	// 创建带取消功能的上下文
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(pctx)
 
 	maxSilenceDuration := viper.GetInt64("chat.chat_max_silence_duration")
 	if maxSilenceDuration == 0 {
@@ -109,17 +91,11 @@ func GenClientState(deviceID string, conn *websocket.Conn, mqttConn *MqttConn) (
 
 	systemPrompt, _ := llm_memory.Get().GetSystemPrompt(ctx, deviceID)
 
-	connType := ConnTypeWebsocket
-	if mqttConn != nil {
-		connType = ConnTypeMqtt
-	}
-
 	clientState := &ClientState{
 		Dialogue:     &Dialogue{},
 		Abort:        false,
 		ListenMode:   "auto",
 		DeviceID:     deviceID,
-		Conn:         NewConn(connType, conn, mqttConn),
 		Ctx:          ctx,
 		Cancel:       cancel,
 		SystemPrompt: systemPrompt.Content,
@@ -142,8 +118,7 @@ func GenClientState(deviceID string, conn *websocket.Conn, mqttConn *MqttConn) (
 			VoiceStop:            false,
 			SilenceThresholdTime: maxSilenceDuration,
 		},
-		SessionCtx:     Ctx{},
-		McpRecvMsgChan: make(chan []byte, 10),
+		SessionCtx: Ctx{},
 	}
 
 	ttsType := clientState.DeviceConfig.Tts.Provider
@@ -176,12 +151,73 @@ func (c *ChatManager) InitAsrLlmTts() error {
 	return nil
 }
 
+func (c *ChatManager) Start() error {
+	go func() error {
+		err := c.InitAsrLlmTts()
+		if err != nil {
+			log.Errorf("初始化ASR/LLM/TTS失败: %v", err)
+			return err
+		}
+
+		go c.CmdMessageLoop()
+		go c.AudioMessageLoop()
+		return nil
+	}()
+
+	return nil
+}
+
+func (c *ChatManager) CmdMessageLoop() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Infof("设备 %s recvCmd context cancel", c.clientState.DeviceID)
+			return
+		default:
+			message, err := c.transport.RecvCmd(120)
+			if err != nil {
+				log.Errorf("recv cmd error: %v", err)
+				return
+			}
+			log.Infof("收到文本消息: %s", string(message))
+			if err := c.HandleTextMessage(message); err != nil {
+				log.Errorf("处理文本消息失败: %v", err)
+				continue
+			}
+		}
+	}
+}
+
+func (c *ChatManager) AudioMessageLoop() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Debugf("设备 %s recvCmd context cancel", c.clientState.DeviceID)
+			return
+		default:
+			message, err := c.transport.RecvAudio(300)
+			if err != nil {
+				log.Errorf("recv audio error: %v", err)
+				return
+			}
+			log.Debugf("收到音频数据，大小: %d 字节", len(message))
+			if c.clientState.GetClientVoiceStop() {
+				//log.Debug("客户端停止说话, 跳过音频数据")
+				continue
+			}
+			// 同时通过音频处理器处理
+			if ok := c.HandleAudioMessage(message); !ok {
+				log.Errorf("音频缓冲区已满: %v", err)
+			}
+		}
+	}
+}
+
 // 主动关闭断开连接
 func (c *ChatManager) Close() error {
 	log.Infof("主动关闭断开连接, 设备 %s", c.clientState.DeviceID)
-	StopSpeaking(c.clientState, true)
+	StopSpeaking(c.session.serverTransport, true)
 	c.clientState.Destroy()
-	c.clientState.Conn.Close()
 	return nil
 }
 
@@ -190,12 +226,7 @@ func (c *ChatManager) OnClose() error {
 	// 关闭done通道通知所有goroutine退出
 	c.clientState.Cancel()
 	c.clientState.Destroy()
-	c.clientState.Conn.Close()
 	return nil
-}
-
-func (c *ChatManager) HandleMqttHelloMessage(clientMsg *ClientMessage, strAesKey string, strFullNonce string) error {
-	return c.session.HandleMqttHelloMessage(clientMsg, strAesKey, strFullNonce)
 }
 
 // handleTextMessage 处理文本消息
@@ -222,7 +253,7 @@ func (c *ChatManager) HandleTextMessage(message []byte) error {
 		return c.session.HandleGoodByeMessage(&clientMsg)
 	default:
 		// 未知消息类型，直接回显
-		return c.clientState.Conn.WriteMessage(websocket.TextMessage, message)
+		return fmt.Errorf("未知消息类型: %s", clientMsg.Type)
 	}
 }
 

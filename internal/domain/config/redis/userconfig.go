@@ -44,6 +44,7 @@ func (u *UserConfig) GetUserConfig(ctx context.Context, userID string) (types.UC
 
 	if u.redisInstance != nil {
 		key := u.GetUserConfigKey(userID)
+
 		//hgetall 拿到所有的
 		var err error
 		redisConfig, err = u.redisInstance.HGetAll(ctx, key).Result()

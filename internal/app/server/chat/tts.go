@@ -1,4 +1,4 @@
-package common
+package chat
 
 import (
 	"bytes"
@@ -17,13 +17,15 @@ import (
 type TTSManagerOption func(*TTSManager)
 
 type TTSManager struct {
-	clientState *ClientState
+	clientState     *ClientState
+	serverTransport *ServerTransport
 }
 
 // NewTTSManager 只接受WithClientState
-func NewTTSManager(clientState *ClientState, opts ...TTSManagerOption) *TTSManager {
+func NewTTSManager(clientState *ClientState, serverTransport *ServerTransport, opts ...TTSManagerOption) *TTSManager {
 	t := &TTSManager{
-		clientState: clientState,
+		clientState:     clientState,
+		serverTransport: serverTransport,
 	}
 	for _, opt := range opts {
 		opt(t)
@@ -44,7 +46,7 @@ func (t *TTSManager) handleTextResponse(ctx context.Context, llmResponse llm_com
 		return fmt.Errorf("生成 TTS 音频失败: %v", err)
 	}
 
-	if err := SendSentenceStart(t.clientState, llmResponse.Text); err != nil {
+	if err := t.serverTransport.SendSentenceStart(llmResponse.Text); err != nil {
 		log.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
 		return fmt.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
 	}
@@ -57,7 +59,7 @@ func (t *TTSManager) handleTextResponse(ctx context.Context, llmResponse llm_com
 		return fmt.Errorf("发送 TTS 音频失败: %s, %v", llmResponse.Text, err)
 	}
 
-	if err := SendSentenceEnd(t.clientState, llmResponse.Text); err != nil {
+	if err := t.serverTransport.SendSentenceEnd(llmResponse.Text); err != nil {
 		log.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
 		return fmt.Errorf("发送 TTS 文本失败: %s, %v", llmResponse.Text, err)
 	}
@@ -94,7 +96,7 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 				if !ok {
 					// 通道已关闭，发送已收集的帧并返回
 					for _, f := range preBuffer {
-						if err := t.clientState.ActionSendAudioData(f); err != nil {
+						if err := t.serverTransport.SendAudio(f); err != nil {
 							return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(f), err)
 						}
 					}
@@ -105,7 +107,7 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 					log.Debugf("SendTTSAudio context done, exit, totalFrames: %d", totalFrames)
 					return nil
 				default:
-					if err := t.clientState.ActionSendAudioData(frame); err != nil {
+					if err := t.serverTransport.SendAudio(frame); err != nil {
 						return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
 					}
 					log.Debugf("发送 TTS 音频: %d 帧, len: %d", totalFrames, len(frame))
@@ -141,7 +143,7 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 					return nil
 				default:
 					// 发送当前帧
-					if err := t.clientState.ActionSendAudioData(frame); err != nil {
+					if err := t.serverTransport.SendAudio(frame); err != nil {
 						return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
 					}
 					totalFrames++

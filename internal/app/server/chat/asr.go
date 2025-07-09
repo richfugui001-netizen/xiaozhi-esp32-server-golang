@@ -1,4 +1,4 @@
-package common
+package chat
 
 import (
 	"context"
@@ -12,12 +12,14 @@ import (
 type ASRManagerOption func(*ASRManager)
 
 type ASRManager struct {
-	clientState *ClientState
+	clientState     *ClientState
+	serverTransport *ServerTransport
 }
 
-func NewASRManager(clientState *ClientState, opts ...ASRManagerOption) *ASRManager {
+func NewASRManager(clientState *ClientState, serverTransport *ServerTransport, opts ...ASRManagerOption) *ASRManager {
 	asr := &ASRManager{
-		clientState: clientState,
+		clientState:     clientState,
+		serverTransport: serverTransport,
 	}
 	for _, opt := range opts {
 		opt(asr)
@@ -121,7 +123,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
 					if idleDuration > state.GetMaxIdleDuration() {
 						log.Infof("超出空闲时长: %dms, 断开连接", idleDuration)
 						//断开连接
-						state.Conn.Close()
+						a.serverTransport.Close()
 						return
 					}
 					//如果之前没有语音, 本次也没有语音, 则从缓存中删除

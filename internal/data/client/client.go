@@ -20,7 +20,6 @@ import (
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/schema"
-	"github.com/gorilla/websocket"
 	"github.com/spf13/viper"
 )
 
@@ -51,8 +50,6 @@ type ClientState struct {
 	DeviceID string
 	// 会话ID
 	SessionID string
-	// 连接
-	Conn *Conn
 
 	//设备配置
 	DeviceConfig utypes.UConfig
@@ -84,7 +81,6 @@ type ClientState struct {
 	SessionCtx Ctx
 
 	UdpSendAudioData SendAudioData //发送音频数据
-	MqttInfo         *MqttConn     //mqtt连接
 	Statistic        Statistic     //耗时统计
 	MqttLastActiveTs int64         //最后活跃时间
 	VadLastActiveTs  int64         //vad最后活跃时间, 超过 60s && 没有在tts则断开连接
@@ -93,7 +89,6 @@ type ClientState struct {
 
 	IsTtsStart bool //是否tts开始
 
-	McpRecvMsgChan chan []byte //mcp接收消息通道
 }
 
 func (c *ClientState) SetTtsStart(isStart bool) {
@@ -119,10 +114,6 @@ func (c *ClientState) UpdateLastActiveTs() {
 func (c *ClientState) IsActive() bool {
 	diff := time.Now().Unix() - c.MqttLastActiveTs
 	return c.MqttLastActiveTs > 0 && diff <= ClientActiveTs
-}
-
-func (c *ClientState) IsMqttUdp() bool {
-	return c.Conn.connType == 1
 }
 
 func (c *ClientState) SetStatus(status string) {
@@ -231,18 +222,6 @@ func (c *ClientState) Destroy() {
 
 func (c *ClientState) SetAsrPcmFrameSize(sampleRate int, channels int, perFrameDuration int) {
 	c.AsrAudioBuffer.PcmFrameSize = sampleRate * channels * perFrameDuration / 1000
-}
-
-func (state *ClientState) SendMsg(msg interface{}) error {
-	return state.Conn.WriteJSON(msg)
-}
-
-func (state *ClientState) ActionSendAudioData(audioData []byte) error {
-	if state.IsMqttUdp() {
-		return state.UdpSendAudioData(audioData)
-	}
-
-	return state.Conn.WriteMessage(websocket.BinaryMessage, audioData)
 }
 
 func (state *ClientState) OnManualStop() {

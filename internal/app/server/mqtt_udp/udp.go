@@ -3,9 +3,9 @@ package mqtt_udp
 import (
 	"crypto/cipher"
 	"encoding/binary"
+	"encoding/hex"
 	"net"
 	"time"
-	"xiaozhi-esp32-server-golang/internal/app/server/common"
 )
 
 // Session 表示一个UDP会话
@@ -21,7 +21,6 @@ type UdpSession struct {
 	LastActive  time.Time
 	RemoteAddr  *net.UDPAddr //remote addr
 	LocalSeq    uint32
-	ChatManager *common.ChatManager
 	Block       cipher.Block
 	RemoteSeq   uint32
 	RecvChannel chan []byte //发送的音频数据
@@ -68,4 +67,18 @@ func (s *UdpSession) Encrypt(data []byte) ([]byte, error) {
 	stream.XORKeyStream(encrypted[16:], data)
 
 	return encrypted, nil
+}
+
+func (s *UdpSession) GetAesKeyAndNonce() (string, string) {
+	//处理
+	strAesKey := hex.EncodeToString(s.AesKey[:])
+
+	// 构造 fullNonce: 前缀2字节0100 + 长度2字节0000 + 真实nonce(8字节) + seq(4字节00000000)
+	prefix := []byte{0x01, 0x00}
+	length := []byte{0x00, 0x00}
+	seq := []byte{0x00, 0x00, 0x00, 0x00}
+	fullNonce := append(append(append(prefix, length...), s.Nonce[:]...), seq...)
+	strFullNonce := hex.EncodeToString(fullNonce)
+
+	return strAesKey, strFullNonce
 }

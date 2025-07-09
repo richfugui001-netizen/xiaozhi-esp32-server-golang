@@ -30,7 +30,7 @@ type UdpServer struct {
 	externalPort  int      //udp server external port
 	nonce2Session sync.Map //nonce => UdpSession
 	addr2Session  sync.Map //addr => UdpSession
-	mqttServer    *MqttServer
+	mqttAdapter   *MqttUdpAdapter
 	sync.RWMutex
 }
 
@@ -135,17 +135,11 @@ func (s *UdpServer) processPacket(addr *net.UDPAddr, data []byte) {
 		Errorf("addr: %s 解密失败: %v", addr, err)
 		return
 	}
-
-	chatManager := udpSession.ChatManager
-
-	Infof("收到音频数据，大小: %d 字节", len(decrypted))
-	if chatManager.GetClientState().GetClientVoiceStop() {
-		//log.Debug("客户端停止说话, 跳过音频数据")
+	select {
+	case udpSession.RecvChannel <- decrypted:
 		return
-	}
-	// 同时通过音频处理器处理
-	if ok := chatManager.HandleAudioMessage(decrypted); !ok {
-		Errorf("音频缓冲区已满: %v", err)
+	default:
+		Warnf("udpSession.RecvChannel is full, addr: %s", addr)
 	}
 }
 
