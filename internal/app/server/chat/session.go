@@ -336,6 +336,9 @@ func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 
 func (s *ChatSession) GetRandomGreeting() string {
 	greetingList := viper.GetStringSlice("greeting_list")
+	if len(greetingList) == 0 {
+		return "你好，有啥好玩的."
+	}
 	rand.Seed(time.Now().UnixNano())
 	return greetingList[rand.Intn(len(greetingList))]
 }
