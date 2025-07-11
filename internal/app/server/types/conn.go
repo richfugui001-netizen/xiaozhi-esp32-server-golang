@@ -21,7 +21,9 @@ type IConn interface {
 	GetDeviceID() string
 
 	Close() error
-	OnClose(func())
+	OnClose(func(deviceId string))
+
+	CloseAudioChannel() error
 
 	GetTransportType() string
 

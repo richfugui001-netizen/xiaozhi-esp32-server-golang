@@ -145,8 +145,8 @@ func (c *ChatManager) Close() error {
 	return nil
 }
 
-func (c *ChatManager) OnClose() {
-	log.Infof("设备 %s 断开连接", c.clientState.DeviceID)
+func (c *ChatManager) OnClose(deviceId string) {
+	log.Infof("设备 %s 断开连接", deviceId)
 	// 关闭done通道通知所有goroutine退出
 	c.cancel()
 	return

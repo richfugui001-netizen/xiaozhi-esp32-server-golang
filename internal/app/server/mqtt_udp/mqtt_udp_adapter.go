@@ -103,7 +103,7 @@ func (s *MqttUdpAdapter) Start() error {
 
 func (s *MqttUdpAdapter) checkClientActive() error {
 	go func() {
-		ticker := time.NewTicker(300 * time.Second)
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -111,10 +111,8 @@ func (s *MqttUdpAdapter) checkClientActive() error {
 				s.deviceId2Conn.Range(func(key, value interface{}) bool {
 					conn := value.(*MqttUdpConn)
 					if !conn.IsActive() {
-						s.udpServer.CloseSession(conn.UdpSession.ConnId)
-						Infof("clientState is not active, clear deviceId: %s", conn.DeviceId)
+						conn.Destroy()
 					}
-					conn.Destroy()
 					return true
 				})
 			}
@@ -146,6 +144,19 @@ func (s *MqttUdpAdapter) handleMessage(client mqtt.Client, msg mqtt.Message) {
 	}
 }
 
+// 断开连接，超时或goodbye主动断开
+func (s *MqttUdpAdapter) handleDisconnect(deviceId string) {
+	Debugf("handleDisconnect, deviceId: %s", deviceId)
+
+	conn := s.getDeviceSession(deviceId)
+	if conn == nil {
+		Debugf("handleDisconnect, deviceId: %s not found", deviceId)
+		return
+	}
+	s.udpServer.CloseSession(conn.UdpSession.ConnId)
+	s.deviceId2Conn.Delete(deviceId)
+}
+
 // 处理消息
 func (s *MqttUdpAdapter) processMessage() {
 	for {
@@ -174,7 +185,7 @@ func (s *MqttUdpAdapter) processMessage() {
 
 				publicTopic := fmt.Sprintf("%s%s", client.ServerPubTopicPrefix, topicMacAddr)
 
-				deviceSession = NewMqttUdpConn(deviceId, publicTopic, s.client, udpSession)
+				deviceSession = NewMqttUdpConn(deviceId, publicTopic, s.client, s.udpServer, udpSession)
 
 				strAesKey, strFullNonce := udpSession.GetAesKeyAndNonce()
 				deviceSession.SetData("aes_key", strAesKey)
@@ -182,6 +193,8 @@ func (s *MqttUdpAdapter) processMessage() {
 
 				//保存至deviceId2UdpSession
 				s.SetDeviceSession(deviceId, deviceSession)
+
+				deviceSession.OnClose(s.handleDisconnect)
 
 				s.onNewConnection(deviceSession)
 			}
@@ -191,13 +204,6 @@ func (s *MqttUdpAdapter) processMessage() {
 				Errorf("InternalRecvCmd失败: %v", err)
 				continue
 			}
-
-			/*
-
-				chatManager := udpSession.ChatManager
-
-				chatManager.GetClientState().UpdateLastActiveTs()
-				chatManager.HandleTextMessage(msg.Payload())*/
 		default:
 		}
 	}
@@ -212,26 +218,4 @@ func (s *MqttUdpAdapter) getDeviceIdByTopic(topic string) (string, string) {
 		deviceId = strings.ReplaceAll(topicMacAddr, "_", ":")
 	}
 	return topicMacAddr, deviceId
-}
-
-// handleHello 处理hello消息
-func (s *MqttUdpAdapter) handleHello(msg mqtt.Message, clientMsg client.ClientMessage) {
-	// 检查传输协议
-	if clientMsg.Transport != "udp" {
-		Warnf("不支持的传输协议: %v", clientMsg.Transport)
-		return
-	}
-
-}
-
-// handleGoodbye 处理goodbye消息
-func (s *MqttUdpAdapter) handleGoodbye(msg mqtt.Message, clientMsg client.ClientMessage) {
-	/*sessionID, ok := clientMsg.SessionID
-	if !ok {
-		Warn("会话ID无效")
-		return
-	}
-
-	s.udpServer.CloseSession(sessionID)
-	Infof("会话已关闭: %s", sessionID)*/
 }

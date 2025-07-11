@@ -405,8 +405,9 @@ func (s *ChatSession) HandleMcpMessage(msg *ClientMessage) error {
 	return nil
 }
 
+// 释放udp资源
 func (s *ChatSession) HandleGoodByeMessage(msg *ClientMessage) error {
-	s.serverTransport.Close()
+	s.serverTransport.transport.CloseAudioChannel()
 	return nil
 }
 

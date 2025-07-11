@@ -8,7 +8,10 @@ import (
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/spf13/viper"
+)
+
+const (
+	MaxIdleDuration = 60 //60ms没有上下行数据 就断开
 )
 
 // MqttUdpConn 实现 types.IConn 接口，适配 MQTT-UDP 连接
@@ -22,6 +25,8 @@ type MqttUdpConn struct {
 
 	PubTopic   string
 	MqttClient mqtt.Client
+	udpServer  *UdpServer
+
 	UdpSession *UdpSession
 
 	recvCmdChan chan []byte
@@ -29,13 +34,13 @@ type MqttUdpConn struct {
 
 	data sync.Map
 
-	onCloseCb func()
+	onCloseCbList []func(deviceId string)
 
-	lastActiveTs int64
+	lastActiveTs int64 //上下行 信令和音频数据 都会更新
 }
 
 // NewMqttUdpConn 创建一个新的 MqttUdpConn 实例
-func NewMqttUdpConn(deviceID string, pubTopic string, mqttClient mqtt.Client, udpSession *UdpSession) *MqttUdpConn {
+func NewMqttUdpConn(deviceID string, pubTopic string, mqttClient mqtt.Client, udpServer *UdpServer, udpSession *UdpSession) *MqttUdpConn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &MqttUdpConn{
 		ctx:      ctx,
@@ -44,6 +49,7 @@ func NewMqttUdpConn(deviceID string, pubTopic string, mqttClient mqtt.Client, ud
 
 		PubTopic:   pubTopic,
 		MqttClient: mqttClient,
+		udpServer:  udpServer,
 		UdpSession: udpSession,
 
 		recvCmdChan: make(chan []byte, 100),
@@ -54,6 +60,7 @@ func NewMqttUdpConn(deviceID string, pubTopic string, mqttClient mqtt.Client, ud
 
 // SendCmd 通过 MQTT-UDP 发送命令（需对接实际发送逻辑）
 func (c *MqttUdpConn) SendCmd(msg []byte) error {
+	c.lastActiveTs = time.Now().Unix()
 	token := c.MqttClient.Publish(c.PubTopic, 0, false, msg)
 	token.Wait()
 	if token.Error() != nil {
@@ -82,7 +89,7 @@ func (c *MqttUdpConn) RecvCmd(timeout int) ([]byte, error) {
 	}
 }
 
-func (c *MqttUdpConn) InternalRecvAudio(msg []byte) error {
+func (c *MqttUdpConn) PushAudioDataToRecvAudio(msg []byte) error {
 	select {
 	case c.UdpSession.RecvChannel <- msg:
 		c.lastActiveTs = time.Now().Unix()
@@ -96,6 +103,7 @@ func (c *MqttUdpConn) InternalRecvAudio(msg []byte) error {
 func (c *MqttUdpConn) SendAudio(audio []byte) error {
 	select {
 	case c.UdpSession.SendChannel <- audio:
+		c.lastActiveTs = time.Now().Unix()
 		return nil
 	default:
 		return errors.New("sendAudioChan is full")
@@ -107,6 +115,7 @@ func (c *MqttUdpConn) RecvAudio(timeout int) ([]byte, error) {
 	select {
 	case audio, ok := <-c.UdpSession.RecvChannel:
 		if ok {
+			c.lastActiveTs = time.Now().Unix()
 			return audio, nil
 		}
 		return nil, errors.New("recvAudioChan is closed")
@@ -127,8 +136,8 @@ func (c *MqttUdpConn) Close() error {
 	return nil
 }
 
-func (c *MqttUdpConn) OnClose(closeCb func()) {
-	c.onCloseCb = closeCb
+func (c *MqttUdpConn) OnClose(closeCb func(deviceId string)) {
+	c.onCloseCbList = append(c.onCloseCbList, closeCb)
 }
 
 func (c *MqttUdpConn) GetTransportType() string {
@@ -148,11 +157,17 @@ func (c *MqttUdpConn) GetData(key string) (interface{}, error) {
 }
 
 func (c *MqttUdpConn) IsActive() bool {
-	return time.Now().Unix()-c.lastActiveTs < viper.GetInt64("chat.max_idle_duration")/100
+	return time.Now().Unix()-c.lastActiveTs < MaxIdleDuration
 }
 
 // 销毁
 func (c *MqttUdpConn) Destroy() {
 	c.cancel()
-	c.onCloseCb()
+	for _, cb := range c.onCloseCbList {
+		cb(c.DeviceId)
+	}
+}
+
+func (c *MqttUdpConn) CloseAudioChannel() error {
+	return nil
 }

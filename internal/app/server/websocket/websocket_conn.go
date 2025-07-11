@@ -16,7 +16,7 @@ type WebSocketConn struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	onCloseCb func()
+	onCloseCbList []func(deviceId string)
 
 	conn     *websocket.Conn
 	deviceID string
@@ -48,7 +48,9 @@ func NewWebSocketConn(conn *websocket.Conn, deviceID string) *WebSocketConn {
 				msgType, audio, err := instance.conn.ReadMessage()
 				if err != nil {
 					log.Errorf("read message error: %v", err)
-					instance.onCloseCb() //通知chatManager进行退出
+					for _, cb := range instance.onCloseCbList {
+						cb(instance.deviceID) //通知注册方退出
+					}
 					return
 				}
 
@@ -124,8 +126,8 @@ func (w *WebSocketConn) Close() error {
 	return nil
 }
 
-func (w *WebSocketConn) OnClose(cb func()) {
-	w.onCloseCb = cb
+func (w *WebSocketConn) OnClose(cb func(deviceId string)) {
+	w.onCloseCbList = append(w.onCloseCbList, cb)
 }
 
 func (w *WebSocketConn) GetDeviceID() string {
@@ -138,4 +140,8 @@ func (w *WebSocketConn) GetTransportType() string {
 
 func (w *WebSocketConn) GetData(key string) (interface{}, error) {
 	return nil, errors.New("not implemented")
+}
+
+func (w *WebSocketConn) CloseAudioChannel() error {
+	return nil
 }
