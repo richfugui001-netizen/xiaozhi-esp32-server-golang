@@ -44,11 +44,8 @@ func main() {
 	}
 
 	// 创建服务器
-	err = server.InitServer()
-	if err != nil {
-		log.Fatalf("初始化服务器失败: %v", err)
-		return
-	}
+	appInstance := server.NewApp()
+	appInstance.Run()
 
 	// 阻塞监听退出信号
 	quit := make(chan os.Signal, 1)

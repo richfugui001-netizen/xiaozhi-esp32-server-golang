@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/md5"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +27,8 @@ var opusData [][]byte
 
 var audioRate = 16000
 var frameDuration = 60
+
+var allowChat = make(chan struct{}, 1)
 
 // ServerMessage 表示服务器消息
 type ServerMessage struct {
@@ -129,13 +133,15 @@ func main1() {
 }
 
 func main() {
+	otaUrl := flag.String("ota", "https://api.tenclass.net/xiaozhi/ota/", "OTA服务器地址")
+	deviceID := flag.String("device", "ba:8f:17:de:94:94", "设备ID")
+	flag.Parse()
 
-	deviceID := "ba:8f:17:de:94:94"
 	clientID := "e4b0c442-98fc-4e1b-8c3d-6a5b6a5b6a6d"
 	boardName := "lc-esp32-s3"
 
 	// Get device configuration
-	deviceInfo := CreateDefaultDeviceInfo(clientID, deviceID, boardName)
+	deviceInfo := CreateDefaultDeviceInfo(clientID, *deviceID, boardName)
 
 	// 生成序列号和HMAC密钥
 	uuid1 := strings.ReplaceAll(uuid.New().String(), "-", "")
@@ -149,7 +155,7 @@ func main() {
 	fmt.Printf("生成的序列号: %s\n", serialNumber)
 	fmt.Printf("生成的HMAC密钥: %s\n", hmacKey)
 
-	config, err := GetDeviceConfig(deviceInfo, deviceID, clientID)
+	config, err := GetDeviceConfig(deviceInfo, *deviceID, clientID, *otaUrl)
 	if err != nil {
 		fmt.Println("获取设备配置失败:", err)
 		os.Exit(1)
@@ -159,7 +165,7 @@ func main() {
 	if config.Activation.Code != "" {
 		fmt.Println("设备激活中, 验证码: ", config.Activation.Code)
 		// 进行激活请求
-		_, err := activateDevice(deviceID, clientID, serialNumber, hmacKey, config.Activation.Challenge)
+		_, err := activateDevice(*deviceID, clientID, serialNumber, hmacKey, config.Activation.Challenge, *otaUrl)
 		if err != nil {
 			fmt.Println("设备激活失败:", err)
 			os.Exit(1)
@@ -195,13 +201,29 @@ func main() {
 func connectMQTT(config *ServerResponse) (mqtt.Client, bool) {
 	// Setup MQTT client with configuration from server
 	opts := mqtt.NewClientOptions()
+
+	endpoint := config.MQTT.Endpoint
+	port := "8883"
+	protocol := "tls"
+	if strings.Contains(endpoint, ":") {
+		parts := strings.Split(endpoint, ":")
+		endpoint = parts[0]
+		port = parts[1]
+	}
+	if port != "8883" {
+		protocol = "tcp"
+	}
+	brokerUrl := fmt.Sprintf("%s://%s:%s", protocol, endpoint, port)
+
 	// 设置 TLS 配置
 	tlsConfig := &tls.Config{
-		ServerName: config.MQTT.Endpoint,
+		ServerName: endpoint,
 		//InsecureSkipVerify: true, // 跳过证书验证，仅用于测试环境
 	}
-	opts.SetTLSConfig(tlsConfig)
-	opts.AddBroker(fmt.Sprintf("tcp://%s:2883", config.MQTT.Endpoint))
+	if protocol == "tls" {
+		opts.SetTLSConfig(tlsConfig)
+	}
+	opts.AddBroker(brokerUrl)
 	opts.SetClientID(config.MQTT.ClientID)
 	opts.SetUsername(config.MQTT.Username)
 	opts.SetPassword(config.MQTT.Password)
@@ -275,6 +297,7 @@ func publicHello(publishTopic string, client mqtt.Client) error {
 		return token.Error()
 	}
 	fmt.Println("✅ 发布消息成功")
+	allowChat <- struct{}{}
 	return nil
 }
 
@@ -538,6 +561,7 @@ func sendListenStop(mqttClient mqtt.Client, sessionID string) error {
 	if token.Wait() && token.Error() != nil {
 		return token.Error()
 	}
+	allowChat <- struct{}{}
 	return nil
 }
 
@@ -600,7 +624,7 @@ func sendIotMessage(mqttClient mqtt.Client, sessionID string) error {
 // 调用tts服务生成语音, 并编码至opus发送至服务端
 func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDPClient, udpConfig *UDPConfig) error {
 	cosyVoiceConfig := map[string]interface{}{
-		"api_url":        "https://tts.linkerai.top/tts",
+		"api_url":        "https://tts.linkerai.cn/tts",
 		"spk_id":         "OUeAo1mhq6IBExi",
 		"frame_duration": frameDuration,
 		"target_sr":      audioRate,
@@ -660,7 +684,7 @@ func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDP
 			os.WriteFile("mqtt_output_first_frame.wav", decryptedData, 0644)
 		}
 
-		fmt.Printf("收到音频数据, 长度: %d\n", len(decryptedData))
+		//fmt.Printf("收到音频数据, 长度: %d\n", len(decryptedData))
 		opusData = append(opusData, decryptedData)
 		//fmt.Println("收到音频数据", len(decryptedData))
 	})
@@ -674,7 +698,7 @@ func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDP
 		}()
 		audioChan, err := ttsProvider.TextToSpeechStream(context.Background(), msg, 16000, 1, 60)
 		if err != nil {
-			fmt.Printf("生成语音失败: %v\n", err)
+			//fmt.Printf("生成语音失败: %v\n", err)
 			return fmt.Errorf("生成语音失败: %v", err)
 		}
 
@@ -693,8 +717,34 @@ func sendTextToSpeech(mqttClient mqtt.Client, sessionID string, udpInstance *UDP
 		return nil
 	}
 
-	genAndSendAudio("你好", 100)
-	time.Sleep(30 * time.Second)
+	// 新增：等待用户输入文本
+	reader := bufio.NewReader(os.Stdin)
+
+	f := func() bool {
+		fmt.Print("请输入要合成的文本（回车发送，直接回车退出）：")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Printf("读取输入失败: %v\n", err)
+			return false
+		}
+		input = strings.TrimSpace(input)
+		if input == "" {
+			return false
+		}
+		genAndSendAudio(input, 50)
+		return true
+	}
+	for {
+		_ = <-allowChat
+		for {
+			if f() {
+				break
+			}
+		}
+	}
+
+	//genAndSendAudio("你好", 100)
+	//time.Sleep(30 * time.Second)
 	/*genAndSendAudio("再来一个", 20)
 	time.Sleep(30 * time.Second)
 	genAndSendAudio("你今天穿的衣服真好看", 20)
