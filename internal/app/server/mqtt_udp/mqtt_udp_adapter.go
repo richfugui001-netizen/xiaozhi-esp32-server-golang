@@ -68,6 +68,8 @@ func NewMqttUdpAdapter(config *MqttConfig, opts ...MqttUdpAdapterOption) *MqttUd
 
 // Start 启动MQTT服务器
 func (s *MqttUdpAdapter) Start() error {
+	const retryInterval = 5 * time.Second
+
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("%s://%s:%d", s.mqttConfig.Type, s.mqttConfig.Broker, s.mqttConfig.Port))
 	opts.SetClientID(s.mqttConfig.ClientID)
@@ -87,9 +89,24 @@ func (s *MqttUdpAdapter) Start() error {
 		}
 	})
 
-	s.client = mqtt.NewClient(opts)
-	if token := s.client.Connect(); token.Wait() && token.Error() != nil {
-		return fmt.Errorf("连接MQTT服务器失败: %v", token.Error())
+	var lastErr error
+	var retryCount int
+	for {
+		s.client = mqtt.NewClient(opts)
+		if token := s.client.Connect(); token.Wait() && token.Error() != nil {
+			lastErr = token.Error()
+			retryCount++
+			Errorf("连接MQTT服务器失败(第%d次): %v，%d秒后重试", retryCount, lastErr, int(retryInterval.Seconds()))
+			time.Sleep(retryInterval)
+			continue
+		} else if token != nil && token.Error() == nil {
+			lastErr = nil
+			break
+		}
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("连接MQTT服务器失败: %v", lastErr)
 	}
 
 	err := s.checkClientActive()
