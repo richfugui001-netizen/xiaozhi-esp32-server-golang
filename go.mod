@@ -14,7 +14,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gopxl/beep v1.4.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/hackers365/go-webrtcvad v0.0.0-20250625094848-b018697c72d3
+	github.com/hackers365/go-webrtcvad v0.0.0-20250711024710-dde35479e077
 	github.com/hraban/opus v0.0.0-20220302220929-eeacdbcb92d0
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible

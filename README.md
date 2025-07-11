@@ -13,6 +13,9 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 ## ✨ 主要特性 | Key Features
 
 - 🚀 **端到端全流式 AI 语音链路**：ASR（自动语音识别）、LLM（大语言模型）、TTS（语音合成）全流程流式处理，极致低延迟，适配实时语音交互场景。
+- 🧩 **主逻辑代码梳理与优化**：对主流程代码结构进行系统性梳理与重构，提升可读性、可维护性与扩展性。
+- 🛠️ **Transport 接口层抽象**：将 WebSocket、MQTT、UDP 等协议统一抽象为 Transport 接口层，灵活注入主逻辑，便于协议扩展与切换。
+- 📬 **LLM/TTS 消息队列化处理**：LLM 与 TTS 处理流程采用消息队列方式，支持异步处理与新业务逻辑的灵活注入。
 - 🔗 **多协议高并发接入**：内置 WebSocket、MQTT、UDP 等多种协议服务器，支持大规模设备并发接入与消息推送。
 - ♻️ **高效资源池与连接复用**：外部资源连接池机制，显著降低响应耗时，提升系统吞吐能力。
 - 🧠 **多引擎 AI 能力集成，基于 Eino 框架**：项目基于 Eino 框架开发，支持 FunASR、Eino LLM、OpenAI、Ollama、Doubao、EdgeTTS、CosyVoice 等多种主流 AI 引擎，灵活切换与扩展。
@@ -76,6 +79,8 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
    - [WebSocket 服务器与 OTA 配置说明 »](doc/websocket_server.md)
    - [MQTT+UDP 服务器配置流程 »](doc/mqtt_udp.md)
    - [MQTT UDP 协议与数据流程 »](doc/mqtt_udp_protocol.md)
+   - [Vision 视觉识别 »](doc/vision.md)
+   - [mcp 架构 »](doc/mcp.md)
 
    ---
 

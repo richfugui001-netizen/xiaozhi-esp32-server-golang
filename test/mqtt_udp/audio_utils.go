@@ -128,7 +128,7 @@ func OpusToWav(opusData [][]byte, sampleRate int, channels int, fileName string)
 		copy(copyData, pcmBuffer[:n])
 		pcmDataList = append(pcmDataList, copyData)
 
-		fmt.Println("pcmData len: ", len(copyData))
+		//fmt.Println("pcmData len: ", len(copyData))
 
 		// 将PCM数据转换为int格式
 		for i := 0; i < len(copyData); i++ {

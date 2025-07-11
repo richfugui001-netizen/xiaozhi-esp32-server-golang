@@ -1,11 +1,8 @@
 package websocket
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -13,10 +10,7 @@ import (
 	"github.com/spf13/viper"
 
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
-	"xiaozhi-esp32-server-golang/internal/app/server/common"
-	"xiaozhi-esp32-server-golang/internal/data/client"
-	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
-	utypes "xiaozhi-esp32-server-golang/internal/domain/config/types"
+	"xiaozhi-esp32-server-golang/internal/app/server/types"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -33,11 +27,37 @@ type WebSocketServer struct {
 	port int
 	// MCP管理器
 	globalMCPManager *mcp.GlobalMCPManager
+
+	onNewConnection types.OnNewConnection
 }
 
-// NewWebSocketServer 创建新的 WebSocket 服务器
-func NewWebSocketServer(port int) *WebSocketServer {
-	return &WebSocketServer{
+// Option 类型定义
+// WebSocketServerOption 用于配置 WebSocketServer 的可选参数
+type WebSocketServerOption func(*WebSocketServer)
+
+// WithAuthManager 设置认证管理器
+func WithAuthManager(authManager *auth.AuthManager) WebSocketServerOption {
+	return func(s *WebSocketServer) {
+		s.authManager = authManager
+	}
+}
+
+// WithMCPManager 设置 MCP 管理器
+func WithMCPManager(mcpManager *mcp.GlobalMCPManager) WebSocketServerOption {
+	return func(s *WebSocketServer) {
+		s.globalMCPManager = mcpManager
+	}
+}
+
+func WithOnNewConnection(onNewConnection types.OnNewConnection) WebSocketServerOption {
+	return func(s *WebSocketServer) {
+		s.onNewConnection = onNewConnection
+	}
+}
+
+// NewWebSocketServer 创建新的 WebSocket 服务器（WithOption 方式）
+func NewWebSocketServer(port int, opts ...WebSocketServerOption) *WebSocketServer {
+	s := &WebSocketServer{
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -45,10 +65,15 @@ func NewWebSocketServer(port int) *WebSocketServer {
 				return true // 允许所有来源的连接
 			},
 		},
+		// 默认值
 		authManager:      auth.A(),
 		port:             port,
 		globalMCPManager: mcp.GetGlobalMCPManager(),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Start 启动 WebSocket 服务器
@@ -82,97 +107,6 @@ func (s *WebSocketServer) Start() error {
 	return nil
 }
 
-// handleMCPWebSocket 处理MCP WebSocket连接
-func (s *WebSocketServer) handleMCPWebSocket(w http.ResponseWriter, r *http.Request) {
-	// 从URL路径中提取deviceId
-	// URL格式: /xiaozhi/mcp/{deviceId}
-	path := strings.TrimPrefix(r.URL.Path, "/xiaozhi/mcp/")
-	if path == "" || path == r.URL.Path {
-		http.Error(w, "缺少设备ID参数", http.StatusBadRequest)
-		return
-	}
-
-	deviceID := strings.TrimSuffix(path, "/")
-	if deviceID == "" {
-		http.Error(w, "设备ID不能为空", http.StatusBadRequest)
-		return
-	}
-
-	log.Infof("收到MCP服务器的WebSocket连接请求，设备ID: %s", deviceID)
-
-	// 验证认证（如果启用）
-	isAuth := viper.GetBool("auth.enable")
-	if isAuth {
-		token := r.Header.Get("Authorization")
-		if token == "" {
-			log.Warn("缺少 Authorization 请求头")
-			http.Error(w, "缺少 Authorization 请求头", http.StatusUnauthorized)
-			return
-		}
-
-		if !s.authManager.ValidateToken(token) {
-			log.Warnf("无效的令牌: %s", token)
-			http.Error(w, "无效的令牌", http.StatusUnauthorized)
-			return
-		}
-	}
-
-	// 升级WebSocket连接
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Errorf("升级WebSocket连接失败: %v", err)
-		return
-	}
-
-	mcpClientSession := mcp.GetDeviceMcpClient(deviceID)
-	if mcpClientSession == nil {
-		mcpClientSession = mcp.NewDeviceMCPSession(deviceID)
-		mcp.AddDeviceMcpClient(deviceID, mcpClientSession)
-	}
-
-	// 创建MCP客户端
-	mcpClient := mcp.NewWsEndPointMcpClient(mcpClientSession.Ctx, deviceID, conn)
-	if mcpClient == nil {
-		log.Errorf("创建MCP客户端失败")
-		conn.Close()
-		return
-	}
-	mcpClientSession.SetWsEndPointMcp(mcpClient)
-
-	// 监听客户端断开连接
-	go func() {
-		<-mcpClientSession.Ctx.Done()
-		mcp.RemoveDeviceMcpClient(deviceID)
-		log.Infof("设备 %s 的MCP连接已断开", deviceID)
-	}()
-
-	log.Infof("设备 %s 的MCP连接已建立", deviceID)
-}
-
-// handleMCPAPI 处理MCP REST API请求
-func (s *WebSocketServer) handleMCPAPI(w http.ResponseWriter, r *http.Request) {
-	// 从URL路径中提取deviceId
-	// URL格式: /xiaozhi/api/mcp/tools/{deviceId}
-	path := strings.TrimPrefix(r.URL.Path, "/xiaozhi/api/mcp/tools/")
-	if path == "" || path == r.URL.Path {
-		http.Error(w, "缺少设备ID参数", http.StatusBadRequest)
-		return
-	}
-
-	deviceID := strings.TrimSuffix(path, "/")
-	if deviceID == "" {
-		http.Error(w, "设备ID不能为空", http.StatusBadRequest)
-		return
-	}
-
-	switch r.Method {
-	case "GET":
-		s.handleGetDeviceTools(w, r, deviceID)
-	default:
-		http.Error(w, "不支持的HTTP方法", http.StatusMethodNotAllowed)
-	}
-}
-
 // handleGetDeviceTools 获取设备的工具列表
 func (s *WebSocketServer) handleGetDeviceTools(w http.ResponseWriter, r *http.Request, deviceID string) {
 
@@ -184,29 +118,6 @@ func (s *WebSocketServer) cleanupSessions() {
 	for range ticker.C {
 		s.authManager.CleanupSessions(30 * time.Minute)
 	}
-}
-
-func (s *WebSocketServer) SendMsg(conn *client.Conn, msg interface{}) error {
-	log.Debugf("发送消息: %+v", msg)
-	return conn.WriteJSON(msg)
-}
-
-func (s *WebSocketServer) SendBinaryMsg(conn *client.Conn, audio []byte) error {
-	return conn.WriteMessage(websocket.BinaryMessage, audio)
-}
-
-// 获取设备配置
-func (s *WebSocketServer) getUserConfig(deviceID string) (*utypes.UConfig, error) {
-	userConfigInstance, err := userconfig.GetProvider()
-	if err != nil {
-		return nil, fmt.Errorf("获取用户配置失败: %v", err)
-	}
-	uConfig, err := userConfigInstance.GetUserConfig(context.Background(), deviceID)
-	if err != nil {
-		log.Errorf("getUserConfig error: %+v", err)
-		return nil, fmt.Errorf("getUserConfig error: %+v", err)
-	}
-	return &uConfig, nil
 }
 
 // handleWebSocket 处理 WebSocket 连接
@@ -242,136 +153,11 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 		log.Errorf("WebSocket 升级失败: %v", err)
 		return
 	}
-	// 设置初始超时时间，比如60秒
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
-	// 初始化客户端状态
-	clientState, err := client.GenWebsocketClientState(deviceID, conn)
-	if err != nil {
-		log.Errorf("初始化客户端状态失败: %v", err)
-		return
+	// 适配为 IConn 接口
+	wsConn := NewWebSocketConn(conn, deviceID)
+	if s.onNewConnection != nil {
+		s.onNewConnection(wsConn)
 	}
 
-	s.clientStates.Store(clientState.Conn, clientState)
-
-	// 连接关闭时从列表中移除
-	defer func() {
-		log.Infof("设备 %s 断开连接", deviceID)
-		// 关闭done通道通知所有goroutine退出
-		clientState.Cancel()
-		clientState.Destroy()
-		clientState.Conn.Close()
-		s.clientStates.Delete(conn)
-	}()
-
-	// 处理消息
-	for {
-		// 每次收到消息都刷新超时时间, 空闲60秒就退出
-		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
-		messageType, message, err := conn.ReadMessage()
-		if err != nil {
-			// 这里会捕获到超时、断开等异常
-			log.Warnf("WebSocket连接异常断开: %v", err)
-			break
-		}
-
-		// 处理文本消息
-		if messageType == websocket.TextMessage {
-			log.Infof("收到文本消息: %s", string(message))
-			if err := common.HandleTextMessage(clientState, message); err != nil {
-				log.Errorf("处理文本消息失败: %v", err)
-				continue
-			}
-		} else if messageType == websocket.BinaryMessage {
-			log.Infof("收到音频数据，大小: %d 字节", len(message))
-			if clientState.GetClientVoiceStop() {
-				//log.Debug("客户端停止说话, 跳过音频数据")
-				continue
-			}
-			// 同时通过音频处理器处理
-			if ok := common.RecvAudio(clientState, message); !ok {
-				log.Errorf("音频缓冲区已满: %v", err)
-			}
-		} else if messageType == websocket.CloseMessage {
-			log.Infof("收到关闭消息")
-			break
-		} else if messageType == websocket.PingMessage {
-			// 响应 Ping 消息
-			if err := conn.WriteMessage(websocket.PongMessage, nil); err != nil {
-				log.Errorf("发送 Pong 消息失败: %v", err)
-				break
-			}
-		}
-	}
-}
-
-// handleVisionAPI 处理图片识别API
-func (s *WebSocketServer) handleVisionAPI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "仅支持POST请求", http.StatusMethodNotAllowed)
-		return
-	}
-
-	//从header头部获取Device-Id和Client-Id
-	deviceId := r.Header.Get("Device-Id")
-	clientId := r.Header.Get("Client-Id")
-	_ = clientId
-	if deviceId == "" {
-		log.Errorf("缺少Device-Id")
-		http.Error(w, "缺少Device-Id", http.StatusBadRequest)
-		return
-	}
-
-	if viper.GetBool("vision.enable_auth") {
-
-		//从header Authorization中获取Bearer token
-		authToken := r.Header.Get("Authorization")
-		if authToken == "" {
-			log.Errorf("缺少Authorization")
-			http.Error(w, "缺少Authorization", http.StatusBadRequest)
-			return
-		}
-		authToken = strings.TrimPrefix(authToken, "Bearer ")
-
-		err := common.VisvionAuth(authToken)
-		if err != nil {
-			log.Errorf("图片识别认证失败: %v", err)
-			http.Error(w, "图片识别认证失败", http.StatusUnauthorized)
-			return
-		}
-	}
-
-	// 解析 multipart 表单，最大 10MB
-	question := r.FormValue("question")
-	if question == "" {
-		http.Error(w, "缺少question参数", http.StatusBadRequest)
-		return
-	}
-
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "缺少file参数或文件读取失败", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	fileBytes, err := io.ReadAll(file)
-	if err != nil {
-		http.Error(w, "文件读取失败", http.StatusInternalServerError)
-		return
-	}
-
-	file.Close()
-
-	result, err := common.HandleVllm(deviceId, fileBytes, question)
-	if err != nil {
-		log.Errorf("图片识别失败: %v", err)
-		http.Error(w, "图片识别失败", http.StatusInternalServerError)
-		return
-	}
-
-	// TODO: 调用llm进行图片识别，输出识别内容
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(result))
 }

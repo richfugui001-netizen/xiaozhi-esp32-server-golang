@@ -1,22 +1,19 @@
-package common
+package chat
 
 import (
 	"encoding/json"
-	"fmt"
-	"time"
 
 	. "xiaozhi-esp32-server-golang/internal/data/client"
-	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	log "xiaozhi-esp32-server-golang/logger"
 
-	"github.com/gorilla/websocket"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/spf13/viper"
 )
 
 type McpTransport struct {
-	Client *ClientState
+	Client          *ClientState
+	ServerTransport *ServerTransport
 }
 
 func (c *McpTransport) SendMcpMsg(payload []byte) error {
@@ -46,28 +43,14 @@ func (c *McpTransport) SendMcpMsg(payload []byte) error {
 		}
 	}
 
-	serverMsg := ServerMessage{
-		Type:      MessageTypeMcp,
-		SessionID: c.Client.SessionID,
-		PayLoad:   payload,
-	}
-	msg, err := json.Marshal(serverMsg)
-	if err != nil {
-		return err
-	}
-	return c.Client.Conn.WriteMessage(websocket.TextMessage, msg)
+	return c.ServerTransport.SendMcpMsg(payload)
 }
 
 func (c *McpTransport) RecvMcpMsg(timeOut int) ([]byte, error) {
-	select {
-	case msg := <-c.Client.McpRecvMsgChan:
-		return msg, nil
-	case <-time.After(time.Duration(timeOut) * time.Millisecond):
-		return nil, fmt.Errorf("mcp 接收消息超时")
-	}
+	return c.ServerTransport.RecvMcpMsg(timeOut)
 }
 
-func initMcp(clientState *ClientState) {
+func initMcp(clientState *ClientState, serverTransport *ServerTransport) {
 	mcpClientSession := mcp.GetDeviceMcpClient(clientState.DeviceID)
 	if mcpClientSession == nil {
 		mcpClientSession = mcp.NewDeviceMCPSession(clientState.DeviceID)
@@ -76,12 +59,13 @@ func initMcp(clientState *ClientState) {
 
 	// 创建IotOverMcp客户端
 	mcpTransport := &McpTransport{
-		Client: clientState,
+		Client:          clientState,
+		ServerTransport: serverTransport,
 	}
 	iotOverMcpClient := mcp.NewIotOverMcpClient(clientState.DeviceID, mcpTransport)
 	if iotOverMcpClient == nil {
 		log.Errorf("创建IotOverMcp客户端失败")
-		clientState.Conn.Close()
+		serverTransport.transport.Close()
 		return
 	}
 	mcpClientSession.SetIotOverMcp(iotOverMcpClient)
