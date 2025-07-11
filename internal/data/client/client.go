@@ -87,8 +87,8 @@ type ClientState struct {
 
 	Status string //状态 listening, llmStart, ttsStart
 
-	IsTtsStart bool //是否tts开始
-
+	IsTtsStart        bool //是否tts开始
+	IsWelcomeSpeaking bool //是否已经欢迎语
 }
 
 func (c *ClientState) SetTtsStart(isStart bool) {

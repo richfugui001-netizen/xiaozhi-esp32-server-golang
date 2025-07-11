@@ -205,7 +205,10 @@ func runClient(serverAddr, deviceID, audioFile string) error {
 
 				if serverMsg.Type == "tts" && serverMsg.State == "stop" {
 					//OpusToWav(OpusData, 24000, 1, "ws_output_24000.wav")
-					waitInput <- struct{}{}
+					select {
+					case waitInput <- struct{}{}:
+					default:
+					}
 				}
 			} else if messageType == websocket.BinaryMessage {
 				if !firstRecvFrame {
@@ -556,10 +559,14 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 		return nil
 	}
 
+	//发送detect 消息
+	sendListenDetect(conn, deviceID, "你好小智")
+
 	// 新增：等待用户输入文本
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
+
 		fmt.Print("请输入要合成的文本（回车发送，直接回车退出）：")
 		input, err := reader.ReadString('\n')
 		if err != nil {
@@ -577,9 +584,9 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 			}
 			continue
 		}
-
 		select {
 		case <-waitInput:
+
 			go func() {
 				sendListenStart(conn, deviceID, mode)
 				genAndSendAudio(input, 20)

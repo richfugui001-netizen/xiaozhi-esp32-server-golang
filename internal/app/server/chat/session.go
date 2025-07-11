@@ -1,8 +1,12 @@
 package chat
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"math/rand"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -14,8 +18,11 @@ import (
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
+	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
+	"xiaozhi-esp32-server-golang/internal/domain/tts"
+	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 )
 
@@ -26,7 +33,10 @@ type ChatSession struct {
 	llmManager      *LLMManager
 	serverTransport *ServerTransport
 
-	chatTextQueue chan string
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	chatTextQueue *util.Queue[string]
 }
 
 type ChatSessionOption func(*ChatSession)
@@ -55,16 +65,138 @@ func WithLLMManager(llm *LLMManager) ChatSessionOption {
 	}
 }
 
-func NewChatSession(clientState *ClientState, opts ...ChatSessionOption) *ChatSession {
+func NewChatSession(pctx context.Context, clientState *ClientState, opts ...ChatSessionOption) *ChatSession {
+	ctx, cancel := context.WithCancel(pctx)
 	s := &ChatSession{
 		clientState:   clientState,
-		chatTextQueue: make(chan string, 10),
+		ctx:           ctx,
+		cancel:        cancel,
+		chatTextQueue: util.NewQueue[string](10),
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
-	s.processChatText()
 	return s
+}
+
+func (s *ChatSession) Start(ctx context.Context) error {
+	err := s.InitAsrLlmTts()
+	if err != nil {
+		log.Errorf("初始化ASR/LLM/TTS失败: %v", err)
+		return err
+	}
+
+	go s.CmdMessageLoop(ctx)   //处理信令消息
+	go s.AudioMessageLoop(ctx) //处理音频数据
+	go s.processChatText(ctx)  //处理llm队列消息
+	go s.llmManager.Start(ctx) //处理llm队列消息
+
+	return nil
+}
+
+// 在mqtt 收到type: listen, state: start后进行
+func (c *ChatSession) InitAsrLlmTts() error {
+	ttsConfig := c.clientState.DeviceConfig.Tts
+	ttsProvider, err := tts.GetTTSProvider(ttsConfig.Provider, ttsConfig.Config)
+	if err != nil {
+		return fmt.Errorf("创建 TTS 提供者失败: %v", err)
+	}
+	c.clientState.TTSProvider = ttsProvider
+
+	if err := c.clientState.InitLlm(); err != nil {
+		return fmt.Errorf("初始化LLM失败: %v", err)
+	}
+	if err := c.clientState.InitAsr(); err != nil {
+		return fmt.Errorf("初始化ASR失败: %v", err)
+	}
+	c.clientState.SetAsrPcmFrameSize(c.clientState.InputAudioFormat.SampleRate, c.clientState.InputAudioFormat.Channels, c.clientState.InputAudioFormat.FrameDuration)
+
+	return nil
+}
+
+func (c *ChatSession) CmdMessageLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Infof("设备 %s recvCmd context cancel", c.clientState.DeviceID)
+			return
+		default:
+			message, err := c.serverTransport.RecvCmd(120)
+			if err != nil {
+				log.Errorf("recv cmd error: %v", err)
+				return
+			}
+			log.Infof("收到文本消息: %s", string(message))
+			if err := c.HandleTextMessage(message); err != nil {
+				log.Errorf("处理文本消息失败: %v", err)
+				continue
+			}
+		}
+	}
+}
+
+func (c *ChatSession) AudioMessageLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debugf("设备 %s recvCmd context cancel", c.clientState.DeviceID)
+			return
+		default:
+			message, err := c.serverTransport.RecvAudio(300)
+			if err != nil {
+				log.Errorf("recv audio error: %v", err)
+				return
+			}
+			log.Debugf("收到音频数据，大小: %d 字节", len(message))
+			if c.clientState.GetClientVoiceStop() {
+				//log.Debug("客户端停止说话, 跳过音频数据")
+				continue
+			}
+			// 同时通过音频处理器处理
+			if ok := c.HandleAudioMessage(message); !ok {
+				log.Errorf("音频缓冲区已满: %v", err)
+			}
+		}
+	}
+}
+
+// handleTextMessage 处理文本消息
+func (c *ChatSession) HandleTextMessage(message []byte) error {
+	var clientMsg ClientMessage
+	if err := json.Unmarshal(message, &clientMsg); err != nil {
+		log.Errorf("解析消息失败: %v", err)
+		return fmt.Errorf("解析消息失败: %v", err)
+	}
+
+	// 处理不同类型的消息
+	switch clientMsg.Type {
+	case MessageTypeHello:
+		return c.HandleHelloMessage(&clientMsg)
+	case MessageTypeListen:
+		return c.HandleListenMessage(&clientMsg)
+	case MessageTypeAbort:
+		return c.HandleAbortMessage(&clientMsg)
+	case MessageTypeIot:
+		return c.HandleIoTMessage(&clientMsg)
+	case MessageTypeMcp:
+		return c.HandleMcpMessage(&clientMsg)
+	case MessageTypeGoodBye:
+		return c.HandleGoodByeMessage(&clientMsg)
+	default:
+		// 未知消息类型，直接回显
+		return fmt.Errorf("未知消息类型: %s", clientMsg.Type)
+	}
+}
+
+// HandleAudioMessage 处理音频消息
+func (c *ChatSession) HandleAudioMessage(data []byte) bool {
+	select {
+	case c.clientState.OpusAudioBuffer <- data:
+		return true
+	default:
+		log.Warnf("音频缓冲区已满, 丢弃音频数据")
+	}
+	return false
 }
 
 // handleHelloMessage 处理 hello 消息
@@ -166,7 +298,7 @@ func (s *ChatSession) HandleListenMessage(msg *ClientMessage) error {
 
 func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 	// 唤醒词检测
-	StopSpeaking(s.serverTransport, false)
+	s.StopSpeaking(false)
 
 	// 如果有文本，处理唤醒词
 	if msg.Text != "" {
@@ -179,19 +311,47 @@ func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 		enableGreeting := viper.GetBool("enable_greeting") // 从配置获取
 
 		var needStartChat bool
-		if isWakeupWord && enableGreeting {
-			needStartChat = true
-		}
-		if !isWakeupWord {
+		if !isWakeupWord || (isWakeupWord && enableGreeting) {
 			needStartChat = true
 		}
 		if needStartChat {
 			// 否则开始对话
-			if err := s.startChat(text); err != nil {
-				log.Errorf("开始对话失败: %v", err)
+			if enableGreeting && isWakeupWord {
+				//进行tts欢迎语
+				if !s.clientState.IsWelcomeSpeaking {
+					greetingText := s.GetRandomGreeting()
+					s.AddTextToTTSQueue(greetingText)
+					s.clientState.IsWelcomeSpeaking = true
+				}
+			} else {
+				//进行llm->tts聊天
+				if err := s.AddChatTextToQueue(text); err != nil {
+					log.Errorf("开始对话失败: %v", err)
+				}
 			}
 		}
 	}
+	return nil
+}
+
+func (s *ChatSession) GetRandomGreeting() string {
+	greetingList := viper.GetStringSlice("greeting_list")
+	rand.Seed(time.Now().UnixNano())
+	return greetingList[rand.Intn(len(greetingList))]
+}
+
+func (s *ChatSession) AddTextToTTSQueue(text string) error {
+	log.Debugf("AddTextToTTSQueue text: %s", text)
+	msg := []*schema.Message{}
+	llmResponseChan := make(chan llm_common.LLMResponseStruct, 10)
+	llmResponseChan <- llm_common.LLMResponseStruct{
+		IsStart: true,
+		IsEnd:   true,
+		Text:    text,
+	}
+	close(llmResponseChan)
+	s.llmManager.AddLLMResponseChannel(msg, llmResponseChan)
+
 	return nil
 }
 
@@ -201,7 +361,7 @@ func (s *ChatSession) HandleAbortMessage(msg *ClientMessage) error {
 	s.clientState.Abort = true
 	s.clientState.Dialogue.Messages = nil // 清空对话历史
 
-	StopSpeaking(s.serverTransport, true)
+	s.StopSpeaking(true)
 
 	// 记录日志
 	log.Infof("设备 %s abort 会话", msg.DeviceID)
@@ -254,7 +414,7 @@ func (s *ChatSession) HandleListenStart(msg *ClientMessage) error {
 		log.Infof("设备 %s 拾音模式: %s", msg.DeviceID, msg.Mode)
 	}
 	if s.clientState.ListenMode == "manual" {
-		StopSpeaking(s.serverTransport, false)
+		s.StopSpeaking(false)
 	}
 	s.clientState.SetStatus(ClientStatusListening)
 
@@ -262,9 +422,9 @@ func (s *ChatSession) HandleListenStart(msg *ClientMessage) error {
 }
 
 func (s *ChatSession) HandleListenStop() error {
-	if s.clientState.ListenMode == "auto" {
+	/*if s.clientState.ListenMode == "auto" {
 		s.clientState.CancelSessionCtx()
-	}
+	}*/
 
 	//调用
 	s.clientState.OnManualStop()
@@ -345,7 +505,7 @@ func (s *ChatSession) OnListenStart() error {
 					return
 				}
 
-				err = s.startChat(text)
+				err = s.AddChatTextToQueue(text)
 				if err != nil {
 					log.Errorf("开始对话失败: %v", err)
 					return
@@ -383,44 +543,60 @@ func (s *ChatSession) OnListenStart() error {
 }
 
 // startChat 开始对话
-func (s *ChatSession) startChat(text string) error {
-	select {
-	case s.chatTextQueue <- text:
-	default:
-		log.Warnf("chatTextQueue 已满, 丢弃消息")
+func (s *ChatSession) AddChatTextToQueue(text string) error {
+	log.Debugf("AddChatTextToQueue text: %s", text)
+	err := s.chatTextQueue.Push(text)
+	if err != nil {
+		log.Warnf("chatTextQueue 已满或已关闭, 丢弃消息")
 	}
 	return nil
 }
 
-func (s *ChatSession) processChatText() {
+func (s *ChatSession) processChatText(ctx context.Context) {
 	log.Debugf("processChatText start")
 	defer log.Debugf("processChatText end")
 
-	go func() {
-		for {
-			select {
-			case <-s.clientState.Ctx.Done():
+	for {
+		text, err := s.chatTextQueue.Pop(ctx, 0)
+		if err != nil {
+			if err == util.ErrQueueCtxDone {
 				return
-			case <-s.clientState.GetSessionCtx().Done():
-				//清空chatTextQueue, 然后continue
-				s.chatTextQueue = make(chan string, 10)
-				continue
-			default:
-				select {
-				case text := <-s.chatTextQueue:
-					err := s.actionDoChat(text)
-					if err != nil {
-						log.Errorf("处理对话失败: %v", err)
-						continue
-					}
-				}
 			}
+			continue
 		}
-	}()
+		sessionCtx := s.clientState.GetSessionCtx()
+		err = s.actionDoChat(sessionCtx, text)
+		if err != nil {
+			log.Errorf("处理对话失败: %v", err)
+			continue
+		}
+	}
 }
 
-func (s *ChatSession) actionDoChat(text string) error {
-	ctx := s.clientState.GetSessionCtx()
+func (s *ChatSession) ClearChatTextQueue() {
+	s.chatTextQueue.Clear()
+}
+
+func (s *ChatSession) Close() {
+	s.cancel()
+	s.serverTransport.Close()
+}
+
+func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
+	select {
+	case <-ctx.Done():
+		log.Debugf("actionDoChat ctx done, return")
+		return nil
+	default:
+	}
+
+	//当收到停止说话或退出说话时, 则退出对话
+	clearText := strings.TrimSpace(text)
+	if clearText == "退下吧" || clearText == "退出" || clearText == "退出对话" || clearText == "停止" || clearText == "停止说话" {
+		s.Close()
+		return nil
+	}
+
 	clientState := s.clientState
 
 	sessionID := clientState.SessionID

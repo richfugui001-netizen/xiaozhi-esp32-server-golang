@@ -16,6 +16,8 @@ type WebSocketConn struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	onCloseCb func()
+
 	conn     *websocket.Conn
 	deviceID string
 
@@ -46,6 +48,7 @@ func NewWebSocketConn(conn *websocket.Conn, deviceID string) *WebSocketConn {
 				msgType, audio, err := instance.conn.ReadMessage()
 				if err != nil {
 					log.Errorf("read message error: %v", err)
+					instance.onCloseCb() //通知chatManager进行退出
 					return
 				}
 
@@ -119,6 +122,10 @@ func (w *WebSocketConn) Close() error {
 	close(w.recvCmdChan)
 	close(w.recvAudioChan)
 	return nil
+}
+
+func (w *WebSocketConn) OnClose(cb func()) {
+	w.onCloseCb = cb
 }
 
 func (w *WebSocketConn) GetDeviceID() string {

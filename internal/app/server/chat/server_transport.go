@@ -154,6 +154,10 @@ func (s *ServerTransport) SendSentenceEnd(text string) error {
 	return nil
 }
 
+func (s *ServerTransport) SendCmd(cmdBytes []byte) error {
+	return s.transport.SendCmd(cmdBytes)
+}
+
 func (s *ServerTransport) SendAudio(audio []byte) error {
 	return s.transport.SendAudio(audio)
 }
@@ -194,4 +198,12 @@ func (s *ServerTransport) RecvMcpMsg(timeOut int) ([]byte, error) {
 
 func (s *ServerTransport) Close() error {
 	return s.transport.Close()
+}
+
+func (s *ServerTransport) RecvAudio(timeOut int) ([]byte, error) {
+	return s.transport.RecvAudio(timeOut)
+}
+
+func (s *ServerTransport) RecvCmd(timeOut int) ([]byte, error) {
+	return s.transport.RecvCmd(timeOut)
 }

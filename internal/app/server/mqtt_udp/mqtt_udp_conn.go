@@ -27,6 +27,8 @@ type MqttUdpConn struct {
 	sync.RWMutex
 
 	data sync.Map
+
+	onCloseCb func()
 }
 
 // NewMqttUdpConn 创建一个新的 MqttUdpConn 实例
@@ -54,8 +56,7 @@ func (c *MqttUdpConn) SendCmd(msg []byte) error {
 	if token.Error() != nil {
 		return token.Error()
 	}
-	// TODO: 通过 MQTT-UDP 发送命令
-	return errors.New("SendCmd not implemented")
+	return nil
 }
 
 func (c *MqttUdpConn) InternalRecvCmd(msg []byte) error {
@@ -119,6 +120,10 @@ func (c *MqttUdpConn) Close() error {
 	c.cancel()
 	close(c.recvCmdChan)
 	return nil
+}
+
+func (c *MqttUdpConn) OnClose(closeCb func()) {
+	c.onCloseCb = closeCb
 }
 
 func (c *MqttUdpConn) GetTransportType() string {

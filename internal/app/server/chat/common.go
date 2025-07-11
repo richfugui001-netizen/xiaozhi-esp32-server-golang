@@ -1,8 +1,10 @@
 package chat
 
-func StopSpeaking(serverTransport *ServerTransport, isSendTtsStop bool) {
-	serverTransport.clientState.CancelSessionCtx()
+func (s *ChatSession) StopSpeaking(isSendTtsStop bool) {
+	s.clientState.CancelSessionCtx()
+	s.llmManager.ClearLLMResponseQueue()
+	s.ClearChatTextQueue()
 	if isSendTtsStop {
-		serverTransport.SendTtsStop()
+		s.serverTransport.SendTtsStop()
 	}
 }

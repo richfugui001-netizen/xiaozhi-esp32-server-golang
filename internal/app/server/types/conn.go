@@ -5,7 +5,7 @@ package types
 
 const (
 	TransportTypeWebsocket = "websocket"
-	TransportTypeMqttUdp   = "mqtt_udp"
+	TransportTypeMqttUdp   = "udp"
 )
 
 type IConn interface {
@@ -21,6 +21,7 @@ type IConn interface {
 	GetDeviceID() string
 
 	Close() error
+	OnClose(func())
 
 	GetTransportType() string
 

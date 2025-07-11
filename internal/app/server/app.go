@@ -100,5 +100,5 @@ func (a *App) OnNewConnection(transport types.IConn) {
 		return
 	}
 
-	chatManager.Start()
+	go chatManager.Start()
 }

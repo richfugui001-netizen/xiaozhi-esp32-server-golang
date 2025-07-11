@@ -12,29 +12,78 @@ import (
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
+	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/schema"
 )
 
+type LLMResponseChannelItem struct {
+	requestEinoMessages []*schema.Message
+	responseChan        chan llm_common.LLMResponseStruct
+}
+
 type LLMManager struct {
 	clientState     *ClientState
 	serverTransport *ServerTransport
 	ttsManager      *TTSManager
+
+	llmResponseQueue *util.Queue[LLMResponseChannelItem]
 }
 
 func NewLLMManager(clientState *ClientState, serverTransport *ServerTransport, ttsManager *TTSManager) *LLMManager {
 	return &LLMManager{
-		clientState:     clientState,
-		serverTransport: serverTransport,
-		ttsManager:      ttsManager,
+		clientState:      clientState,
+		serverTransport:  serverTransport,
+		ttsManager:       ttsManager,
+		llmResponseQueue: util.NewQueue[LLMResponseChannelItem](10),
 	}
+}
+
+func (l *LLMManager) Start(ctx context.Context) {
+	l.processLLMResponseQueue(ctx)
+}
+
+func (l *LLMManager) processLLMResponseQueue(ctx context.Context) {
+	for {
+		item, err := l.llmResponseQueue.Pop(ctx, 0) // 阻塞式
+		if err != nil {
+			if err == util.ErrQueueCtxDone {
+				return
+			}
+			// 其他错误
+			continue
+		}
+		log.Debugf("processLLMResponseQueue item: %+v", item)
+		sessionCtx := l.clientState.GetSessionCtx()
+		l.HandleLLMResponse(sessionCtx, item.requestEinoMessages, item.responseChan)
+	}
+}
+
+func (l *LLMManager) ClearLLMResponseQueue() {
+	l.llmResponseQueue.Clear()
+}
+
+func (l *LLMManager) AddLLMResponseChannel(requestEinoMessages []*schema.Message, responseChan chan llm_common.LLMResponseStruct) error {
+	err := l.llmResponseQueue.Push(LLMResponseChannelItem{requestEinoMessages: requestEinoMessages, responseChan: responseChan})
+	if err != nil {
+		log.Warnf("llmResponseQueue 已满或已关闭, 丢弃消息")
+		return fmt.Errorf("llmResponseQueue 已满或已关闭, 丢弃消息")
+	}
+	return nil
 }
 
 // HandleLLMResponse 处理LLM响应
 func (l *LLMManager) HandleLLMResponse(ctx context.Context, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
 	log.Debugf("HandleLLMResponse start")
 	defer log.Debugf("HandleLLMResponse end")
+
+	select {
+	case <-ctx.Done():
+		log.Debugf("HandleLLMResponse ctx done, return")
+		return false, nil
+	default:
+	}
 
 	state := l.clientState
 	var toolCalls []schema.ToolCall
@@ -101,8 +150,6 @@ func (l *LLMManager) HandleLLMResponse(ctx context.Context, requestEinoMessages 
 				}
 
 				if llmResponse.IsEnd {
-					//延迟50ms毫秒再发stop
-					//time.Sleep(50 * time.Millisecond)
 					//写到redis中
 					if len(requestEinoMessages) > 0 {
 						llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.User, requestEinoMessages[len(requestEinoMessages)-1].Content)
@@ -210,14 +257,12 @@ func (l *LLMManager) DoLLmRequest(ctx context.Context, requestEinoMessages []*sc
 	}
 
 	log.Debugf("DoLLmRequest goroutine开始 - SessionID: %s, context状态: %v", l.clientState.SessionID, ctx.Err())
-	ok, err := l.HandleLLMResponse(ctx, requestEinoMessages, responseSentences)
+	err = l.AddLLMResponseChannel(requestEinoMessages, responseSentences)
 	if err != nil {
 		log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", l.clientState.SessionID, err)
-		clientState.CancelSessionCtx()
 	}
 
-	log.Debugf("DoLLmRequest goroutine结束 - SessionID: %s, ok: %v", l.clientState.SessionID, ok)
-	_ = ok
+	log.Debugf("DoLLmRequest 结束 - SessionID: %s", l.clientState.SessionID)
 
 	return nil
 }

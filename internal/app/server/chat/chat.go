@@ -2,8 +2,6 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"sync"
 
 	"github.com/spf13/viper"
@@ -11,10 +9,8 @@ import (
 	types_conn "xiaozhi-esp32-server-golang/internal/app/server/types"
 	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
-	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
-	"xiaozhi-esp32-server-golang/internal/domain/tts"
 	"xiaozhi-esp32-server-golang/internal/domain/vad/silero_vad"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -26,20 +22,25 @@ type ChatManager struct {
 	clientState *ClientState
 	session     *ChatSession
 	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 type ChatManagerOption func(*ChatManager)
 
 func NewChatManager(deviceID string, transport types_conn.IConn, options ...ChatManagerOption) (*ChatManager, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	cm := &ChatManager{
 		DeviceID:  deviceID,
 		transport: transport,
-		ctx:       context.Background(),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 
 	for _, option := range options {
 		option(cm)
 	}
+
+	cm.transport.OnClose(cm.OnClose)
 
 	clientState, err := GenClientState(cm.ctx, cm.DeviceID)
 	if err != nil {
@@ -55,6 +56,7 @@ func NewChatManager(deviceID string, transport types_conn.IConn, options ...Chat
 	llmManager := NewLLMManager(clientState, serverTransport, ttsManager)
 
 	cm.session = NewChatSession(
+		cm.ctx,
 		clientState,
 		WithASRManager(asrManager),
 		WithTTSManager(ttsManager),
@@ -131,141 +133,23 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 	return clientState, nil
 }
 
-// 在mqtt 收到type: listen, state: start后进行
-func (c *ChatManager) InitAsrLlmTts() error {
-	ttsConfig := c.clientState.DeviceConfig.Tts
-	ttsProvider, err := tts.GetTTSProvider(ttsConfig.Provider, ttsConfig.Config)
-	if err != nil {
-		return fmt.Errorf("创建 TTS 提供者失败: %v", err)
-	}
-	c.clientState.TTSProvider = ttsProvider
-
-	if err := c.clientState.InitLlm(); err != nil {
-		return fmt.Errorf("初始化LLM失败: %v", err)
-	}
-	if err := c.clientState.InitAsr(); err != nil {
-		return fmt.Errorf("初始化ASR失败: %v", err)
-	}
-	c.clientState.SetAsrPcmFrameSize(c.clientState.InputAudioFormat.SampleRate, c.clientState.InputAudioFormat.Channels, c.clientState.InputAudioFormat.FrameDuration)
-
-	return nil
-}
-
 func (c *ChatManager) Start() error {
-	go func() error {
-		err := c.InitAsrLlmTts()
-		if err != nil {
-			log.Errorf("初始化ASR/LLM/TTS失败: %v", err)
-			return err
-		}
-
-		go c.CmdMessageLoop()
-		go c.AudioMessageLoop()
-		return nil
-	}()
-
-	return nil
-}
-
-func (c *ChatManager) CmdMessageLoop() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Infof("设备 %s recvCmd context cancel", c.clientState.DeviceID)
-			return
-		default:
-			message, err := c.transport.RecvCmd(120)
-			if err != nil {
-				log.Errorf("recv cmd error: %v", err)
-				return
-			}
-			log.Infof("收到文本消息: %s", string(message))
-			if err := c.HandleTextMessage(message); err != nil {
-				log.Errorf("处理文本消息失败: %v", err)
-				continue
-			}
-		}
-	}
-}
-
-func (c *ChatManager) AudioMessageLoop() {
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Debugf("设备 %s recvCmd context cancel", c.clientState.DeviceID)
-			return
-		default:
-			message, err := c.transport.RecvAudio(300)
-			if err != nil {
-				log.Errorf("recv audio error: %v", err)
-				return
-			}
-			log.Debugf("收到音频数据，大小: %d 字节", len(message))
-			if c.clientState.GetClientVoiceStop() {
-				//log.Debug("客户端停止说话, 跳过音频数据")
-				continue
-			}
-			// 同时通过音频处理器处理
-			if ok := c.HandleAudioMessage(message); !ok {
-				log.Errorf("音频缓冲区已满: %v", err)
-			}
-		}
-	}
+	return c.session.Start(c.ctx)
 }
 
 // 主动关闭断开连接
 func (c *ChatManager) Close() error {
 	log.Infof("主动关闭断开连接, 设备 %s", c.clientState.DeviceID)
-	StopSpeaking(c.session.serverTransport, true)
-	c.clientState.Destroy()
+	c.cancel()
+	c.transport.Close()
 	return nil
 }
 
-func (c *ChatManager) OnClose() error {
+func (c *ChatManager) OnClose() {
 	log.Infof("设备 %s 断开连接", c.clientState.DeviceID)
 	// 关闭done通道通知所有goroutine退出
-	c.clientState.Cancel()
-	c.clientState.Destroy()
-	return nil
-}
-
-// handleTextMessage 处理文本消息
-func (c *ChatManager) HandleTextMessage(message []byte) error {
-	var clientMsg ClientMessage
-	if err := json.Unmarshal(message, &clientMsg); err != nil {
-		log.Errorf("解析消息失败: %v", err)
-		return fmt.Errorf("解析消息失败: %v", err)
-	}
-
-	// 处理不同类型的消息
-	switch clientMsg.Type {
-	case MessageTypeHello:
-		return c.session.HandleHelloMessage(&clientMsg)
-	case MessageTypeListen:
-		return c.session.HandleListenMessage(&clientMsg)
-	case MessageTypeAbort:
-		return c.session.HandleAbortMessage(&clientMsg)
-	case MessageTypeIot:
-		return c.session.HandleIoTMessage(&clientMsg)
-	case MessageTypeMcp:
-		return c.session.HandleMcpMessage(&clientMsg)
-	case MessageTypeGoodBye:
-		return c.session.HandleGoodByeMessage(&clientMsg)
-	default:
-		// 未知消息类型，直接回显
-		return fmt.Errorf("未知消息类型: %s", clientMsg.Type)
-	}
-}
-
-// HandleAudioMessage 处理音频消息
-func (c *ChatManager) HandleAudioMessage(data []byte) bool {
-	select {
-	case c.clientState.OpusAudioBuffer <- data:
-		return true
-	default:
-		log.Warnf("音频缓冲区已满, 丢弃音频数据")
-	}
-	return false
+	c.cancel()
+	return
 }
 
 func (c *ChatManager) GetClientState() *ClientState {
