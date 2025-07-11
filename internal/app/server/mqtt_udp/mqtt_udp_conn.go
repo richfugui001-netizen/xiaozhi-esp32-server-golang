@@ -8,6 +8,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/spf13/viper"
 )
 
 // MqttUdpConn 实现 types.IConn 接口，适配 MQTT-UDP 连接
@@ -29,6 +30,8 @@ type MqttUdpConn struct {
 	data sync.Map
 
 	onCloseCb func()
+
+	lastActiveTs int64
 }
 
 // NewMqttUdpConn 创建一个新的 MqttUdpConn 实例
@@ -59,9 +62,10 @@ func (c *MqttUdpConn) SendCmd(msg []byte) error {
 	return nil
 }
 
-func (c *MqttUdpConn) InternalRecvCmd(msg []byte) error {
+func (c *MqttUdpConn) PushMsgToRecvCmd(msg []byte) error {
 	select {
 	case c.recvCmdChan <- msg:
+		c.lastActiveTs = time.Now().Unix()
 		return nil
 	default:
 		return errors.New("recvCmdChan is full")
@@ -81,6 +85,7 @@ func (c *MqttUdpConn) RecvCmd(timeout int) ([]byte, error) {
 func (c *MqttUdpConn) InternalRecvAudio(msg []byte) error {
 	select {
 	case c.UdpSession.RecvChannel <- msg:
+		c.lastActiveTs = time.Now().Unix()
 		return nil
 	default:
 		return errors.New("recvAudioChan is full")
@@ -117,8 +122,8 @@ func (c *MqttUdpConn) GetDeviceID() string {
 
 // Close 关闭连接
 func (c *MqttUdpConn) Close() error {
-	c.cancel()
-	close(c.recvCmdChan)
+	//c.cancel()
+
 	return nil
 }
 
@@ -140,4 +145,14 @@ func (c *MqttUdpConn) GetData(key string) (interface{}, error) {
 		return nil, errors.New("key not found")
 	}
 	return value, nil
+}
+
+func (c *MqttUdpConn) IsActive() bool {
+	return time.Now().Unix()-c.lastActiveTs < viper.GetInt64("chat.max_idle_duration")/100
+}
+
+// 销毁
+func (c *MqttUdpConn) Destroy() {
+	c.cancel()
+	c.onCloseCb()
 }

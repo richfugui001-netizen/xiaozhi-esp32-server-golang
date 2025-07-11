@@ -82,3 +82,8 @@ func (s *UdpSession) GetAesKeyAndNonce() (string, string) {
 
 	return strAesKey, strFullNonce
 }
+
+func (s *UdpSession) Destroy() {
+	close(s.RecvChannel)
+	close(s.SendChannel)
+}

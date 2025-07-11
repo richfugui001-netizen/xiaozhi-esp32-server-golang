@@ -103,27 +103,20 @@ func (s *MqttUdpAdapter) Start() error {
 
 func (s *MqttUdpAdapter) checkClientActive() error {
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(300 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				/*
-					s.deviceId2UdpSession.Range(func(key, value interface{}) bool {
-						udpSession := value.(*UdpSession)
-						clientState := udpSession.ChatManager.GetClientState()
-						if !clientState.IsActive() {
-							Infof("clientState is not active, clear deviceId: %s", clientState.DeviceID)
-							//主动关闭断开连接
-							udpSession.ChatManager.Close()
-
-							//解除udp会话
-							s.udpServer.CloseSession(udpSession.ConnId)
-							//删除mqtt关联关系
-							s.deviceId2UdpSession.Delete(key)
-						}
-						return true
-					})*/
+				s.deviceId2Conn.Range(func(key, value interface{}) bool {
+					conn := value.(*MqttUdpConn)
+					if !conn.IsActive() {
+						s.udpServer.CloseSession(conn.UdpSession.ConnId)
+						Infof("clientState is not active, clear deviceId: %s", conn.DeviceId)
+					}
+					conn.Destroy()
+					return true
+				})
 			}
 		}
 	}()
@@ -193,7 +186,7 @@ func (s *MqttUdpAdapter) processMessage() {
 				s.onNewConnection(deviceSession)
 			}
 
-			err := deviceSession.InternalRecvCmd(msg.Payload())
+			err := deviceSession.PushMsgToRecvCmd(msg.Payload())
 			if err != nil {
 				Errorf("InternalRecvCmd失败: %v", err)
 				continue

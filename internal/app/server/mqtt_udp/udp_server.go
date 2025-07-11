@@ -238,6 +238,11 @@ func (s *UdpServer) CreateSession(deviceId, clientId string) *UdpSession {
 
 // CloseSession 关闭会话
 func (s *UdpServer) CloseSession(connID string) {
+	session := s.getSessionByNonce(connID)
+	if session != nil {
+		s.addr2Session.Delete(session.RemoteAddr.String())
+		session.Destroy()
+	}
 	s.nonce2Session.Delete(connID)
 }
 
