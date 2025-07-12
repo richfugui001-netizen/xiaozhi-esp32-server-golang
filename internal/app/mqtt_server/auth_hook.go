@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"crypto/aes"
 	"encoding/base64"
+	"encoding/json"
+
+	"xiaozhi-esp32-server-golang/internal/util"
+	log "xiaozhi-esp32-server-golang/logger"
 
 	mqttServer "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/packets"
@@ -12,7 +16,7 @@ import (
 
 // AuthHook 实现自定义鉴权逻辑
 // 支持普通用户和超级管理员
-// 普通用户: 用户名为 base64 后的 {"ip":"1.202.193.194"}，密码为 AES 加密后的用户名
+// 普通用户: 用户名为 base64 后的 {"ip":"1.202.193.194"}，密码为 HMAC-SHA256 签名
 // 超级管理员: 用户名 admin，密码 shijingbo!@#
 type AuthHook struct {
 	mqttServer.HookBase
@@ -27,32 +31,62 @@ func (h *AuthHook) Provides(b byte) bool {
 }
 
 func (h *AuthHook) OnConnectAuthenticate(cl *mqttServer.Client, pk packets.Packet) bool {
-	username := string(pk.Connect.Username)
-	password := string(pk.Connect.Password)
-
-	adminUsername := viper.GetString("mqtt_server.username")
-	adminPassword := viper.GetString("mqtt_server.password")
-	if username == adminUsername && password == adminPassword {
+	// 检查是否启用鉴权
+	enableAuth := viper.GetBool("mqtt_server.enable_auth")
+	if !enableAuth {
+		//log.Infof("MQTT鉴权已禁用，允许所有连接")
 		return true
 	}
 
-	// 普通用户校验
-	/*
-		decoded, err := base64.StdEncoding.DecodeString(username)
+	username := string(pk.Connect.Username)
+	password := string(pk.Connect.Password)
+	clientId := string(pk.Connect.ClientIdentifier)
+
+	// 超级管理员校验
+	adminUsername := viper.GetString("mqtt_server.username")
+	adminPassword := viper.GetString("mqtt_server.password")
+	if username == adminUsername && password == adminPassword {
+		log.Infof("超级管理员登录成功: %s", username)
+		return true
+	}
+
+	// 普通用户校验 - 使用新的签名验证逻辑
+	signatureKey := viper.GetString("mqtt_server.signature_key")
+	if signatureKey != "" {
+		credentialInfo, err := util.ValidateMqttCredentials(clientId, username, password, signatureKey)
 		if err != nil {
+			log.Warnf("MQTT凭据验证失败: %v", err)
 			return false
 		}
-		var userInfo map[string]string
-		if err := json.Unmarshal(decoded, &userInfo); err != nil {
-			return false
-		}
-		if _, ok := userInfo["ip"]; !ok {
-			return false
-		}
-		// 校验 password 是否为 AES 加密后的 username
-		if !checkAesPassword(username, password) {
-			return false
-		}*/
+
+		log.Infof("MQTT用户验证成功: groupId=%s, macAddress=%s, uuid=%s",
+			credentialInfo.GroupId, credentialInfo.MacAddress, credentialInfo.UUID)
+		return true
+	}
+
+	// 如果没有配置签名密钥，回退到原来的AES验证逻辑
+	log.Warnf("缺少OTA签名密钥配置，使用AES验证方式")
+	return h.validateWithAes(username, password)
+}
+
+// validateWithAes 使用AES方式验证密码（向后兼容）
+func (h *AuthHook) validateWithAes(username, password string) bool {
+	// 普通用户校验
+	decoded, err := base64.StdEncoding.DecodeString(username)
+	if err != nil {
+		return false
+	}
+	var userInfo map[string]string
+	if err := json.Unmarshal(decoded, &userInfo); err != nil {
+		return false
+	}
+	if _, ok := userInfo["ip"]; !ok {
+		return false
+	}
+	// 校验 password 是否为 AES 加密后的 username
+	if !checkAesPassword(username, password) {
+		return false
+	}
 	return true
 }
 

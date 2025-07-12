@@ -1,9 +1,7 @@
 package websocket
 
 import (
-	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -47,7 +45,7 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 
 	otaConfigPrefix := "ota.external."
 	//如果ip是192.168开头的，则选择test配置
-	if strings.HasPrefix(clientIp, "192.168") || strings.HasPrefix(clientIp, "127.0.0.1") {
+	if strings.HasPrefix(clientIp, "192.168") || strings.HasPrefix(clientIp, "10.") || strings.HasPrefix(clientIp, "127.0.0.1") {
 		otaConfigPrefix = "ota.test."
 	} else {
 		otaConfigPrefix = "ota.external."
@@ -85,26 +83,20 @@ func getMqttInfo(deviceId, clientId, otaConfigPrefix, ip string) *MqttInfo {
 	if !viper.GetBool(otaConfigPrefix + "mqtt.enable") {
 		return nil
 	}
-	userName := struct {
-		Ip string `json:"ip"`
-	}{
-		Ip: ip,
-	}
-	userNameJson, err := json.Marshal(userName)
+
+	// 生成MQTT凭据
+	signatureKey := viper.GetString("ota.signature_key")
+	credentials, err := util.GenerateMqttCredentials(deviceId, clientId, ip, signatureKey)
 	if err != nil {
-		log.Errorf("用户名序列化失败: %v", err)
+		log.Errorf("生成MQTT凭据失败: %v", err)
 		return nil
 	}
-	base64UserName := base64.StdEncoding.EncodeToString(userNameJson)
-
-	mqttClientId := fmt.Sprintf("GID_test@@@%s@@@%s", deviceId, clientId)
-	pwd := util.Sha256Digest([]byte(mqttClientId))
 
 	return &MqttInfo{
 		Endpoint:       viper.GetString(otaConfigPrefix + "mqtt.endpoint"),
-		ClientId:       mqttClientId,
-		Username:       base64UserName,
-		Password:       pwd,
+		ClientId:       credentials.ClientId,
+		Username:       credentials.Username,
+		Password:       credentials.Password,
 		PublishTopic:   client.DeviceMockPubTopicPrefix,
 		SubscribeTopic: client.DeviceMockSubTopicPrefix,
 	}
