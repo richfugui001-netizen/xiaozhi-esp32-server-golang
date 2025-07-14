@@ -77,6 +77,18 @@ PUBLIC_IP=192.168.0.100     # 服务器公网IP
 #MQTT_SIGNATURE_KEY=mqtt_key # mqtt key, 可选，如果配置则进行mqtt认证，需与 websocket服务器配置的key相同
 ```
 
+### 运行
+
+##### 开发环境
+
+```
+# 直接运行
+node app.js
+
+# 调试模式运行
+DEBUG=mqtt-server node app.js
+```
+
 ---
 
 ## 二、小智golang后端服务配置指南
@@ -121,7 +133,7 @@ PUBLIC_IP=192.168.0.100     # 服务器公网IP
 ```
 ---
 
-## 五、参考文档
+## 三、参考文档
 - [mqtt_udp.md](./mqtt_udp.md)（详细架构、配置、流程）
 - [mqtt_udp_protocol.md](./mqtt_udp_protocol.md)（协议与数据流程）
 - [config.md](./config.md)（配置项详细说明）
