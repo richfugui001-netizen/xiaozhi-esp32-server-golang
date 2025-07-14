@@ -7,7 +7,6 @@ import (
 	"time"
 
 	. "xiaozhi-esp32-server-golang/internal/data/client"
-	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
@@ -19,8 +18,11 @@ import (
 )
 
 type LLMResponseChannelItem struct {
+	ctx                 context.Context
 	requestEinoMessages []*schema.Message
 	responseChan        chan llm_common.LLMResponseStruct
+	onStartFunc         func()
+	onEndFunc           func(err error)
 }
 
 type LLMManager struct {
@@ -54,9 +56,15 @@ func (l *LLMManager) processLLMResponseQueue(ctx context.Context) {
 			// 其他错误
 			continue
 		}
+
 		log.Debugf("processLLMResponseQueue item: %+v", item)
-		sessionCtx := l.clientState.GetSessionCtx()
-		l.HandleLLMResponse(sessionCtx, item.requestEinoMessages, item.responseChan)
+		if item.onStartFunc != nil {
+			item.onStartFunc()
+		}
+		_, err = l.handleLLMResponse(item.ctx, item.requestEinoMessages, item.responseChan)
+		if item.onEndFunc != nil {
+			item.onEndFunc(err)
+		}
 	}
 }
 
@@ -64,8 +72,51 @@ func (l *LLMManager) ClearLLMResponseQueue() {
 	l.llmResponseQueue.Clear()
 }
 
-func (l *LLMManager) AddLLMResponseChannel(requestEinoMessages []*schema.Message, responseChan chan llm_common.LLMResponseStruct) error {
-	err := l.llmResponseQueue.Push(LLMResponseChannelItem{requestEinoMessages: requestEinoMessages, responseChan: responseChan})
+func (l *LLMManager) AddTextToTTSQueue(text string) error {
+	log.Debugf("AddTextToTTSQueue text: %s", text)
+	msg := []*schema.Message{}
+	llmResponseChan := make(chan llm_common.LLMResponseStruct, 10)
+	llmResponseChan <- llm_common.LLMResponseStruct{
+		IsStart: true,
+		IsEnd:   true,
+		Text:    text,
+	}
+	close(llmResponseChan)
+	l.HandleLLMResponseChannelAsync(l.clientState.GetSessionCtx(), msg, llmResponseChan)
+
+	return nil
+}
+
+func (l *LLMManager) HandleLLMResponseChannelAsync(ctx context.Context, requestEinoMessages []*schema.Message, responseChan chan llm_common.LLMResponseStruct) error {
+	needSendTtsCmd := true
+	val := ctx.Value("nest")
+	log.Debugf("AddLLMResponseChannel nest: %+v", val)
+	if nest, ok := val.(int); ok {
+		if nest > 1 {
+			needSendTtsCmd = false
+		}
+	}
+
+	var onStartFunc func()
+	var onEndFunc func(err error)
+
+	if needSendTtsCmd {
+		onStartFunc = func() {
+			l.serverTransport.SendTtsStart()
+		}
+		onEndFunc = func(err error) {
+			l.serverTransport.SendTtsStop()
+		}
+	}
+
+	item := LLMResponseChannelItem{
+		ctx:                 ctx,
+		requestEinoMessages: requestEinoMessages,
+		responseChan:        responseChan,
+		onStartFunc:         onStartFunc,
+		onEndFunc:           onEndFunc,
+	}
+	err := l.llmResponseQueue.Push(item)
 	if err != nil {
 		log.Warnf("llmResponseQueue 已满或已关闭, 丢弃消息")
 		return fmt.Errorf("llmResponseQueue 已满或已关闭, 丢弃消息")
@@ -73,14 +124,31 @@ func (l *LLMManager) AddLLMResponseChannel(requestEinoMessages []*schema.Message
 	return nil
 }
 
+func (l *LLMManager) HandleLLMResponseChannelSync(ctx context.Context, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
+	needSendTtsCmd := true
+	val := ctx.Value("nest")
+	log.Debugf("AddLLMResponseChannel nest: %+v", val)
+	if nest, ok := val.(int); ok {
+		if nest > 1 {
+			needSendTtsCmd = false
+		}
+	}
+	if needSendTtsCmd {
+		l.serverTransport.SendTtsStart()
+		defer l.serverTransport.SendTtsStop()
+	}
+
+	return l.handleLLMResponse(ctx, requestEinoMessages, llmResponseChannel)
+}
+
 // HandleLLMResponse 处理LLM响应
-func (l *LLMManager) HandleLLMResponse(ctx context.Context, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
-	log.Debugf("HandleLLMResponse start")
-	defer log.Debugf("HandleLLMResponse end")
+func (l *LLMManager) handleLLMResponse(ctx context.Context, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
+	log.Debugf("handleLLMResponse start")
+	defer log.Debugf("handleLLMResponse end")
 
 	select {
 	case <-ctx.Done():
-		log.Debugf("HandleLLMResponse ctx done, return")
+		log.Debugf("handleLLMResponse ctx done, return")
 		return false, nil
 	default:
 	}
@@ -89,41 +157,13 @@ func (l *LLMManager) HandleLLMResponse(ctx context.Context, requestEinoMessages 
 	var toolCalls []schema.ToolCall
 	var fullText bytes.Buffer
 
-	sendTtsStartEndFunc := func(isStart bool) error {
-		msgState := MessageStateStart
-		if !isStart {
-			msgState = MessageStateStop
-		}
-
-		if msgState == MessageStateStart {
-			err := l.serverTransport.SendTtsStart()
-			if err != nil {
-				log.Errorf("发送tts start失败: %+v", err)
-				return err
-			}
-			return nil
-		} else if msgState == MessageStateStop {
-			err := l.serverTransport.SendTtsStop()
-			if err != nil {
-				log.Errorf("发送tts stop失败: %+v", err)
-				return err
-			}
-			return nil
-		}
-
-		return fmt.Errorf("msgState: %s", msgState)
-	}
-
-	if !state.GetTtsStart() {
-		sendTtsStartEndFunc(true)
-	}
-
+	var hasTextResponse bool
 	for {
 		select {
 		case <-ctx.Done():
 			// 上下文已取消，优先处理取消逻辑
 			log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
-			sendTtsStartEndFunc(false)
+			//sendTtsStartEndFunc(false)
 			return false, nil
 		default:
 			// 非阻塞检查，如果ctx没有Done，继续处理LLM响应
@@ -143,10 +183,12 @@ func (l *LLMManager) HandleLLMResponse(ctx context.Context, requestEinoMessages 
 				}
 
 				if llmResponse.Text != "" {
+					hasTextResponse = true
 					// 处理文本内容响应
-					if err := l.ttsManager.handleTextResponse(ctx, llmResponse, &fullText); err != nil {
+					if err := l.ttsManager.handleTextResponse(ctx, llmResponse, true); err != nil {
 						return true, err
 					}
+					fullText.WriteString(llmResponse.Text)
 				}
 
 				if llmResponse.IsEnd {
@@ -159,20 +201,29 @@ func (l *LLMManager) HandleLLMResponse(ctx context.Context, requestEinoMessages 
 						llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.Assistant, strFullText)
 					}
 					if len(toolCalls) > 0 {
-						invokeToolSuccess, err := l.handleToolCallResponse(ctx, requestEinoMessages, toolCalls)
+						if !hasTextResponse {
+							//有工具调用 && 没有文本响应，发送"查询中", 异步tts
+							l.ttsManager.handleTextResponse(ctx, llm_common.LLMResponseStruct{
+								Text: "查询中, 请稍候",
+							}, false)
+						}
+
+						lctx := context.WithValue(ctx, "nest", 2)
+						invokeToolSuccess, err := l.handleToolCallResponse(lctx, requestEinoMessages, toolCalls)
 						if err != nil {
 							log.Errorf("处理工具调用响应失败: %v", err)
 							return true, fmt.Errorf("处理工具调用响应失败: %v", err)
 						}
 						if !invokeToolSuccess {
 							//工具调用失败
-							if err := l.ttsManager.handleTextResponse(ctx, llmResponse, &fullText); err != nil {
+							if err := l.ttsManager.handleTextResponse(ctx, llmResponse, false); err != nil {
 								return true, err
 							}
-							sendTtsStartEndFunc(false)
+							fullText.WriteString(llmResponse.Text)
+							//sendTtsStartEndFunc(false)
 						}
 					} else {
-						sendTtsStartEndFunc(false)
+						//sendTtsStartEndFunc(false)
 					}
 
 					return ok, nil
@@ -180,7 +231,7 @@ func (l *LLMManager) HandleLLMResponse(ctx context.Context, requestEinoMessages 
 			case <-ctx.Done():
 				// 上下文已取消，退出协程
 				log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
-				sendTtsStartEndFunc(false)
+				//sendTtsStartEndFunc(false)
 				return false, nil
 			}
 		}
@@ -233,13 +284,13 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 	if invokeToolSuccess {
 		requestEinoMessages = append(requestEinoMessages, msgList...)
 		//不需要带tool进行调用
-		l.DoLLmRequest(ctx, requestEinoMessages, nil)
+		l.DoLLmRequest(ctx, requestEinoMessages, nil, true)
 	}
 
 	return invokeToolSuccess, nil
 }
 
-func (l *LLMManager) DoLLmRequest(ctx context.Context, requestEinoMessages []*schema.Message, einoTools []*schema.ToolInfo) error {
+func (l *LLMManager) DoLLmRequest(ctx context.Context, requestEinoMessages []*schema.Message, einoTools []*schema.ToolInfo, isSync bool) error {
 	log.Debugf("发送带工具的 LLM 请求, seesionID: %s, requestEinoMessages: %+v", l.clientState.SessionID, requestEinoMessages)
 	clientState := l.clientState
 
@@ -257,9 +308,18 @@ func (l *LLMManager) DoLLmRequest(ctx context.Context, requestEinoMessages []*sc
 	}
 
 	log.Debugf("DoLLmRequest goroutine开始 - SessionID: %s, context状态: %v", l.clientState.SessionID, ctx.Err())
-	err = l.AddLLMResponseChannel(requestEinoMessages, responseSentences)
-	if err != nil {
-		log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", l.clientState.SessionID, err)
+
+	if isSync {
+		_, err := l.HandleLLMResponseChannelSync(ctx, requestEinoMessages, responseSentences)
+		if err != nil {
+			log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", l.clientState.SessionID, err)
+			return err
+		}
+	} else {
+		err = l.HandleLLMResponseChannelAsync(ctx, requestEinoMessages, responseSentences)
+		if err != nil {
+			log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", l.clientState.SessionID, err)
+		}
 	}
 
 	log.Debugf("DoLLmRequest 结束 - SessionID: %s", l.clientState.SessionID)

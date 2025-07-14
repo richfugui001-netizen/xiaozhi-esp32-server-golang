@@ -136,6 +136,7 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 
 func (c *ChatManager) Start() error {
 	return c.session.Start(c.ctx)
+
 }
 
 // 主动关闭断开连接
