@@ -18,13 +18,17 @@ import (
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
-	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 )
+
+type AsrResponseChannelItem struct {
+	ctx  context.Context
+	text string
+}
 
 type ChatSession struct {
 	clientState     *ClientState
@@ -36,7 +40,7 @@ type ChatSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	chatTextQueue *util.Queue[string]
+	chatTextQueue *util.Queue[AsrResponseChannelItem]
 }
 
 type ChatSessionOption func(*ChatSession)
@@ -71,7 +75,7 @@ func NewChatSession(pctx context.Context, clientState *ClientState, opts ...Chat
 		clientState:   clientState,
 		ctx:           ctx,
 		cancel:        cancel,
-		chatTextQueue: util.NewQueue[string](10),
+		chatTextQueue: util.NewQueue[AsrResponseChannelItem](10),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -88,8 +92,9 @@ func (s *ChatSession) Start(ctx context.Context) error {
 
 	go s.CmdMessageLoop(ctx)   //处理信令消息
 	go s.AudioMessageLoop(ctx) //处理音频数据
-	go s.processChatText(ctx)  //处理llm队列消息
-	go s.llmManager.Start(ctx) //处理llm队列消息
+	go s.processChatText(ctx)  //处理 asr后 的对话消息
+	go s.llmManager.Start(ctx) //处理 llm后 的一系列返回消息
+	go s.ttsManager.Start(ctx) //处理 tts的 消息队列
 
 	return nil
 }
@@ -325,7 +330,7 @@ func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 				}
 			} else {
 				//进行llm->tts聊天
-				if err := s.AddChatTextToQueue(text); err != nil {
+				if err := s.AddAsrResultToQueue(text); err != nil {
 					log.Errorf("开始对话失败: %v", err)
 				}
 			}
@@ -344,17 +349,7 @@ func (s *ChatSession) GetRandomGreeting() string {
 }
 
 func (s *ChatSession) AddTextToTTSQueue(text string) error {
-	log.Debugf("AddTextToTTSQueue text: %s", text)
-	msg := []*schema.Message{}
-	llmResponseChan := make(chan llm_common.LLMResponseStruct, 10)
-	llmResponseChan <- llm_common.LLMResponseStruct{
-		IsStart: true,
-		IsEnd:   true,
-		Text:    text,
-	}
-	close(llmResponseChan)
-	s.llmManager.AddLLMResponseChannel(msg, llmResponseChan)
-
+	s.llmManager.AddTextToTTSQueue(text)
 	return nil
 }
 
@@ -509,7 +504,7 @@ func (s *ChatSession) OnListenStart() error {
 					return
 				}
 
-				err = s.AddChatTextToQueue(text)
+				err = s.AddAsrResultToQueue(text)
 				if err != nil {
 					log.Errorf("开始对话失败: %v", err)
 					return
@@ -547,9 +542,13 @@ func (s *ChatSession) OnListenStart() error {
 }
 
 // startChat 开始对话
-func (s *ChatSession) AddChatTextToQueue(text string) error {
-	log.Debugf("AddChatTextToQueue text: %s", text)
-	err := s.chatTextQueue.Push(text)
+func (s *ChatSession) AddAsrResultToQueue(text string) error {
+	log.Debugf("AddAsrResultToQueue text: %s", text)
+	item := AsrResponseChannelItem{
+		ctx:  s.clientState.GetSessionCtx(),
+		text: text,
+	}
+	err := s.chatTextQueue.Push(item)
 	if err != nil {
 		log.Warnf("chatTextQueue 已满或已关闭, 丢弃消息")
 	}
@@ -561,15 +560,15 @@ func (s *ChatSession) processChatText(ctx context.Context) {
 	defer log.Debugf("processChatText end")
 
 	for {
-		text, err := s.chatTextQueue.Pop(ctx, 0)
+		item, err := s.chatTextQueue.Pop(ctx, 0)
 		if err != nil {
 			if err == util.ErrQueueCtxDone {
 				return
 			}
 			continue
 		}
-		sessionCtx := s.clientState.GetSessionCtx()
-		err = s.actionDoChat(sessionCtx, text)
+
+		err = s.actionDoChat(item.ctx, item.text)
 		if err != nil {
 			log.Errorf("处理对话失败: %v", err)
 			continue
@@ -654,7 +653,7 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
 	// 发送带工具的LLM请求
 	log.Infof("使用 %d 个MCP工具发送LLM请求, tools: %+v", len(einoTools), toolNameList)
 
-	err = s.llmManager.DoLLmRequest(ctx, requestEinoMessages, einoTools)
+	err = s.llmManager.DoLLmRequest(ctx, requestEinoMessages, einoTools, true)
 	if err != nil {
 		log.Errorf("发送带工具的 LLM 请求失败, seesionID: %s, error: %v", sessionID, err)
 		return fmt.Errorf("发送带工具的 LLM 请求失败: %v", err)
