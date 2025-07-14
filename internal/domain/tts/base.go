@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"xiaozhi-esp32-server-golang/constants"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/cosyvoice"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/doubao"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/edge"
@@ -27,17 +28,17 @@ func GetTTSProvider(providerName string, config map[string]interface{}) (TTSProv
 	var baseProvider BaseTTSProvider
 
 	switch providerName {
-	case "doubao":
+	case constants.TtsTypeDoubao:
 		baseProvider = doubao.NewDoubaoTTSProvider(config)
-	case "doubao_ws":
+	case constants.TtsTypeDoubaoWS:
 		baseProvider = doubao.NewDoubaoWSProvider(config)
-	case "cosyvoice":
+	case constants.TtsTypeCosyvoice:
 		baseProvider = cosyvoice.NewCosyVoiceTTSProvider(config)
-	case "edge":
+	case constants.TtsTypeEdge:
 		baseProvider = edge.NewEdgeTTSProvider(config)
-	case "edge_offline":
+	case constants.TtsTypeEdgeOffline:
 		baseProvider = edge_offline.NewEdgeOfflineTTSProvider(config)
-	case "xiaozhi":
+	case constants.TtsTypeXiaozhi:
 		baseProvider = xiaozhi.NewXiaozhiProvider(config)
 	default:
 		return nil, fmt.Errorf("不支持的TTS提供者: %s", providerName)

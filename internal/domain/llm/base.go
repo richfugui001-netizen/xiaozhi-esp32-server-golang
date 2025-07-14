@@ -6,6 +6,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
+	"xiaozhi-esp32-server-golang/constants"
 	"xiaozhi-esp32-server-golang/internal/domain/llm/eino_llm"
 )
 
@@ -37,7 +38,7 @@ type LLMFactory interface {
 func GetLLMProvider(providerName string, config map[string]interface{}) (LLMProvider, error) {
 	llmType := config["type"].(string)
 	switch llmType {
-	case "openai", "ollama", "eino_llm", "eino":
+	case constants.LlmTypeOpenai, constants.LlmTypeOllama, constants.LlmTypeEinoLLM, constants.LlmTypeEino:
 		// 统一使用 EinoLLMProvider 处理所有类型
 		provider, err := eino_llm.NewEinoLLMProvider(config)
 		if err != nil {

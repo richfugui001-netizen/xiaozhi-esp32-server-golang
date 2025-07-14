@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/viper"
 
+	"xiaozhi-esp32-server-golang/constants"
 	types_conn "xiaozhi-esp32-server-golang/internal/app/server/types"
 	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
@@ -125,7 +126,7 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 
 	ttsType := clientState.DeviceConfig.Tts.Provider
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
-	if ttsType == "xiaozhi" || ttsType == "edge_offline" {
+	if ttsType == constants.TtsTypeXiaozhi || ttsType == constants.TtsTypeEdgeOffline {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}

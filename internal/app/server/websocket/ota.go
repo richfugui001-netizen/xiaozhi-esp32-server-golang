@@ -1,10 +1,7 @@
 package websocket
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -161,14 +158,23 @@ func (s *WebSocketServer) handleOtaActivate(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "不支持的算法", http.StatusBadRequest)
 		return
 	}
-	// 这里假设 hmacKey = deviceId + clientId
-	hmacKey := deviceId + clientId
-	h := hmac.New(sha256.New, []byte(hmacKey))
-	h.Write([]byte(req.Payload.Challenge))
-	hmacValue := hex.EncodeToString(h.Sum(nil))
-	if !hmac.Equal([]byte(hmacValue), []byte(req.Payload.HMAC)) {
-		log.Warnf("HMAC校验失败: got %s, want %s", req.Payload.HMAC, hmacValue)
-		http.Error(w, "HMAC校验失败", http.StatusUnauthorized)
+
+	// 调用配置Provider进行绑定校验
+	configProvider, err := user_config.GetProvider()
+	if err != nil {
+		log.Errorf("获取配置Provider失败: %v", err)
+		http.Error(w, "内部服务器错误", http.StatusInternalServerError)
+		return
+	}
+	ok, err := configProvider.VerifyChallenge(r.Context(), deviceId, clientId, req.Payload)
+	if err != nil {
+		log.Errorf("设备激活校验失败: %v", err)
+		http.Error(w, "设备激活校验失败", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		log.Warnf("设备激活校验未通过: deviceId=%s, clientId=%s", deviceId, clientId)
+		http.Error(w, "设备激活校验未通过", http.StatusUnauthorized)
 		return
 	}
 	// 激活成功，返回200

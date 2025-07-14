@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"xiaozhi-esp32-server-golang/constants"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
 )
 
@@ -24,7 +25,7 @@ type AsrProvider interface {
 // config: ASR引擎配置，为 map[string]interface{} 类型
 func NewAsrProvider(asrType string, config map[string]interface{}) (AsrProvider, error) {
 	switch asrType {
-	case "funasr":
+	case constants.AsrTypeFunAsr:
 		return NewFunasrAdapter(config)
 	default:
 		return nil, fmt.Errorf("不支持的ASR引擎类型: %s，目前仅支持 'funasr'", asrType)
