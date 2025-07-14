@@ -3,7 +3,6 @@ package user_config
 import (
 	"fmt"
 
-	userconfig_memory "xiaozhi-esp32-server-golang/internal/domain/config/memory"
 	userconfig_redis "xiaozhi-esp32-server-golang/internal/domain/config/redis"
 )
 
@@ -37,13 +36,6 @@ func GetUserConfigProvider(providerType string, config map[string]interface{}) (
 		provider, err := userconfig_redis.NewRedisUserConfigProvider(config)
 		if err != nil {
 			return nil, fmt.Errorf("创建Redis用户配置提供者失败: %v", err)
-		}
-		return provider, nil
-	case "memory":
-		// 创建内存用户配置提供者
-		provider, err := userconfig_memory.NewMemoryUserConfigProvider(config)
-		if err != nil {
-			return nil, fmt.Errorf("创建内存用户配置提供者失败: %v", err)
 		}
 		return provider, nil
 	case "file":

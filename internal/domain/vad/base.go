@@ -2,6 +2,7 @@ package vad
 
 import (
 	"errors"
+	"xiaozhi-esp32-server-golang/constants"
 	"xiaozhi-esp32-server-golang/internal/domain/vad/inter"
 	"xiaozhi-esp32-server-golang/internal/domain/vad/silero_vad"
 	"xiaozhi-esp32-server-golang/internal/domain/vad/webrtc_vad"
@@ -9,9 +10,9 @@ import (
 
 func AcquireVAD(provider string, config map[string]interface{}) (inter.VAD, error) {
 	switch provider {
-	case "silero_vad":
+	case constants.VadTypeSileroVad:
 		return silero_vad.AcquireVAD(config)
-	case "webrtc_vad":
+	case constants.VadTypeWebRTCVad:
 		return webrtc_vad.AcquireVAD(config)
 	default:
 		return nil, errors.New("invalid vad provider")
