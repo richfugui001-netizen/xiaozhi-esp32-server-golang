@@ -33,6 +33,7 @@
     "port": 8989
   },
   "mqtt": {
+    "enable": true,
     "broker": "127.0.0.1",
     "type": "tcp",
     "port": 2883,
@@ -57,7 +58,6 @@
     }
   },
   "udp": {
-    "enable": true,
     "external_host": "127.0.0.1",
     "external_port": 8990,
     "listen_host": "0.0.0.0",

@@ -47,7 +47,7 @@ func (a *App) Run() {
 }
 
 func (app *App) newMqttUdpAdapter() (*mqtt_udp.MqttUdpAdapter, error) {
-	isEnableUdp := viper.GetBool("udp.enable")
+	isEnableUdp := viper.GetBool("mqtt.enable")
 	if !isEnableUdp {
 		return nil, nil
 	}

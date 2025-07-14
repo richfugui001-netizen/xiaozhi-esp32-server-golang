@@ -88,7 +88,8 @@ func (s *WebSocketServer) Start() error {
 	go s.cleanupSessions()
 
 	// 注册路由处理器
-	http.HandleFunc("/xiaozhi/v1/", s.handleWebSocket)
+	http.HandleFunc("/xiaozhi/mqtt_udp/v1/", s.handleMqttUdpChat)
+	http.HandleFunc("/xiaozhi/v1/", s.handleChat)
 	http.HandleFunc("/xiaozhi/ota/", s.handleOta)
 	http.HandleFunc("/xiaozhi/mcp/", s.handleMCPWebSocket)
 	http.HandleFunc("/xiaozhi/api/mcp/tools/", s.handleMCPAPI)
@@ -120,7 +121,17 @@ func (s *WebSocketServer) cleanupSessions() {
 }
 
 // handleWebSocket 处理 WebSocket 连接
-func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+func (s *WebSocketServer) handleChat(w http.ResponseWriter, r *http.Request) {
+	s.internalHandleChat(w, r, false)
+}
+
+// handleWebSocket 处理 WebSocket 连接
+func (s *WebSocketServer) handleMqttUdpChat(w http.ResponseWriter, r *http.Request) {
+	s.internalHandleChat(w, r, true)
+}
+
+// handleWebSocket 处理 WebSocket 连接
+func (s *WebSocketServer) internalHandleChat(w http.ResponseWriter, r *http.Request, isMqttUdp bool) {
 	// 验证请求头
 	deviceID := r.Header.Get("Device-Id")
 	if deviceID == "" {
@@ -154,7 +165,7 @@ func (s *WebSocketServer) handleWebSocket(w http.ResponseWriter, r *http.Request
 	}
 
 	// 适配为 IConn 接口
-	wsConn := NewWebSocketConn(conn, deviceID)
+	wsConn := NewWebSocketConn(conn, deviceID, isMqttUdp)
 	if s.onNewConnection != nil {
 		s.onNewConnection(wsConn)
 	}

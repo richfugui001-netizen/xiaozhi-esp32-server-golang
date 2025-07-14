@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"time"
@@ -21,21 +22,23 @@ type WebSocketConn struct {
 	conn     *websocket.Conn
 	deviceID string
 
-	recvCmdChan   chan []byte
-	recvAudioChan chan []byte
+	isMqttUdpBridge bool
+	recvCmdChan     chan []byte
+	recvAudioChan   chan []byte
 	sync.RWMutex
 }
 
 // NewWebSocketConn 创建一个新的 WebSocketConn 实例
-func NewWebSocketConn(conn *websocket.Conn, deviceID string) *WebSocketConn {
+func NewWebSocketConn(conn *websocket.Conn, deviceID string, isMqttUdpBridge bool) *WebSocketConn {
 	ctx, cancel := context.WithCancel(context.Background())
 	instance := &WebSocketConn{
-		ctx:           ctx,
-		cancel:        cancel,
-		conn:          conn,
-		deviceID:      deviceID,
-		recvCmdChan:   make(chan []byte, 100),
-		recvAudioChan: make(chan []byte, 100),
+		ctx:             ctx,
+		cancel:          cancel,
+		conn:            conn,
+		deviceID:        deviceID,
+		isMqttUdpBridge: isMqttUdpBridge,
+		recvCmdChan:     make(chan []byte, 100),
+		recvAudioChan:   make(chan []byte, 100),
 	}
 
 	go func() {
@@ -61,6 +64,9 @@ func NewWebSocketConn(conn *websocket.Conn, deviceID string) *WebSocketConn {
 						log.Errorf("recv cmd channel is full")
 					}
 				} else if msgType == websocket.BinaryMessage {
+					if instance.isMqttUdpBridge {
+						audio = instance.tryUnpackUdpBridgeAudioPacket(audio)
+					}
 					select {
 					case instance.recvAudioChan <- audio:
 					default:
@@ -72,6 +78,26 @@ func NewWebSocketConn(conn *websocket.Conn, deviceID string) *WebSocketConn {
 	}()
 
 	return instance
+}
+
+// 适配mqtt udp bridge的数据格式
+// 前8个字节为0, 12-16字节为音频数据长度, 16字节后为音频数据
+func (c *WebSocketConn) tryUnpackUdpBridgeAudioPacket(buffer []byte) []byte {
+	if len(buffer) < 16 {
+		return buffer
+	}
+	// 检查前8字节是否全为0
+	for i := 0; i < 8; i++ {
+		if buffer[i] != 0 {
+			return buffer
+		}
+	}
+	dataLen := binary.BigEndian.Uint32(buffer[12:16])
+	if int(dataLen) != len(buffer)-16 {
+		return buffer
+	}
+	audioData := buffer[16:]
+	return audioData
 }
 
 func (w *WebSocketConn) SendCmd(msg []byte) error {
