@@ -11,6 +11,9 @@
 - **支持第三方 MQTT 服务端**：
   - 项目架构支持将内置 MQTT 服务端替换为如 EMQX、或自研MQTT Server等第三方 MQTT Broker。
   - 只需在配置文件中调整 `mqtt` 相关参数，主程序即可作为纯客户端对接外部 Broker，适合大规模集群和高可用场景。
+- **支持 虾哥官方 xiaozhi-mqtt-gateway 项目接入**
+  - 适配了虾哥 xiaozhi-mqtt-gateway 开源项目，可以接入使用
+  - [详见 mqtt_bridge.md](./mqtt_bridge.md)
 
 ### 部署架构图
 

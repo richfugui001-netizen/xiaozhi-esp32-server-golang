@@ -152,7 +152,7 @@ func (c *ChatSession) AudioMessageLoop(ctx context.Context) {
 				//log.Debug("客户端停止说话, 跳过音频数据")
 				continue
 			}
-			// 同时通过音频处理器处理
+
 			if ok := c.HandleAudioMessage(message); !ok {
 				log.Errorf("音频缓冲区已满: %v", err)
 			}

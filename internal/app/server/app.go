@@ -32,7 +32,9 @@ func NewApp() *App {
 
 func (a *App) Run() {
 	go a.wsServer.Start()
-	go a.mqttUdpAdapter.Start()
+	if a.mqttUdpAdapter != nil {
+		go a.mqttUdpAdapter.Start()
+	}
 	if viper.GetBool("mqtt_server.enable") {
 		go func() {
 			err := a.startMqttServer()
@@ -45,6 +47,10 @@ func (a *App) Run() {
 }
 
 func (app *App) newMqttUdpAdapter() (*mqtt_udp.MqttUdpAdapter, error) {
+	isEnableUdp := viper.GetBool("mqtt.enable")
+	if !isEnableUdp {
+		return nil, nil
+	}
 	mqttConfig := mqtt_udp.MqttConfig{
 		Broker:   viper.GetString("mqtt.broker"),
 		Type:     viper.GetString("mqtt.type"),

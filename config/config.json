@@ -33,6 +33,7 @@
     "port": 8989
   },
   "mqtt": {
+    "enable": true,
     "broker": "127.0.0.1",
     "type": "tcp",
     "port": 2883,
@@ -47,6 +48,8 @@
     "client_id": "xiaozhi_server",
     "username": "admin",
     "password": "test!@#",
+    "signature_key": "your_ota_signature_key_here",
+    "enable_auth": false,
     "tls": {
       "enable": false,
       "port": 8883,
@@ -208,6 +211,7 @@
     }
   },
   "ota": {
+    "signature_key": "your_ota_signature_key_here",
     "test": {
       "websocket": {
         "url": "ws://192.168.208.214:8989/xiaozhi/v1/"
@@ -258,5 +262,5 @@
     "你好，我是小智，今天有啥好玩的。", 
     "你好，我是小智，有什么需要帮助的。"
   ],
-  "wakeup_words": ["小智", "小知", "你好小智"],
+  "wakeup_words": ["小智", "小知", "你好小智"]
 }
