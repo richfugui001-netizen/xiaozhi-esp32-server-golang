@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -152,12 +153,31 @@ func (c *ChatSession) AudioMessageLoop(ctx context.Context) {
 				//log.Debug("客户端停止说话, 跳过音频数据")
 				continue
 			}
+			message = c.TryUnpackUdpAudioPacket(message)
 			// 同时通过音频处理器处理
 			if ok := c.HandleAudioMessage(message); !ok {
 				log.Errorf("音频缓冲区已满: %v", err)
 			}
 		}
 	}
+}
+
+func (c *ChatSession) TryUnpackUdpAudioPacket(buffer []byte) []byte {
+	if len(buffer) < 16 {
+		return buffer
+	}
+	// 检查前8字节是否全为0
+	for i := 0; i < 8; i++ {
+		if buffer[i] != 0 {
+			return buffer
+		}
+	}
+	dataLen := binary.BigEndian.Uint32(buffer[12:16])
+	if int(dataLen) != len(buffer)-16 {
+		return buffer
+	}
+	audioData := buffer[16:]
+	return audioData
 }
 
 // handleTextMessage 处理文本消息
