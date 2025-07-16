@@ -28,7 +28,7 @@ func NewASRManager(clientState *ClientState, serverTransport *ServerTransport, o
 }
 
 // ProcessVadAudio 启动VAD音频处理
-func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
+func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 	state := a.clientState
 	go func() {
 		audioFormat := state.InputAudioFormat
@@ -123,7 +123,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
 					if idleDuration > state.GetMaxIdleDuration() {
 						log.Infof("超出空闲时长: %dms, 断开连接", idleDuration)
 						//断开连接
-						a.serverTransport.Close()
+						onClose()
 						return
 					}
 					//如果之前没有语音, 本次也没有语音, 则从缓存中删除

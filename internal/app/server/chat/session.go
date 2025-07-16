@@ -270,7 +270,7 @@ func (s *ChatSession) HandleCommonHelloMessage(msg *ClientMessage) error {
 	clientState.InputAudioFormat = *msg.AudioParams
 	clientState.SetAsrPcmFrameSize(clientState.InputAudioFormat.SampleRate, clientState.InputAudioFormat.Channels, clientState.InputAudioFormat.FrameDuration)
 
-	s.asrManager.ProcessVadAudio(clientState.Ctx)
+	s.asrManager.ProcessVadAudio(clientState.Ctx, s.Close)
 
 	return nil
 }
@@ -455,7 +455,7 @@ func (s *ChatSession) OnListenStart() error {
 	err := s.asrManager.RestartAsrRecognition(ctx)
 	if err != nil {
 		log.Errorf("asr流式识别失败: %v", err)
-		s.serverTransport.Close()
+		s.Close()
 		return err
 	}
 
@@ -530,7 +530,7 @@ func (s *ChatSession) OnListenStart() error {
 						continue
 					} else {
 						log.Warnf("ASR识别结果为空，已达到最大空闲时间: %d", maxIdleTime)
-						s.serverTransport.Close()
+						s.Close()
 						return
 					}
 				}
@@ -581,6 +581,7 @@ func (s *ChatSession) ClearChatTextQueue() {
 }
 
 func (s *ChatSession) Close() {
+	s.StopSpeaking(true)
 	s.cancel()
 	s.serverTransport.Close()
 }
@@ -595,7 +596,7 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
 
 	//当收到停止说话或退出说话时, 则退出对话
 	clearText := strings.TrimSpace(text)
-	if clearText == "退下吧" || clearText == "退出" || clearText == "退出对话" || clearText == "停止" || clearText == "停止说话" {
+	if clearText == "再见" || clearText == "退下吧" || clearText == "退出" || clearText == "退出对话" || clearText == "停止" || clearText == "停止说话" {
 		s.Close()
 		return nil
 	}
