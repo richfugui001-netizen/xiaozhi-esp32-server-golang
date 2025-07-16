@@ -126,16 +126,17 @@ func (c *ChatSession) CmdMessageLoop(ctx context.Context) {
 			log.Infof("设备 %s recvCmd context cancel", c.clientState.DeviceID)
 			return
 		default:
-			message, err := c.serverTransport.RecvCmd(120)
-			if err != nil {
-				log.Errorf("recv cmd error: %v", err)
-				return
-			}
-			log.Infof("收到文本消息: %s", string(message))
-			if err := c.HandleTextMessage(message); err != nil {
-				log.Errorf("处理文本消息失败: %v", err)
-				continue
-			}
+		}
+
+		message, err := c.serverTransport.RecvCmd(120)
+		if err != nil {
+			log.Errorf("recv cmd error: %v", err)
+			return
+		}
+		log.Infof("收到文本消息: %s", string(message))
+		if err := c.HandleTextMessage(message); err != nil {
+			log.Errorf("处理文本消息失败: %v", err)
+			continue
 		}
 	}
 }
@@ -147,20 +148,20 @@ func (c *ChatSession) AudioMessageLoop(ctx context.Context) {
 			log.Debugf("设备 %s recvCmd context cancel", c.clientState.DeviceID)
 			return
 		default:
-			message, err := c.serverTransport.RecvAudio(300)
-			if err != nil {
-				log.Errorf("recv audio error: %v", err)
-				return
-			}
-			log.Debugf("收到音频数据，大小: %d 字节", len(message))
-			if c.clientState.GetClientVoiceStop() {
-				//log.Debug("客户端停止说话, 跳过音频数据")
-				continue
-			}
+		}
+		message, err := c.serverTransport.RecvAudio(300)
+		if err != nil {
+			log.Errorf("recv audio error: %v", err)
+			return
+		}
+		log.Debugf("收到音频数据，大小: %d 字节", len(message))
+		if c.clientState.GetClientVoiceStop() {
+			//log.Debug("客户端停止说话, 跳过音频数据")
+			continue
+		}
 
-			if ok := c.HandleAudioMessage(message); !ok {
-				log.Errorf("音频缓冲区已满: %v", err)
-			}
+		if ok := c.HandleAudioMessage(message); !ok {
+			log.Errorf("音频缓冲区已满: %v", err)
 		}
 	}
 }

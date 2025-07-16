@@ -221,7 +221,6 @@ func (s *MqttUdpAdapter) processMessage() {
 				Errorf("InternalRecvCmd失败: %v", err)
 				continue
 			}
-		default:
 		}
 	}
 }

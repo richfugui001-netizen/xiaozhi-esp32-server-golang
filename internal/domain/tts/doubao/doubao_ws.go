@@ -222,38 +222,38 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 				log.Debugf("DoubaoWs TextToSpeechStream context done, exit")
 				return
 			default:
-				_, message, err := conn.ReadMessage()
-				if err != nil {
-					p.removeWSConnection()
-					log.Errorf("读取WebSocket消息失败: %v", err)
-
-					return
-				}
-
-				resp, err := parseResponse(message)
-				if err != nil {
-					p.removeWSConnection()
-					log.Errorf("解析响应失败: %v", err)
-					return
-				}
-
-				if len(resp.Audio) > 0 {
-					chunkCount++
-					// 存储用于最终返回
-					//allAudio = append(allAudio, resp.Audio...)
-					pipeWriter.Write(resp.Audio)
-				}
-
-				if resp.IsLast {
-					log.Debugf("收到最后一个音频片段，共%d个片段", chunkCount)
-					//将allAudio写到文件中
-					//saveAudioToTmp(allAudio, "mp3")
-					return
-				}
-
-				// 重置读取超时
-				conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 			}
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				p.removeWSConnection()
+				log.Errorf("读取WebSocket消息失败: %v", err)
+
+				return
+			}
+
+			resp, err := parseResponse(message)
+			if err != nil {
+				p.removeWSConnection()
+				log.Errorf("解析响应失败: %v", err)
+				return
+			}
+
+			if len(resp.Audio) > 0 {
+				chunkCount++
+				// 存储用于最终返回
+				//allAudio = append(allAudio, resp.Audio...)
+				pipeWriter.Write(resp.Audio)
+			}
+
+			if resp.IsLast {
+				log.Debugf("收到最后一个音频片段，共%d个片段", chunkCount)
+				//将allAudio写到文件中
+				//saveAudioToTmp(allAudio, "mp3")
+				return
+			}
+
+			// 重置读取超时
+			conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		}
 	}()
 

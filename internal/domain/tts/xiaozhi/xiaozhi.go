@@ -496,49 +496,49 @@ func (p *XiaozhiProvider) handleTTSConnection(ctx context.Context, text string, 
 			releaseWSConnection(deviceId)
 			return nil
 		default:
-			msgType, msg, err := conn.ReadMessage()
+		}
+		msgType, msg, err := conn.ReadMessage()
+		if err != nil {
+			// 连接出错
+			log.Errorf("读取消息错误: %v，设备ID: %s", err, deviceId)
+
+			// 如果还没有收到任何音频帧，说明连接可能有问题，将deviceId加入禁用列表
+			if !receivedFrames {
+				blockDeviceId(deviceId)
+			}
+
+			// 直接从连接池中移除这个连接，而不是标记为未使用
+			removeWSConnection(deviceId)
+
+			return fmt.Errorf("读取消息错误: %v", err)
+		}
+		if msgType == websocket.TextMessage {
+			log.Debugf("收到xiaozhi服务端消息: %s", string(msg))
+			var recvMsg RecvMsg
+			err := json.Unmarshal(msg, &recvMsg)
 			if err != nil {
-				// 连接出错
-				log.Errorf("读取消息错误: %v，设备ID: %s", err, deviceId)
-
-				// 如果还没有收到任何音频帧，说明连接可能有问题，将deviceId加入禁用列表
-				if !receivedFrames {
-					blockDeviceId(deviceId)
-				}
-
-				// 直接从连接池中移除这个连接，而不是标记为未使用
-				removeWSConnection(deviceId)
-
-				return fmt.Errorf("读取消息错误: %v", err)
+				continue
 			}
-			if msgType == websocket.TextMessage {
-				log.Debugf("收到xiaozhi服务端消息: %s", string(msg))
-				var recvMsg RecvMsg
-				err := json.Unmarshal(msg, &recvMsg)
-				if err != nil {
-					continue
+			if recvMsg.Type == "tts" {
+				if recvMsg.State == "stop" {
+					log.Debugf("xiaozhi服务端消息tts stop消息")
+					// 更新连接活跃时间
+					updateWSConnectionActiveTime(deviceId)
+					releaseWSConnection(deviceId)
+					return nil
 				}
-				if recvMsg.Type == "tts" {
-					if recvMsg.State == "stop" {
-						log.Debugf("xiaozhi服务端消息tts stop消息")
-						// 更新连接活跃时间
-						updateWSConnectionActiveTime(deviceId)
-						releaseWSConnection(deviceId)
-						return nil
-					}
-				}
-			} else if msgType == websocket.BinaryMessage {
-				receivedFrames = true
-				if !firstFrameTs {
-					firstFrameTs = true
-					log.Debugf("tts耗时统计: xiaozhi服务tts 第一个音频帧时间: %d", time.Now().UnixMilli()-startTs)
-				}
-				outputChan <- msg
-				if i%20 == 0 {
-					log.Debugf("xiaozhi服务端音频消息, 已收到%d个音频帧", i)
-				}
-				i++
 			}
+		} else if msgType == websocket.BinaryMessage {
+			receivedFrames = true
+			if !firstFrameTs {
+				firstFrameTs = true
+				log.Debugf("tts耗时统计: xiaozhi服务tts 第一个音频帧时间: %d", time.Now().UnixMilli()-startTs)
+			}
+			outputChan <- msg
+			if i%20 == 0 {
+				log.Debugf("xiaozhi服务端音频消息, 已收到%d个音频帧", i)
+			}
+			i++
 		}
 	}
 }

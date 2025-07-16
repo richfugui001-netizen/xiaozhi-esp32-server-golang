@@ -69,73 +69,90 @@ func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, 
 			case <-ctx.Done():
 				log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
 				return
-			default:
-				select {
-				case message, ok := <-msgChan:
-					if !ok {
-						remaining := buffer.String()
-						if remaining != "" {
-							log.Infof("处理剩余内容: %s", remaining)
-							fullText += remaining
-							sentenceChannel <- common.LLMResponseStruct{
-								Text:  remaining,
-								IsEnd: true,
-							}
-						} else {
-							sentenceChannel <- common.LLMResponseStruct{
-								Text:  "",
-								IsEnd: true,
-							}
+			case message, ok := <-msgChan:
+				if !ok {
+					remaining := buffer.String()
+					if remaining != "" {
+						log.Infof("处理剩余内容: %s", remaining)
+						fullText += remaining
+						select {
+						case <-ctx.Done():
+							log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
+							return
+						case sentenceChannel <- common.LLMResponseStruct{
+							Text:  remaining,
+							IsEnd: true,
+						}:
 						}
-						return
+
+					} else {
+						select {
+						case <-ctx.Done():
+							log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
+							return
+						case sentenceChannel <- common.LLMResponseStruct{
+							Text:  "",
+							IsEnd: true,
+						}:
+						}
 					}
-					if message == nil {
-						break
-					}
-					byteMessage, _ := json.Marshal(message)
-					log.Infof("收到message: %s", string(byteMessage))
-					if message.Content != "" {
-						fullText += message.Content
-						buffer.WriteString(message.Content)
-						if containsSentenceSeparator(message.Content, isFirst) {
-							sentences, remaining := extractSmartSentences(buffer.String(), 5, 100, isFirst)
-							if len(sentences) > 0 {
-								for _, sentence := range sentences {
-									if sentence != "" {
-										if !firstFrame {
-											firstFrame = true
-											log.Infof("耗时统计: llm工具首句: %d ms", time.Now().UnixMilli()-startTs)
-										}
-										log.Infof("处理完整句子: %s", sentence)
-										sentenceChannel <- common.LLMResponseStruct{
-											Text:    sentence,
-											IsStart: isFirst,
-											IsEnd:   false,
-										}
-										if isFirst {
-											isFirst = false
-										}
+					return
+				}
+				if message == nil {
+					break
+				}
+				byteMessage, _ := json.Marshal(message)
+				log.Infof("收到message: %s", string(byteMessage))
+				if message.Content != "" {
+					fullText += message.Content
+					buffer.WriteString(message.Content)
+					if containsSentenceSeparator(message.Content, isFirst) {
+						sentences, remaining := extractSmartSentences(buffer.String(), 5, 100, isFirst)
+						if len(sentences) > 0 {
+							for _, sentence := range sentences {
+								if sentence != "" {
+									if !firstFrame {
+										firstFrame = true
+										log.Infof("耗时统计: llm工具首句: %d ms", time.Now().UnixMilli()-startTs)
+									}
+									log.Infof("处理完整句子: %s", sentence)
+									select {
+									case <-ctx.Done():
+										log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
+										return
+									case sentenceChannel <- common.LLMResponseStruct{
+										Text:    sentence,
+										IsStart: isFirst,
+										IsEnd:   false,
+									}:
+									}
+
+									if isFirst {
+										isFirst = false
 									}
 								}
 							}
-							buffer.Reset()
-							buffer.WriteString(remaining)
-							if isFirst {
-								isFirst = false
-							}
+						}
+						buffer.Reset()
+						buffer.WriteString(remaining)
+						if isFirst {
+							isFirst = false
 						}
 					}
-					// 工具调用响应（假设 ToolCalls 字段）
-					if message.ToolCalls != nil && len(message.ToolCalls) > 0 {
-						log.Infof("处理工具调用: %+v", message.ToolCalls)
-						sentenceChannel <- common.LLMResponseStruct{
-							ToolCalls: message.ToolCalls,
-							IsStart:   isFirst,
-							IsEnd:     false,
-						}
+				}
+				// 工具调用响应（假设 ToolCalls 字段）
+				if message.ToolCalls != nil && len(message.ToolCalls) > 0 {
+					log.Infof("处理工具调用: %+v", message.ToolCalls)
+					select {
+					case <-ctx.Done():
+						log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
+						return
+					case sentenceChannel <- common.LLMResponseStruct{
+						ToolCalls: message.ToolCalls,
+						IsStart:   isFirst,
+						IsEnd:     false,
+					}:
 					}
-				default:
-
 				}
 			}
 		}
