@@ -61,6 +61,23 @@ func (s *ServerTransport) SendTtsStop() error {
 	return nil
 }
 
+func (s *ServerTransport) SendMqttGoodbye() error {
+	msg := ServerMessage{
+		Type:      ServerMessageTypeGoodBye,
+		State:     MessageStateStop,
+		SessionID: s.clientState.SessionID,
+	}
+	bytes, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	err = s.transport.SendCmd(bytes)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *ServerTransport) SendHello(transportType string, audioFormat *types_audio.AudioFormat, udpConfig *UdpConfig) error {
 	msg := ServerMessage{
 		Type:        MessageTypeHello,
@@ -197,6 +214,9 @@ func (s *ServerTransport) RecvMcpMsg(timeOut int) ([]byte, error) {
 }
 
 func (s *ServerTransport) Close() error {
+	if s.transport.GetTransportType() == types_conn.TransportTypeMqttUdp {
+		s.SendMqttGoodbye()
+	}
 	return s.transport.Close()
 }
 

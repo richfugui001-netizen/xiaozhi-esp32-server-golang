@@ -27,12 +27,13 @@ const (
 
 // 服务器消息类型常量
 const (
-	ServerMessageTypeHello = "hello" // 握手消息
-	ServerMessageTypeStt   = "stt"   // 语音转文本
-	ServerMessageTypeTts   = "tts"   // 文本转语音
-	ServerMessageTypeIot   = "iot"   // 物联网消息
-	ServerMessageTypeLlm   = "llm"   // 大语言模型
-	ServerMessageTypeText  = "text"  // 文本消息
+	ServerMessageTypeHello   = "hello"   // 握手消息
+	ServerMessageTypeStt     = "stt"     // 语音转文本
+	ServerMessageTypeTts     = "tts"     // 文本转语音
+	ServerMessageTypeIot     = "iot"     // 物联网消息
+	ServerMessageTypeLlm     = "llm"     // 大语言模型
+	ServerMessageTypeText    = "text"    // 文本消息
+	ServerMessageTypeGoodBye = "goodbye" // 再见消息
 )
 
 // 消息状态常量
