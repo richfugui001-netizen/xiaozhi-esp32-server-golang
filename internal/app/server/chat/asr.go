@@ -38,7 +38,6 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 			return
 		}
 		frameSize := state.AsrAudioBuffer.PcmFrameSize
-		pcmFrame := make([]float32, frameSize)
 
 		vadNeedGetCount := 1
 		if state.DeviceConfig.Vad.Provider == "silero_vad" {
@@ -46,6 +45,8 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 		}
 
 		for {
+			pcmFrame := make([]float32, frameSize)
+
 			select {
 			case opusFrame, ok := <-state.OpusAudioBuffer:
 				log.Debugf("processAsrAudio 收到音频数据, len: %d", len(opusFrame))
