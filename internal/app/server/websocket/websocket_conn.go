@@ -100,6 +100,18 @@ func (c *WebSocketConn) tryUnpackUdpBridgeAudioPacket(buffer []byte) []byte {
 	return audioData
 }
 
+func (c *WebSocketConn) packUdpBridgeAudioPacket(buffer []byte) []byte {
+	header := make([]byte, 16)
+	// 前8字节全为0，已初始化
+	// 9~12字节写入当前时间戳（秒）
+	timestamp := uint32(time.Now().Unix())
+	binary.BigEndian.PutUint32(header[8:12], timestamp)
+	// 13~16字节写入音频长度
+	binary.BigEndian.PutUint32(header[12:16], uint32(len(buffer)))
+	// 拼接header和音频数据
+	return append(header, buffer...)
+}
+
 func (w *WebSocketConn) SendCmd(msg []byte) error {
 	w.Lock()
 	defer w.Unlock()
@@ -114,6 +126,9 @@ func (w *WebSocketConn) SendCmd(msg []byte) error {
 func (w *WebSocketConn) SendAudio(audio []byte) error {
 	w.Lock()
 	defer w.Unlock()
+	if w.isMqttUdpBridge {
+		audio = w.packUdpBridgeAudioPacket(audio)
+	}
 	err := w.conn.WriteMessage(websocket.BinaryMessage, audio)
 	if err != nil {
 		log.Errorf("send audio error: %v", err)
