@@ -597,9 +597,12 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
 
 	//当收到停止说话或退出说话时, 则退出对话
 	clearText := strings.TrimSpace(text)
-	if clearText == "再见" || clearText == "退下吧" || clearText == "退出" || clearText == "退出对话" || clearText == "停止" || clearText == "停止说话" {
-		s.Close()
-		return nil
+	exitWords := []string{"再见", "退下吧", "退出", "退出对话", "停止", "停止说话"}
+	for _, word := range exitWords {
+		if strings.Contains(clearText, word) {
+			s.Close()
+			return nil
+		}
 	}
 
 	clientState := s.clientState

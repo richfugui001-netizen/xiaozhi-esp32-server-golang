@@ -135,6 +135,7 @@ func (s *UdpServer) processPacket(addr *net.UDPAddr, data []byte) {
 		Errorf("addr: %s 解密失败: %v", addr, err)
 		return
 	}
+	Debugf("收到音频数据, addr: %s, 大小: %d 字节", addr, len(decrypted))
 	select {
 	case udpSession.RecvChannel <- decrypted:
 		return

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"time"
 	"xiaozhi-esp32-server-golang/internal/app/mqtt_server"
 	"xiaozhi-esp32-server-golang/internal/app/server/chat"
 	"xiaozhi-esp32-server-golang/internal/app/server/mqtt_udp"
@@ -32,9 +33,6 @@ func NewApp() *App {
 
 func (a *App) Run() {
 	go a.wsServer.Start()
-	if a.mqttUdpAdapter != nil {
-		go a.mqttUdpAdapter.Start()
-	}
 	if viper.GetBool("mqtt_server.enable") {
 		go func() {
 			err := a.startMqttServer()
@@ -43,6 +41,11 @@ func (a *App) Run() {
 			}
 		}()
 	}
+	if a.mqttUdpAdapter != nil {
+		time.Sleep(1 * time.Second)
+		go a.mqttUdpAdapter.Start()
+	}
+
 	select {} // 阻塞主线程
 }
 
