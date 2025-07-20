@@ -65,6 +65,8 @@ func NewChatManager(deviceID string, transport types_conn.IConn, options ...Chat
 		WithLLMManager(llmManager),
 	)
 
+	llmManager.chatSession = cm.session
+
 	return cm, nil
 }
 

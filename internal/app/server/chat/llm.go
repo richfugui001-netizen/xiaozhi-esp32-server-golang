@@ -29,6 +29,7 @@ type LLMManager struct {
 	clientState     *ClientState
 	serverTransport *ServerTransport
 	ttsManager      *TTSManager
+	chatSession     *ChatSession
 
 	llmResponseQueue *util.Queue[LLMResponseChannelItem]
 }
@@ -248,6 +249,7 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 
 	log.Infof("处理 %d 个工具调用", len(tools))
 
+	ctx = context.WithValue(ctx, "chat_session", l.chatSession)
 	var invokeToolSuccess bool
 	msgList := make([]*schema.Message, 0)
 	for _, toolCall := range tools {

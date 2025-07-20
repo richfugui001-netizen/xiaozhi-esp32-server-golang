@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
+	"xiaozhi-esp32-server-golang/internal/app/server/chat"
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	log "xiaozhi-esp32-server-golang/logger"
@@ -76,13 +77,26 @@ func NewWebSocketServer(port int, opts ...WebSocketServerOption) *WebSocketServe
 	return s
 }
 
+// registerChatMCPTools 注册聊天相关的本地MCP工具
+func (s *WebSocketServer) registerChatMCPTools() {
+	log.Info("在WebSocket服务器中注册聊天相关的本地MCP工具...")
+
+	// 调用chat包的注册函数
+	chat.RegisterChatMCPTools()
+
+	log.Info("聊天相关的本地MCP工具注册完成")
+}
+
 // Start 启动 WebSocket 服务器
 func (s *WebSocketServer) Start() error {
-	// 启动MCP管理器
-	if err := s.globalMCPManager.Start(); err != nil {
-		log.Errorf("启动全局MCP管理器失败: %v", err)
+	// 启动所有MCP管理器（通过统一管理器）
+	if err := mcp.StartMCPManagers(); err != nil {
+		log.Errorf("启动MCP管理器集群失败: %v", err)
 		return err
 	}
+
+	// 注册聊天相关的本地MCP工具
+	s.registerChatMCPTools()
 
 	// 启动会话清理
 	go s.cleanupSessions()
