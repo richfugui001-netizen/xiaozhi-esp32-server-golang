@@ -29,7 +29,6 @@ type LLMManager struct {
 	clientState     *ClientState
 	serverTransport *ServerTransport
 	ttsManager      *TTSManager
-	chatSession     *ChatSession
 
 	llmResponseQueue *util.Queue[LLMResponseChannelItem]
 }
@@ -249,9 +248,17 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 
 	log.Infof("处理 %d 个工具调用", len(tools))
 
-	ctx = context.WithValue(ctx, "chat_session", l.chatSession)
 	var invokeToolSuccess bool
 	msgList := make([]*schema.Message, 0)
+
+	// 从 context 中获取 chat_session_operator（如果存在）
+	// 如果不存在，说明没有需要 ChatSession 操作的工具，可以正常执行
+	var toolCtx context.Context = ctx
+	if chatSessionOperator, ok := ctx.Value("chat_session_operator").(ChatSessionOperator); ok {
+		// 在 context 中传递 chat_session_operator，供 local mcp tool 使用
+		toolCtx = context.WithValue(ctx, "chat_session_operator", chatSessionOperator)
+	}
+
 	for _, toolCall := range tools {
 		toolName := toolCall.Function.Name
 		tool, ok := mcp.GetToolByName(state.DeviceID, toolName)
@@ -261,7 +268,7 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 		}
 		log.Infof("进行工具调用请求: %s, 参数: %+v", toolName, toolCall.Function.Arguments)
 		startTs := time.Now().UnixMilli()
-		result, err := tool.InvokableRun(ctx, toolCall.Function.Arguments)
+		result, err := tool.InvokableRun(toolCtx, toolCall.Function.Arguments)
 		if err != nil {
 			log.Errorf("工具调用失败: %v", err)
 			continue

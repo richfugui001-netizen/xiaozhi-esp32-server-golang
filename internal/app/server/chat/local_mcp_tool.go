@@ -150,16 +150,16 @@ func exitConversationHandler(ctx context.Context, argumentsInJSON string) (strin
 
 	log.Infof("退出对话处理完成，原因: %s", reason)
 
-	// 从context中获取ChatSession并调用Close方法
-	if chatSessionValue := ctx.Value("chat_session"); chatSessionValue != nil {
-		if chatSession, ok := chatSessionValue.(*ChatSession); ok {
-			log.Info("找到ChatSession，正在调用Close方法关闭会话")
-			defer chatSession.Close()
+	// 从context中获取ChatSessionOperator并调用Close方法
+	if chatSessionOperatorValue := ctx.Value("chat_session_operator"); chatSessionOperatorValue != nil {
+		if chatSessionOperator, ok := chatSessionOperatorValue.(ChatSessionOperator); ok {
+			log.Info("找到ChatSessionOperator，正在调用Close方法关闭会话")
+			defer chatSessionOperator.LocalMcpCloseChat()
 		} else {
-			log.Warn("从context中获取的chat_session不是*ChatSession类型")
+			log.Warn("从context中获取的chat_session_operator不是ChatSessionOperator类型")
 		}
 	} else {
-		log.Warn("从context中未找到chat_session")
+		log.Warn("从context中未找到chat_session_operator")
 	}
 
 	return string(resultBytes), nil

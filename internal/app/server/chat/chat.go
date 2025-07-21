@@ -41,6 +41,8 @@ func NewChatManager(deviceID string, transport types_conn.IConn, options ...Chat
 		option(cm)
 	}
 
+	cm.ctx, cm.cancel = context.WithCancel(ctx)
+
 	cm.transport.OnClose(cm.OnClose)
 
 	clientState, err := GenClientState(cm.ctx, cm.DeviceID)
@@ -52,20 +54,10 @@ func NewChatManager(deviceID string, transport types_conn.IConn, options ...Chat
 
 	serverTransport := NewServerTransport(cm.transport, clientState)
 
-	asrManager := NewASRManager(clientState, serverTransport)
-	ttsManager := NewTTSManager(clientState, serverTransport)
-	llmManager := NewLLMManager(clientState, serverTransport, ttsManager)
-
 	cm.session = NewChatSession(
-		cm.ctx,
 		clientState,
-		WithASRManager(asrManager),
-		WithTTSManager(ttsManager),
-		WithServerTransport(serverTransport),
-		WithLLMManager(llmManager),
+		serverTransport,
 	)
-
-	llmManager.chatSession = cm.session
 
 	return cm, nil
 }
@@ -138,21 +130,27 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 
 func (c *ChatManager) Start() error {
 	return c.session.Start(c.ctx)
-
 }
 
 // 主动关闭断开连接
 func (c *ChatManager) Close() error {
 	log.Infof("主动关闭断开连接, 设备 %s", c.clientState.DeviceID)
+
+	// 先关闭会话级别的资源
+	if c.session != nil {
+		c.session.Close()
+	}
+
+	// 最后取消管理器级别的上下文
 	c.cancel()
-	c.transport.Close()
+
 	return nil
 }
 
 func (c *ChatManager) OnClose(deviceId string) {
 	log.Infof("设备 %s 断开连接", deviceId)
-	// 关闭done通道通知所有goroutine退出
-	c.cancel()
+	// 调用统一的Close方法进行清理
+	c.Close()
 	return
 }
 
