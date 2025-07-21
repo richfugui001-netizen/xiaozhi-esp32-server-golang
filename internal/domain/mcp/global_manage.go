@@ -463,32 +463,6 @@ func (g *GlobalMCPManager) checkAndReconnect() {
 	}
 }
 
-// mcpTool MCP工具实现
-type mcpTool struct {
-	name        string
-	description string
-	inputSchema map[string]interface{}
-	serverName  string
-	client      *client.Client
-}
-
-// Info 获取工具信息，实现BaseTool接口
-func (t *mcpTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	// 创建参数定义
-	var paramsOneOf *schema.ParamsOneOf
-	if t.inputSchema != nil {
-		paramsOneOf = &schema.ParamsOneOf{
-			// 简化的参数定义，实际使用中需要完善
-		}
-	}
-
-	return &schema.ToolInfo{
-		Name:        t.name,
-		Desc:        t.description,
-		ParamsOneOf: paramsOneOf,
-	}, nil
-}
-
 // reconnectServer 重连服务器并返回新的client
 func (g *GlobalMCPManager) reconnectServer(serverName string) (*client.Client, error) {
 	g.mu.RLock()
@@ -519,6 +493,32 @@ func (g *GlobalMCPManager) reconnectServer(serverName string) (*client.Client, e
 	}
 
 	return conn.client, nil
+}
+
+// mcpTool MCP工具实现
+type mcpTool struct {
+	name        string
+	description string
+	inputSchema map[string]interface{}
+	serverName  string
+	client      *client.Client
+}
+
+// Info 获取工具信息，实现BaseTool接口
+func (t *mcpTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
+	// 创建参数定义
+	var paramsOneOf *schema.ParamsOneOf
+	if t.inputSchema != nil {
+		paramsOneOf = &schema.ParamsOneOf{
+			// 简化的参数定义，实际使用中需要完善
+		}
+	}
+
+	return &schema.ToolInfo{
+		Name:        t.name,
+		Desc:        t.description,
+		ParamsOneOf: paramsOneOf,
+	}, nil
 }
 
 // InvokableRun 调用工具，实现InvokableTool接口

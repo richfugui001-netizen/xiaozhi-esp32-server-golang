@@ -11,7 +11,6 @@ import (
 	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
-	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/vad/silero_vad"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -29,17 +28,18 @@ type ChatManager struct {
 type ChatManagerOption func(*ChatManager)
 
 func NewChatManager(deviceID string, transport types_conn.IConn, options ...ChatManagerOption) (*ChatManager, error) {
-	ctx, cancel := context.WithCancel(context.Background())
 	cm := &ChatManager{
 		DeviceID:  deviceID,
 		transport: transport,
-		ctx:       ctx,
-		cancel:    cancel,
 	}
 
 	for _, option := range options {
 		option(cm)
 	}
+
+	ctx := context.WithValue(context.Background(), "chat_session_operator", ChatSessionOperator(cm))
+
+	cm.ctx, cm.cancel = context.WithCancel(ctx)
 
 	cm.transport.OnClose(cm.OnClose)
 
@@ -52,17 +52,9 @@ func NewChatManager(deviceID string, transport types_conn.IConn, options ...Chat
 
 	serverTransport := NewServerTransport(cm.transport, clientState)
 
-	asrManager := NewASRManager(clientState, serverTransport)
-	ttsManager := NewTTSManager(clientState, serverTransport)
-	llmManager := NewLLMManager(clientState, serverTransport, ttsManager)
-
 	cm.session = NewChatSession(
-		cm.ctx,
 		clientState,
-		WithASRManager(asrManager),
-		WithTTSManager(ttsManager),
-		WithServerTransport(serverTransport),
-		WithLLMManager(llmManager),
+		serverTransport,
 	)
 
 	return cm, nil
@@ -92,8 +84,6 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		maxSilenceDuration = 200
 	}
 
-	systemPrompt, _ := llm_memory.Get().GetSystemPrompt(ctx, deviceID)
-
 	clientState := &ClientState{
 		Dialogue:     &Dialogue{},
 		Abort:        false,
@@ -101,7 +91,7 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		DeviceID:     deviceID,
 		Ctx:          ctx,
 		Cancel:       cancel,
-		SystemPrompt: systemPrompt.Content,
+		SystemPrompt: deviceConfig.SystemPrompt,
 		DeviceConfig: deviceConfig,
 		OutputAudioFormat: types_audio.AudioFormat{
 			SampleRate:    types_audio.SampleRate,
@@ -136,20 +126,25 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 
 func (c *ChatManager) Start() error {
 	return c.session.Start(c.ctx)
-
 }
 
 // 主动关闭断开连接
 func (c *ChatManager) Close() error {
 	log.Infof("主动关闭断开连接, 设备 %s", c.clientState.DeviceID)
+
+	// 先关闭会话级别的资源
+	if c.session != nil {
+		c.session.Close()
+	}
+
+	// 最后取消管理器级别的上下文
 	c.cancel()
-	c.transport.Close()
+
 	return nil
 }
 
 func (c *ChatManager) OnClose(deviceId string) {
 	log.Infof("设备 %s 断开连接", deviceId)
-	// 关闭done通道通知所有goroutine退出
 	c.cancel()
 	return
 }

@@ -46,6 +46,9 @@ func (a *App) Run() {
 		go a.mqttUdpAdapter.Start()
 	}
 
+	// 注册聊天相关的本地MCP工具
+	a.registerChatMCPTools()
+
 	select {} // 阻塞主线程
 }
 
@@ -110,4 +113,12 @@ func (a *App) OnNewConnection(transport types.IConn) {
 	}
 
 	go chatManager.Start()
+}
+
+// registerChatMCPTools 注册聊天相关的本地MCP工具
+func (s *App) registerChatMCPTools() {
+	// 调用chat包的注册函数
+	chat.RegisterChatMCPTools()
+
+	log.Info("聊天相关的本地MCP工具注册完成")
 }

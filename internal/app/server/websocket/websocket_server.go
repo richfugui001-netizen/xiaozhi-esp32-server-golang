@@ -78,9 +78,9 @@ func NewWebSocketServer(port int, opts ...WebSocketServerOption) *WebSocketServe
 
 // Start 启动 WebSocket 服务器
 func (s *WebSocketServer) Start() error {
-	// 启动MCP管理器
-	if err := s.globalMCPManager.Start(); err != nil {
-		log.Errorf("启动全局MCP管理器失败: %v", err)
+	// 启动所有MCP管理器（通过统一管理器）
+	if err := mcp.StartMCPManagers(); err != nil {
+		log.Errorf("启动MCP管理器集群失败: %v", err)
 		return err
 	}
 

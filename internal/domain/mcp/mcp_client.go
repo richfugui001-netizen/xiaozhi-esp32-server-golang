@@ -7,11 +7,20 @@ import (
 )
 
 func GetToolByName(deviceId string, toolName string) (tool.InvokableTool, bool) {
-	tool, ok := globalManager.GetToolByName(toolName)
+	// 优先从本地管理器获取
+	localManager := GetLocalMCPManager()
+	tool, ok := localManager.GetToolByName(toolName)
 	if ok {
 		return tool, ok
 	}
 
+	// 其次从全局管理器获取
+	tool, ok = globalManager.GetToolByName(toolName)
+	if ok {
+		return tool, ok
+	}
+
+	// 最后从设备MCP客户端池获取
 	tool, ok = mcpClientPool.GetToolByDeviceId(deviceId, toolName)
 	if !ok {
 		return nil, false
@@ -35,20 +44,39 @@ func RemoveDeviceMcpClient(deviceId string) error {
 
 func GetToolsByDeviceId(deviceId string) (map[string]tool.InvokableTool, error) {
 	retTools := make(map[string]tool.InvokableTool)
-	//从全局管理器获取
-	globalTools := globalManager.GetAllTools()
-	for toolName, tool := range globalTools {
+
+	// 优先从本地管理器获取
+	localManager := GetLocalMCPManager()
+	localTools := localManager.GetAllTools()
+	for toolName, tool := range localTools {
 		retTools[toolName] = tool
 	}
+	log.Infof("从本地管理器获取到 %d 个工具", len(localTools))
 
-	//从MCP客户端池获取
+	// 其次从全局管理器获取
+	globalTools := globalManager.GetAllTools()
+	for toolName, tool := range globalTools {
+		// 本地工具优先，如果已存在同名工具则不覆盖
+		if _, exists := retTools[toolName]; !exists {
+			retTools[toolName] = tool
+		}
+	}
+	log.Infof("从全局管理器获取到 %d 个工具", len(globalTools))
+
+	// 最后从MCP客户端池获取
 	deviceTools, err := mcpClientPool.GetAllToolsByDeviceId(deviceId)
 	if err != nil {
 		log.Errorf("获取设备 %s 的工具失败: %v", deviceId, err)
 		return retTools, nil
 	}
 	for toolName, tool := range deviceTools {
-		retTools[toolName] = tool
+		// 本地工具和全局工具优先，如果已存在同名工具则不覆盖
+		if _, exists := retTools[toolName]; !exists {
+			retTools[toolName] = tool
+		}
 	}
+	log.Infof("从设备 %s 获取到 %d 个工具", deviceId, len(deviceTools))
+	log.Infof("设备 %s 总共获取到 %d 个工具", deviceId, len(retTools))
+
 	return retTools, nil
 }

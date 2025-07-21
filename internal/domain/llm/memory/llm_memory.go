@@ -137,12 +137,6 @@ func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count i
 		return []schema.Message{}, nil
 	}
 
-	// 首先获取系统 prompt
-	sysPrompt, err := m.GetSystemPrompt(ctx, deviceID)
-	if err != nil {
-		return nil, fmt.Errorf("get system prompt failed: %w", err)
-	}
-
 	// 获取历史消息（已经是按时间顺序：旧->新）
 	memoryMessages, err := m.GetMessages(ctx, deviceID, count)
 	if err != nil {
@@ -151,11 +145,6 @@ func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count i
 
 	// 预分配足够的容量
 	messages := make([]schema.Message, 0, len(memoryMessages)+1)
-
-	// 系统 prompt 始终在最前面
-	if sysPrompt.Content != "" {
-		messages = append(messages, sysPrompt)
-	}
 
 	// 添加历史消息（已经是按时间顺序：旧->新）
 	for _, msg := range memoryMessages {
@@ -180,7 +169,7 @@ func (m *Memory) SetSystemPrompt(ctx context.Context, deviceID string, prompt st
 func (m *Memory) GetSystemPrompt(ctx context.Context, deviceID string) (schema.Message, error) {
 	if m.redisClient == nil {
 		log.Log().Warn("redis client is nil")
-		return schema.Message{}, nil
+		return schema.Message{Role: schema.System, Content: viper.GetString("system_prompt")}, nil
 	}
 
 	key := m.getSystemPromptKey(deviceID)
@@ -210,12 +199,6 @@ func (m *Memory) ResetMemory(ctx context.Context, deviceID string) error {
 	historyKey := m.getMemoryKey(deviceID)
 	if err := m.redisClient.Del(ctx, historyKey).Err(); err != nil {
 		return fmt.Errorf("delete history failed: %w", err)
-	}
-
-	// 删除系统 prompt
-	promptKey := m.getSystemPromptKey(deviceID)
-	if err := m.redisClient.Del(ctx, promptKey).Err(); err != nil {
-		return fmt.Errorf("delete system prompt failed: %w", err)
 	}
 
 	return nil

@@ -45,56 +45,37 @@ type ChatSession struct {
 
 type ChatSessionOption func(*ChatSession)
 
-func WithASRManager(asr *ASRManager) ChatSessionOption {
-	return func(s *ChatSession) {
-		s.asrManager = asr
-	}
-}
-
-func WithTTSManager(tts *TTSManager) ChatSessionOption {
-	return func(s *ChatSession) {
-		s.ttsManager = tts
-	}
-}
-
-func WithServerTransport(serverTransport *ServerTransport) ChatSessionOption {
-	return func(s *ChatSession) {
-		s.serverTransport = serverTransport
-	}
-}
-
-func WithLLMManager(llm *LLMManager) ChatSessionOption {
-	return func(s *ChatSession) {
-		s.llmManager = llm
-	}
-}
-
-func NewChatSession(pctx context.Context, clientState *ClientState, opts ...ChatSessionOption) *ChatSession {
-	ctx, cancel := context.WithCancel(pctx)
+func NewChatSession(clientState *ClientState, serverTransport *ServerTransport, opts ...ChatSessionOption) *ChatSession {
 	s := &ChatSession{
-		clientState:   clientState,
-		ctx:           ctx,
-		cancel:        cancel,
-		chatTextQueue: util.NewQueue[AsrResponseChannelItem](10),
+		clientState:     clientState,
+		serverTransport: serverTransport,
+		chatTextQueue:   util.NewQueue[AsrResponseChannelItem](10),
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
+
+	s.asrManager = NewASRManager(clientState, serverTransport)
+	s.ttsManager = NewTTSManager(clientState, serverTransport)
+	s.llmManager = NewLLMManager(clientState, serverTransport, s.ttsManager)
+
 	return s
 }
 
-func (s *ChatSession) Start(ctx context.Context) error {
+func (s *ChatSession) Start(pctx context.Context) error {
+	s.ctx, s.cancel = context.WithCancel(pctx)
+
 	err := s.InitAsrLlmTts()
 	if err != nil {
 		log.Errorf("初始化ASR/LLM/TTS失败: %v", err)
 		return err
 	}
 
-	go s.CmdMessageLoop(ctx)   //处理信令消息
-	go s.AudioMessageLoop(ctx) //处理音频数据
-	go s.processChatText(ctx)  //处理 asr后 的对话消息
-	go s.llmManager.Start(ctx) //处理 llm后 的一系列返回消息
-	go s.ttsManager.Start(ctx) //处理 tts的 消息队列
+	go s.CmdMessageLoop(s.ctx)   //处理信令消息
+	go s.AudioMessageLoop(s.ctx) //处理音频数据
+	go s.processChatText(s.ctx)  //处理 asr后 的对话消息
+	go s.llmManager.Start(s.ctx) //处理 llm后 的一系列返回消息
+	go s.ttsManager.Start(s.ctx) //处理 tts的 消息队列
 
 	return nil
 }
@@ -582,9 +563,23 @@ func (s *ChatSession) ClearChatTextQueue() {
 }
 
 func (s *ChatSession) Close() {
+	log.Debugf("ChatSession.Close() 开始清理会话资源, 设备 %s", s.clientState.DeviceID)
+
+	// 停止说话和清理音频相关资源
 	s.StopSpeaking(true)
+
+	// 清理聊天文本队列
+	s.ClearChatTextQueue()
+
+	// 关闭服务端传输
+	if s.serverTransport != nil {
+		s.serverTransport.Close()
+	}
+
+	// 取消会话级别的上下文
 	s.cancel()
-	s.serverTransport.Close()
+
+	log.Debugf("ChatSession.Close() 会话资源清理完成, 设备 %s", s.clientState.DeviceID)
 }
 
 func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
@@ -596,6 +591,7 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
 	}
 
 	//当收到停止说话或退出说话时, 则退出对话
+
 	clearText := strings.TrimSpace(text)
 	exitWords := []string{"再见", "退下吧", "退出", "退出对话", "停止", "停止说话"}
 	for _, word := range exitWords {
@@ -609,16 +605,26 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
 
 	sessionID := clientState.SessionID
 
-	requestMessages, err := llm_memory.Get().GetMessagesForLLM(ctx, clientState.DeviceID, 10)
+	systemPrompt := schema.Message{
+		Role:    schema.System,
+		Content: clientState.SystemPrompt,
+	}
+	//system prompt
+	requestMessages := []schema.Message{
+		systemPrompt,
+	}
+	userMemoryMessages, err := llm_memory.Get().GetMessagesForLLM(ctx, clientState.DeviceID, 10)
 	if err != nil {
 		log.Errorf("获取对话历史失败: %v", err)
 	}
-
+	//历史对话
+	requestMessages = append(requestMessages, userMemoryMessages...)
 	// 直接创建Eino原生消息
 	userMessage := &schema.Message{
 		Role:    schema.User,
 		Content: text,
 	}
+	//当前用户对话
 	requestMessages = append(requestMessages, *userMessage)
 
 	// 添加用户消息到对话历史

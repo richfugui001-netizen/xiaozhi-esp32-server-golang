@@ -53,7 +53,9 @@ func (u *UserConfig) GetUserConfig(ctx context.Context, userID string) (types.UC
 		}
 	}
 
-	ret := types.UConfig{}
+	ret := types.UConfig{
+		SystemPrompt: u.getSystemPrompt(ctx, userID),
+	}
 	//将UserConfig转换成UConfig结构
 	kv := map[string]string{
 		"llm": "",
@@ -156,4 +158,20 @@ func (u *UserConfig) getTtsConfig(ctx context.Context, config map[string]interfa
 }
 func (u *UserConfig) GetUserConfigKey(deviceId string) string {
 	return fmt.Sprintf("%s:userconfig:%s", u.prefix, deviceId)
+}
+
+// getSystemPromptKey 生成设备对应的系统 prompt 的 Redis key
+func (u *UserConfig) getSystemPrompt(ctx context.Context, deviceID string) string {
+	key := fmt.Sprintf("%s:llm:system:%s", u.prefix, deviceID)
+
+	configPrompt := viper.GetString("system_prompt")
+
+	if u.redisInstance != nil {
+		systemPrompt, err := u.redisInstance.Get(ctx, key).Result()
+		if err != nil {
+			return configPrompt
+		}
+		return systemPrompt
+	}
+	return configPrompt
 }
