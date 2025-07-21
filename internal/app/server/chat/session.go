@@ -63,9 +63,7 @@ func NewChatSession(clientState *ClientState, serverTransport *ServerTransport, 
 }
 
 func (s *ChatSession) Start(pctx context.Context) error {
-	ctx, cancel := context.WithCancel(pctx)
-	s.ctx = context.WithValue(ctx, "chat_session_operator", ChatSessionOperator(s))
-	s.cancel = cancel
+	s.ctx, s.cancel = context.WithCancel(pctx)
 
 	err := s.InitAsrLlmTts()
 	if err != nil {
@@ -607,16 +605,26 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
 
 	sessionID := clientState.SessionID
 
-	requestMessages, err := llm_memory.Get().GetMessagesForLLM(ctx, clientState.DeviceID, 10)
+	systemPrompt := schema.Message{
+		Role:    schema.System,
+		Content: clientState.SystemPrompt,
+	}
+	//system prompt
+	requestMessages := []schema.Message{
+		systemPrompt,
+	}
+	userMemoryMessages, err := llm_memory.Get().GetMessagesForLLM(ctx, clientState.DeviceID, 10)
 	if err != nil {
 		log.Errorf("获取对话历史失败: %v", err)
 	}
-
+	//历史对话
+	requestMessages = append(requestMessages, userMemoryMessages...)
 	// 直接创建Eino原生消息
 	userMessage := &schema.Message{
 		Role:    schema.User,
 		Content: text,
 	}
+	//当前用户对话
 	requestMessages = append(requestMessages, *userMessage)
 
 	// 添加用户消息到对话历史

@@ -25,6 +25,8 @@ type WebSocketConn struct {
 	isMqttUdpBridge bool
 	recvCmdChan     chan []byte
 	recvAudioChan   chan []byte
+
+	closed bool
 	sync.RWMutex
 }
 
@@ -115,6 +117,11 @@ func (c *WebSocketConn) packUdpBridgeAudioPacket(buffer []byte) []byte {
 func (w *WebSocketConn) SendCmd(msg []byte) error {
 	w.Lock()
 	defer w.Unlock()
+
+	if w.closed {
+		return errors.New("connection is closed")
+	}
+
 	err := w.conn.WriteMessage(websocket.TextMessage, msg)
 	if err != nil {
 		log.Errorf("send cmd error: %v", err)
@@ -126,6 +133,11 @@ func (w *WebSocketConn) SendCmd(msg []byte) error {
 func (w *WebSocketConn) SendAudio(audio []byte) error {
 	w.Lock()
 	defer w.Unlock()
+
+	if w.closed {
+		return errors.New("connection is closed")
+	}
+
 	if w.isMqttUdpBridge {
 		audio = w.packUdpBridgeAudioPacket(audio)
 	}
@@ -140,7 +152,10 @@ func (w *WebSocketConn) SendAudio(audio []byte) error {
 func (w *WebSocketConn) RecvCmd(timeout int) ([]byte, error) {
 	for {
 		select {
-		case msg := <-w.recvCmdChan:
+		case msg, ok := <-w.recvCmdChan:
+			if !ok {
+				return nil, errors.New("connection is closed")
+			}
 			return msg, nil
 		case <-time.After(time.Duration(timeout) * time.Second):
 			return nil, errors.New("timeout")
@@ -151,7 +166,10 @@ func (w *WebSocketConn) RecvCmd(timeout int) ([]byte, error) {
 func (w *WebSocketConn) RecvAudio(timeout int) ([]byte, error) {
 	for {
 		select {
-		case audio := <-w.recvAudioChan:
+		case audio, ok := <-w.recvAudioChan:
+			if !ok {
+				return nil, errors.New("connection is closed")
+			}
 			return audio, nil
 		case <-time.After(time.Duration(timeout) * time.Second):
 			return nil, errors.New("timeout")
@@ -160,6 +178,14 @@ func (w *WebSocketConn) RecvAudio(timeout int) ([]byte, error) {
 }
 
 func (w *WebSocketConn) Close() error {
+	w.Lock()
+	defer w.Unlock()
+
+	if w.closed {
+		return nil // Already closed
+	}
+
+	w.closed = true
 	w.cancel()
 	w.conn.Close()
 	close(w.recvCmdChan)

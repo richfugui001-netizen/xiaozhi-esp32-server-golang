@@ -6,6 +6,9 @@ type ChatSessionOperator interface {
 	// LocalMcpCloseChat 关闭聊天会话
 	LocalMcpCloseChat() error
 
+	// LocalMcpClearHistory 清空历史对话
+	LocalMcpClearHistory() error
+
 	// 未来可以根据需要添加其他操作
 	// GetDeviceID() string
 	// IsActive() bool

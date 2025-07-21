@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 	types_conn "xiaozhi-esp32-server-golang/internal/app/server/types"
 	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
@@ -16,6 +17,8 @@ type ServerTransport struct {
 	transport      types_conn.IConn
 	clientState    *ClientState
 	McpRecvMsgChan chan []byte
+	closed         bool
+	mu             sync.Mutex
 }
 
 func NewServerTransport(transport types_conn.IConn, clientState *ClientState) *ServerTransport {
@@ -206,7 +209,10 @@ func (s *ServerTransport) SendMcpMsg(payload []byte) error {
 
 func (s *ServerTransport) RecvMcpMsg(timeOut int) ([]byte, error) {
 	select {
-	case msg := <-s.McpRecvMsgChan:
+	case msg, ok := <-s.McpRecvMsgChan:
+		if !ok {
+			return nil, fmt.Errorf("transport is closed")
+		}
 		return msg, nil
 	case <-time.After(time.Duration(timeOut) * time.Millisecond):
 		return nil, fmt.Errorf("mcp 接收消息超时")
@@ -214,9 +220,20 @@ func (s *ServerTransport) RecvMcpMsg(timeOut int) ([]byte, error) {
 }
 
 func (s *ServerTransport) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return nil // Already closed
+	}
+
+	s.closed = true
+
 	if s.transport.GetTransportType() == types_conn.TransportTypeMqttUdp {
 		s.SendMqttGoodbye()
 	}
+
+	close(s.McpRecvMsgChan)
 	return s.transport.Close()
 }
 

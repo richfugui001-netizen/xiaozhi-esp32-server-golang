@@ -11,7 +11,6 @@ import (
 	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
-	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/vad/silero_vad"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -29,17 +28,16 @@ type ChatManager struct {
 type ChatManagerOption func(*ChatManager)
 
 func NewChatManager(deviceID string, transport types_conn.IConn, options ...ChatManagerOption) (*ChatManager, error) {
-	ctx, cancel := context.WithCancel(context.Background())
 	cm := &ChatManager{
 		DeviceID:  deviceID,
 		transport: transport,
-		ctx:       ctx,
-		cancel:    cancel,
 	}
 
 	for _, option := range options {
 		option(cm)
 	}
+
+	ctx := context.WithValue(context.Background(), "chat_session_operator", ChatSessionOperator(cm))
 
 	cm.ctx, cm.cancel = context.WithCancel(ctx)
 
@@ -86,8 +84,6 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		maxSilenceDuration = 200
 	}
 
-	systemPrompt, _ := llm_memory.Get().GetSystemPrompt(ctx, deviceID)
-
 	clientState := &ClientState{
 		Dialogue:     &Dialogue{},
 		Abort:        false,
@@ -95,7 +91,7 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		DeviceID:     deviceID,
 		Ctx:          ctx,
 		Cancel:       cancel,
-		SystemPrompt: systemPrompt.Content,
+		SystemPrompt: deviceConfig.SystemPrompt,
 		DeviceConfig: deviceConfig,
 		OutputAudioFormat: types_audio.AudioFormat{
 			SampleRate:    types_audio.SampleRate,
@@ -149,8 +145,7 @@ func (c *ChatManager) Close() error {
 
 func (c *ChatManager) OnClose(deviceId string) {
 	log.Infof("设备 %s 断开连接", deviceId)
-	// 调用统一的Close方法进行清理
-	c.Close()
+	c.cancel()
 	return
 }
 

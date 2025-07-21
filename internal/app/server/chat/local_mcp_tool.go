@@ -36,7 +36,7 @@ func InitChatLocalMCPTools() {
 	// 注册退出工具
 	err = manager.RegisterToolFunc(
 		"exit_conversation",
-		"结束当前对话会话",
+		"当用户明确表示要结束对话、退出系统或告别时使用，用于优雅地关闭当前聊天会话",
 		exitConversationHandler,
 		&schema.ParamsOneOf{
 			// 可以接受一个可选的reason参数
@@ -46,6 +46,21 @@ func InitChatLocalMCPTools() {
 		log.Errorf("注册退出对话工具失败: %v", err)
 	} else {
 		log.Info("成功注册工具: exit_conversation")
+	}
+
+	// 注册清空历史对话工具
+	err = manager.RegisterToolFunc(
+		"clear_conversation_history",
+		"当用户要求清空、清除或重置历史对话记录时使用，用于清空当前会话的所有历史对话内容",
+		clearConversationHistoryHandler,
+		&schema.ParamsOneOf{
+			// 可以接受一个可选的reason参数
+		},
+	)
+	if err != nil {
+		log.Errorf("注册清空历史对话工具失败: %v", err)
+	} else {
+		log.Info("成功注册工具: clear_conversation_history")
 	}
 
 	log.Info("聊天相关的本地MCP工具初始化完成")
@@ -165,6 +180,71 @@ func exitConversationHandler(ctx context.Context, argumentsInJSON string) (strin
 	return string(resultBytes), nil
 }
 
+// clearConversationHistoryHandler 清空历史对话的处理函数
+func clearConversationHistoryHandler(ctx context.Context, argumentsInJSON string) (string, error) {
+	log.Info("执行清空历史对话工具")
+
+	// 解析参数
+	var params map[string]interface{}
+	reason := "用户主动清空历史" // 默认原因
+
+	if argumentsInJSON != "" {
+		if err := json.Unmarshal([]byte(argumentsInJSON), &params); err == nil {
+			if r, ok := params["reason"].(string); ok && r != "" {
+				reason = r
+			}
+		}
+	}
+
+	// 从context中获取ChatSessionOperator并调用LocalMcpClearHistory方法
+	var success = false
+	var errorMsg = ""
+
+	if chatSessionOperatorValue := ctx.Value("chat_session_operator"); chatSessionOperatorValue != nil {
+		if chatSessionOperator, ok := chatSessionOperatorValue.(ChatSessionOperator); ok {
+			log.Info("找到ChatSessionOperator，正在调用LocalMcpClearHistory方法清空历史")
+			if err := chatSessionOperator.LocalMcpClearHistory(); err != nil {
+				log.Errorf("清空历史对话失败: %v", err)
+				errorMsg = fmt.Sprintf("清空历史失败: %v", err)
+			} else {
+				success = true
+				log.Info("历史对话清空成功")
+			}
+		} else {
+			log.Warn("从context中获取的chat_session_operator不是ChatSessionOperator类型")
+			errorMsg = "无法找到有效的会话操作接口"
+		}
+	} else {
+		log.Warn("从context中未找到chat_session_operator")
+		errorMsg = "未找到会话操作接口"
+	}
+
+	// 构造返回结果
+	result := map[string]interface{}{
+		"success":   success,
+		"action":    "clear_conversation_history",
+		"reason":    reason,
+		"timestamp": time.Now().Unix(),
+	}
+
+	if success {
+		result["message"] = "历史对话已成功清空，您可以开始全新的对话。"
+		result["status"] = "completed"
+	} else {
+		result["message"] = "清空历史对话失败"
+		result["error"] = errorMsg
+		result["status"] = "failed"
+	}
+
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return `{"success": false, "error": "序列化结果失败"}`, err
+	}
+
+	log.Infof("清空历史对话处理完成，原因: %s, 结果: %v", reason, success)
+	return string(resultBytes), nil
+}
+
 // getWeekNumber 获取周数
 func getWeekNumber(t time.Time) int {
 	_, week := t.ISOWeek()
@@ -200,5 +280,6 @@ func GetRegisteredChatTools() []string {
 	return []string{
 		"get_current_datetime",
 		"exit_conversation",
+		"clear_conversation_history",
 	}
 }
