@@ -132,7 +132,7 @@ func (c *MqttUdpConn) GetDeviceID() string {
 // Close 关闭连接
 func (c *MqttUdpConn) Close() error {
 	//c.cancel()
-
+	c.Destroy()
 	return nil
 }
 
