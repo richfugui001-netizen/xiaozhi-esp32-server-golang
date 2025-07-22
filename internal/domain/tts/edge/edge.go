@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"xiaozhi-esp32-server-golang/internal/domain/tts/common"
+	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/difyz9/edge-tts-go/pkg/communicate"
@@ -98,7 +98,7 @@ func (p *EdgeTTSProvider) TextToSpeech(ctx context.Context, text string, sampleR
 		_, _ = io.Copy(pipeWriter, f)
 		pipeWriter.Close()
 	}()
-	mp3Decoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
+	mp3Decoder, err := util.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
 	if err != nil {
 		return nil, fmt.Errorf("创建MP3解码器失败: %v", err)
 	}
@@ -169,7 +169,7 @@ func (p *EdgeTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 	}()
 	// 启动MP3→Opus解码
 	go func() {
-		mp3Decoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
+		mp3Decoder, err := util.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
 		if err != nil {
 			log.Errorf("EdgeTTS MP3解码器创建失败: %v", err)
 			return

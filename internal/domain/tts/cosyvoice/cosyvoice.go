@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"xiaozhi-esp32-server-golang/internal/data/audio"
-	"xiaozhi-esp32-server-golang/internal/domain/tts/common"
+	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 )
 
@@ -167,7 +167,7 @@ func (p *CosyVoiceTTSProvider) TextToSpeech(ctx context.Context, text string, sa
 		outputChan := make(chan []byte, 1000)
 
 		// 创建MP3解码器
-		mp3Decoder, err := common.CreateAudioDecoder(ctx, resp.Body, outputChan, frameDuration, p.AudioFormat)
+		mp3Decoder, err := util.CreateAudioDecoder(ctx, resp.Body, outputChan, frameDuration, p.AudioFormat)
 		if err != nil {
 			close(doneChan)
 			return nil, fmt.Errorf("创建MP3解码器失败: %v", err)
@@ -262,7 +262,7 @@ func (p *CosyVoiceTTSProvider) TextToSpeechStream(ctx context.Context, text stri
 		// 根据音频格式处理流式响应
 		if p.AudioFormat == "mp3" {
 			// 创建 MP3 解码器，传入 context 而不是 done 通道
-			mp3Decoder, err := common.CreateAudioDecoder(ctx, resp.Body, outputChan, frameDuration, p.AudioFormat)
+			mp3Decoder, err := util.CreateAudioDecoder(ctx, resp.Body, outputChan, frameDuration, p.AudioFormat)
 			if err != nil {
 				log.Errorf("创建MP3解码器失败: %v", err)
 				close(outputChan)

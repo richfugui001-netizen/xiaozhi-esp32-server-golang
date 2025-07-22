@@ -18,6 +18,7 @@ import (
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
+	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
@@ -306,9 +307,7 @@ func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 			if enableGreeting && isWakeupWord {
 				//进行tts欢迎语
 				if !s.clientState.IsWelcomeSpeaking {
-					greetingText := s.GetRandomGreeting()
-					s.AddTextToTTSQueue(greetingText)
-					s.clientState.IsWelcomeSpeaking = true
+					s.HandleWelcome()
 				}
 			} else {
 				//进行llm->tts聊天
@@ -319,6 +318,18 @@ func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 		}
 	}
 	return nil
+}
+
+func (s *ChatSession) HandleWelcome() {
+	greetingText := s.GetRandomGreeting()
+	s.serverTransport.SendTtsStart()
+	defer s.serverTransport.SendTtsStop()
+
+	s.ttsManager.handleTts(s.clientState.GetSessionCtx(), llm_common.LLMResponseStruct{
+		Text: greetingText,
+	})
+
+	s.clientState.IsWelcomeSpeaking = true
 }
 
 func (s *ChatSession) GetRandomGreeting() string {
@@ -394,9 +405,9 @@ func (s *ChatSession) HandleListenStart(msg *ClientMessage) error {
 		s.clientState.ListenMode = msg.Mode
 		log.Infof("设备 %s 拾音模式: %s", msg.DeviceID, msg.Mode)
 	}
-	if s.clientState.ListenMode == "manual" {
-		s.StopSpeaking(false)
-	}
+	//if s.clientState.ListenMode == "manual" {
+	s.StopSpeaking(false)
+	//}
 	s.clientState.SetStatus(ClientStatusListening)
 
 	return s.OnListenStart()

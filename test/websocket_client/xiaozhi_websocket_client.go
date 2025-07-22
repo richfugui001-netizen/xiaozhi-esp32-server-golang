@@ -16,7 +16,7 @@ import (
 
 	"xiaozhi-esp32-server-golang/internal/domain/audio"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
-	"xiaozhi-esp32-server-golang/internal/domain/tts/common"
+	"xiaozhi-esp32-server-golang/internal/util"
 
 	"github.com/gorilla/websocket"
 )
@@ -403,7 +403,7 @@ func sendWavFileWithOpusEncoding(conn *websocket.Conn, filePath string) error {
 	fmt.Printf("文件内容长度: %d\n", len(fileContent))
 	file.Close()
 
-	opusFrames, err := common.WavToOpus(fileContent, SampleRate, Channels, 0)
+	opusFrames, err := util.WavToOpus(fileContent, SampleRate, Channels, 0)
 	if err != nil {
 		return fmt.Errorf("转换WAV文件失败: %v", err)
 	}

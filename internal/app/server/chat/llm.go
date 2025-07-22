@@ -201,12 +201,13 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, requestEinoMessages 
 						llm_memory.Get().AddMessage(ctx, state.DeviceID, schema.Assistant, strFullText)
 					}
 					if len(toolCalls) > 0 {
-						if !hasTextResponse {
-							//有工具调用 && 没有文本响应，发送"查询中", 异步tts
-							l.ttsManager.handleTextResponse(ctx, llm_common.LLMResponseStruct{
-								Text: "查询中, 请稍候",
-							}, false)
-						}
+						/*
+							if !hasTextResponse {
+								//有工具调用 && 没有文本响应，发送"查询中", 异步tts
+								l.ttsManager.handleTextResponse(ctx, llm_common.LLMResponseStruct{
+									Text: "查询中, 请稍候",
+								}, false)
+							}*/
 
 						lctx := context.WithValue(ctx, "nest", 2)
 						invokeToolSuccess, err := l.handleToolCallResponse(lctx, requestEinoMessages, toolCalls)
@@ -250,6 +251,7 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 
 	var invokeToolSuccess bool
 	msgList := make([]*schema.Message, 0)
+	var shouldStopLLMProcessing bool
 
 	// 从 context 中获取 chat_session_operator（如果存在）
 	// 如果不存在，说明没有需要 ChatSession 操作的工具，可以正常执行
@@ -268,14 +270,26 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 		}
 		log.Infof("进行工具调用请求: %s, 参数: %+v", toolName, toolCall.Function.Arguments)
 		startTs := time.Now().UnixMilli()
-		result, err := tool.InvokableRun(toolCtx, toolCall.Function.Arguments)
+		fcResult, err := tool.InvokableRun(toolCtx, toolCall.Function.Arguments)
 		if err != nil {
 			log.Errorf("工具调用失败: %v", err)
 			continue
 		}
 		costTs := time.Now().UnixMilli() - startTs
 		invokeToolSuccess = true
-		log.Infof("工具调用结果: %s, 耗时: %dms", result, costTs)
+		log.Infof("工具调用结果: %s, 耗时: %dms", fcResult, costTs)
+
+		var result string = fcResult
+		// 首先尝试解析新的结构化响应
+		if response, err := ParseMCPResponse(fcResult); err == nil {
+			log.Debugf("解析到结构化MCP响应，类型: %s", response.GetType())
+			if response.IsTerminal() {
+				log.Infof("工具响应类型: %s, 成功: %t, 终止: %t", response.GetType(), response.GetSuccess(), response.IsTerminal())
+				return invokeToolSuccess, nil
+			}
+			result = response.GetContent()
+		}
+
 		msg := []*schema.Message{
 			&schema.Message{
 				Role:      schema.Assistant,
@@ -290,10 +304,13 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 		msgList = append(msgList, msg...)
 	}
 
-	if invokeToolSuccess {
+	// 如果工具调用成功且没有被标记为停止处理，则继续LLM调用
+	if invokeToolSuccess && !shouldStopLLMProcessing {
 		requestEinoMessages = append(requestEinoMessages, msgList...)
 		//不需要带tool进行调用
 		l.DoLLmRequest(ctx, requestEinoMessages, nil, true)
+	} else if shouldStopLLMProcessing {
+		log.Infof("根据工具返回标志，跳过后续LLM处理")
 	}
 
 	return invokeToolSuccess, nil

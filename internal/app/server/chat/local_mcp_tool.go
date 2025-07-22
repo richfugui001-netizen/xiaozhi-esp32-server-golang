@@ -63,7 +63,76 @@ func InitChatLocalMCPTools() {
 		log.Info("成功注册工具: clear_conversation_history")
 	}
 
+	// 注册播放音乐工具
+	err = manager.RegisterToolFunc(
+		"play_music",
+		"播放指定名称的音乐。参数格式: {\"name\": \"音乐名称\"}",
+		playMusicHandler,
+		&schema.ParamsOneOf{
+			// 只接受音乐名称参数
+		},
+	)
+	if err != nil {
+		log.Errorf("注册播放音乐工具失败: %v", err)
+	} else {
+		log.Info("成功注册工具: play_music")
+	}
+
 	log.Info("聊天相关的本地MCP工具初始化完成")
+}
+
+// playMusicHandler 播放音乐的处理函数
+func playMusicHandler(ctx context.Context, argumentsInJSON string) (string, error) {
+	log.Info("执行播放音乐工具")
+
+	// 解析参数
+	var params map[string]interface{}
+	musicName := "" // 音乐名称
+
+	if argumentsInJSON != "" {
+		if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
+			response := NewErrorResponse("play_music", "参数解析失败", "PARSE_ERROR", "请检查参数格式是否正确")
+			return response.ToJSON()
+		}
+		if name, ok := params["name"].(string); ok && name != "" {
+			musicName = name
+		}
+	}
+
+	if musicName == "" {
+		response := NewErrorResponse("play_music", "缺少必需的参数: name", "MISSING_PARAM", "请提供音乐名称参数")
+		return response.ToJSON()
+	}
+
+	// 从context中获取ChatSessionOperator并调用LocalMcpPlayMusic方法
+	if chatSessionOperatorValue := ctx.Value("chat_session_operator"); chatSessionOperatorValue != nil {
+		if chatSessionOperator, ok := chatSessionOperatorValue.(ChatSessionOperator); ok {
+			log.Infof("找到ChatSessionOperator，正在调用LocalMcpPlayMusic方法播放音乐: %s", musicName)
+			if err := chatSessionOperator.LocalMcpPlayMusic(ctx, musicName); err != nil {
+				log.Errorf("播放音乐失败: %v", err)
+				response := NewErrorResponse("play_music", fmt.Sprintf("播放音乐失败: %v", err), "PLAYBACK_ERROR", "请检查音乐名称或网络连接")
+				return response.ToJSON()
+			} else {
+				// 成功播放 - 动作类响应，终止后续处理
+				response := NewActionResponse("play_music", "play_music", fmt.Sprintf("开始播放音乐: %s", musicName), "playing", true)
+				response.UserState = "listening_music"
+				response.Instruction = "音乐已开始播放，请保持安静，不要生成额外的文本回复"
+				response.Metadata = map[string]string{
+					"music_name": musicName,
+				}
+				log.Infof("开始播放音乐: %s", musicName)
+				return response.ToJSON()
+			}
+		} else {
+			log.Warn("从context中获取的chat_session_operator不是ChatSessionOperator类型")
+			response := NewErrorResponse("play_music", "无法找到有效的会话操作接口", "INTERFACE_ERROR", "系统内部错误，请重试")
+			return response.ToJSON()
+		}
+	} else {
+		log.Warn("从context中未找到chat_session_operator")
+		response := NewErrorResponse("play_music", "未找到会话操作接口", "NO_INTERFACE", "系统内部错误，请重试")
+		return response.ToJSON()
+	}
 }
 
 // getCurrentDateTimeHandler 获取当前时间和日期的处理函数
@@ -93,39 +162,34 @@ func getCurrentDateTimeHandler(ctx context.Context, argumentsInJSON string) (str
 		}
 	}
 
-	// 构造返回结果
-	result := map[string]interface{}{
-		"success":     true,
-		"timestamp":   now.Unix(),
-		"datetime":    now.Format("2006-01-02 15:04:05"),
-		"date":        now.Format("2006-01-02"),
-		"time":        now.Format("15:04:05"),
-		"timezone":    now.Location().String(),
-		"year":        now.Year(),
-		"month":       int(now.Month()),
-		"day":         now.Day(),
-		"hour":        now.Hour(),
-		"minute":      now.Minute(),
-		"second":      now.Second(),
-		"weekday":     now.Weekday().String(),
-		"yearday":     now.YearDay(),
-		"week_number": getWeekNumber(now),
-		"formatted": map[string]string{
-			"rfc3339": now.Format(time.RFC3339),
-			"rfc822":  now.Format(time.RFC822),
-			"kitchen": now.Format(time.Kitchen),
-			"stamp":   now.Format(time.Stamp),
-			"chinese": formatChineseDateTime(now),
+	// 构造返回数据
+	data := map[string]interface{}{
+		"datetime": map[string]interface{}{
+			"formatted":     now.Format("2006-01-02 15:04:05"),
+			"iso8601":       now.Format(time.RFC3339),
+			"chinese":       formatChineseDateTime(now),
+			"unix":          now.Unix(),
+			"year":          now.Year(),
+			"month":         int(now.Month()),
+			"day":           now.Day(),
+			"hour":          now.Hour(),
+			"minute":        now.Minute(),
+			"second":        now.Second(),
+			"weekday":       now.Weekday().String(),
+			"weekday_zh":    getWeekdayChinese(now.Weekday()),
+			"week_number":   getWeekNumber(now),
+			"timezone":      timezone,
+			"timezone_name": now.Location().String(),
 		},
 	}
 
-	resultBytes, err := json.Marshal(result)
-	if err != nil {
-		return `{"success": false, "error": "序列化结果失败"}`, err
-	}
+	// 创建内容类响应
+	response := NewContentResponse("get_current_datetime", data, fmt.Sprintf("当前时间：%s", formatChineseDateTime(now)))
+	response.Format = "datetime"
+	response.DisplayHint = "可用于显示当前日期时间信息"
 
 	log.Infof("获取当前时间日期成功: %s", now.Format("2006-01-02 15:04:05"))
-	return string(resultBytes), nil
+	return response.ToJSON()
 }
 
 // exitConversationHandler 退出对话的处理函数
@@ -144,23 +208,15 @@ func exitConversationHandler(ctx context.Context, argumentsInJSON string) (strin
 		}
 	}
 
-	// 构造返回结果
-	result := map[string]interface{}{
-		"success":   true,
-		"action":    "exit_conversation",
-		"reason":    reason,
-		"timestamp": time.Now().Unix(),
-		"message":   "对话即将结束，感谢您的使用！",
-		"exit_code": 0,
-		"farewell": map[string]string{
-			"chinese": "再见！期待下次与您交流。",
-			"english": "Goodbye! Looking forward to our next conversation.",
-		},
-	}
-
-	resultBytes, err := json.Marshal(result)
-	if err != nil {
-		return `{"success": false, "error": "序列化结果失败"}`, err
+	// 创建动作类响应 - 终止性操作
+	response := NewActionResponse("exit_conversation", "exit_conversation", "对话即将结束，感谢您的使用！", "exiting", true)
+	response.UserState = "conversation_ended"
+	response.Instruction = "对话已结束，请不要生成额外的文本回复"
+	response.Metadata = map[string]string{
+		"reason":           reason,
+		"exit_code":        "0",
+		"farewell_chinese": "再见！期待下次与您交流。",
+		"farewell_english": "Goodbye! Looking forward to our next conversation.",
 	}
 
 	log.Infof("退出对话处理完成，原因: %s", reason)
@@ -177,7 +233,7 @@ func exitConversationHandler(ctx context.Context, argumentsInJSON string) (strin
 		log.Warn("从context中未找到chat_session_operator")
 	}
 
-	return string(resultBytes), nil
+	return response.ToJSON()
 }
 
 // clearConversationHistoryHandler 清空历史对话的处理函数
@@ -197,52 +253,39 @@ func clearConversationHistoryHandler(ctx context.Context, argumentsInJSON string
 	}
 
 	// 从context中获取ChatSessionOperator并调用LocalMcpClearHistory方法
-	var success = false
-	var errorMsg = ""
-
 	if chatSessionOperatorValue := ctx.Value("chat_session_operator"); chatSessionOperatorValue != nil {
 		if chatSessionOperator, ok := chatSessionOperatorValue.(ChatSessionOperator); ok {
 			log.Info("找到ChatSessionOperator，正在调用LocalMcpClearHistory方法清空历史")
 			if err := chatSessionOperator.LocalMcpClearHistory(); err != nil {
 				log.Errorf("清空历史对话失败: %v", err)
-				errorMsg = fmt.Sprintf("清空历史失败: %v", err)
+				return NewErrorResponse("clear_conversation_history",
+					fmt.Sprintf("清空历史失败: %v", err),
+					"CLEAR_FAILED",
+					"请重试清空操作").ToJSON()
 			} else {
-				success = true
+				// 成功清空 - 动作类响应，但不终止对话
+				response := NewActionResponse("clear_conversation_history", "clear_history", "历史对话已成功清空，您可以开始全新的对话。", "completed", false)
+				response.Metadata = map[string]string{
+					"reason": reason,
+					"status": "cleared",
+				}
 				log.Info("历史对话清空成功")
+				return response.ToJSON()
 			}
 		} else {
 			log.Warn("从context中获取的chat_session_operator不是ChatSessionOperator类型")
-			errorMsg = "无法找到有效的会话操作接口"
+			return NewErrorResponse("clear_conversation_history",
+				"无法找到有效的会话操作接口",
+				"INTERFACE_ERROR",
+				"系统内部错误，请重试").ToJSON()
 		}
 	} else {
 		log.Warn("从context中未找到chat_session_operator")
-		errorMsg = "未找到会话操作接口"
+		return NewErrorResponse("clear_conversation_history",
+			"未找到会话操作接口",
+			"NO_INTERFACE",
+			"系统内部错误，请重试").ToJSON()
 	}
-
-	// 构造返回结果
-	result := map[string]interface{}{
-		"success":   success,
-		"action":    "clear_conversation_history",
-		"reason":    reason,
-		"timestamp": time.Now().Unix(),
-	}
-
-	if success {
-		result["message"] = "历史对话已成功清空，您可以开始全新的对话。"
-		result["status"] = "completed"
-	} else {
-		result["message"] = "清空历史对话失败"
-		result["error"] = errorMsg
-		result["status"] = "failed"
-	}
-
-	resultBytes, err := json.Marshal(result)
-	if err != nil {
-		return `{"success": false, "error": "序列化结果失败"}`, err
-	}
-
-	log.Infof("清空历史对话处理完成，原因: %s, 结果: %v", reason, success)
-	return string(resultBytes), nil
 }
 
 // getWeekNumber 获取周数
@@ -270,6 +313,20 @@ func formatChineseDateTime(t time.Time) string {
 	)
 }
 
+// getWeekdayChinese 获取中文星期几
+func getWeekdayChinese(weekday time.Weekday) string {
+	weekdays := map[time.Weekday]string{
+		time.Sunday:    "星期日",
+		time.Monday:    "星期一",
+		time.Tuesday:   "星期二",
+		time.Wednesday: "星期三",
+		time.Thursday:  "星期四",
+		time.Friday:    "星期五",
+		time.Saturday:  "星期六",
+	}
+	return weekdays[weekday]
+}
+
 // RegisterChatMCPTools 公共函数，供外部调用注册聊天MCP工具
 func RegisterChatMCPTools() {
 	InitChatLocalMCPTools()
@@ -281,5 +338,6 @@ func GetRegisteredChatTools() []string {
 		"get_current_datetime",
 		"exit_conversation",
 		"clear_conversation_history",
+		"play_music",
 	}
 }
