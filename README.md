@@ -27,7 +27,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 
 ---
 
-[deepwiki 架构分析]([https://deepwiki.com/hackers365/xiaozhi-esp32-server-golang/5.4-mcp-and-tool-integration](https://deepwiki.com/hackers365/xiaozhi-esp32-server-golang))
+[deepwiki 架构分析](https://deepwiki.com/hackers365/xiaozhi-esp32-server-golang/5.4-mcp-and-tool-integration](https://deepwiki.com/hackers365/xiaozhi-esp32-server-golang)
 
 ## 🚀 快速开始 | Quick Start
 
