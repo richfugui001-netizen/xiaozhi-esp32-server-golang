@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"xiaozhi-esp32-server-golang/internal/domain/tts/common"
+	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 )
 
@@ -212,7 +212,7 @@ func (p *DoubaoTTSProvider) TextToSpeech(ctx context.Context, text string, sampl
 		}
 
 		// 转换为Opus帧并直接返回
-		return common.WavToOpus(wavData, 0, 0, 0)
+		return util.WavToOpus(wavData, 0, 0, 0)
 	}
 
 	return nil, fmt.Errorf("响应中没有数据字段, 状态码: %d, 响应: %s", resp.StatusCode, string(body))

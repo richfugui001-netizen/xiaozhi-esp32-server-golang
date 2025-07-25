@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"xiaozhi-esp32-server-golang/internal/domain/tts/common"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 
@@ -236,7 +235,7 @@ func (p *EdgeOfflineTTSProvider) TextToSpeech(ctx context.Context, text string, 
 	startTs := time.Now().UnixMilli()
 
 	// 创建音频解码器
-	audioDecoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
+	audioDecoder, err := util.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "mp3")
 	if err != nil {
 		pipeReader.Close()
 		return nil, fmt.Errorf("创建音频解码器失败: %v", err)
@@ -327,7 +326,7 @@ func (p *EdgeOfflineTTSProvider) TextToSpeechStream(ctx context.Context, text st
 		go func() {
 			startTs := time.Now().UnixMilli()
 			// 创建音频解码器
-			audioDecoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "pcm")
+			audioDecoder, err := util.CreateAudioDecoder(ctx, pipeReader, outputChan, frameDuration, "pcm")
 			if err != nil {
 				pipeReader.Close()
 				log.Errorf("创建音频解码器失败: %v", err)

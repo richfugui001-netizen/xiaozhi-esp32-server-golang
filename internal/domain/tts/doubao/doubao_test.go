@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"xiaozhi-esp32-server-golang/internal/data/client"
-	"xiaozhi-esp32-server-golang/internal/domain/tts/common"
+	"xiaozhi-esp32-server-golang/internal/util"
 )
 
 // 测试创建TTS提供者
@@ -68,7 +68,7 @@ func TestGenerateUUID(t *testing.T) {
 // 如果要全面测试，需要准备有效的WAV数据并验证转换结果
 func TestWavToOpus_InvalidData(t *testing.T) {
 	// 测试无效的WAV数据
-	_, err := common.WavToOpus([]byte("这不是WAV数据"), client.SampleRate, client.Channels, client.FrameDuration)
+	_, err := util.WavToOpus([]byte("这不是WAV数据"), client.SampleRate, client.Channels, client.FrameDuration)
 	if err == nil {
 		t.Error("期望处理无效数据时返回错误，但没有")
 	}
