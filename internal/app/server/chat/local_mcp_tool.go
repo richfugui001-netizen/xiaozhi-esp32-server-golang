@@ -114,7 +114,7 @@ func playMusicHandler(ctx context.Context, argumentsInJSON string) (string, erro
 				return response.ToJSON()
 			} else {
 				// 成功播放 - 动作类响应，终止后续处理
-				response := NewActionResponse("play_music", "play_music", fmt.Sprintf("开始播放音乐: %s", musicName), "playing", true)
+				response := NewAudioResponse("play_music", "play_music", fmt.Sprintf("开始播放音乐: %s", musicName), "playing", true)
 				response.UserState = "listening_music"
 				response.Instruction = "音乐已开始播放，请保持安静，不要生成额外的文本回复"
 				response.Metadata = map[string]string{
