@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"xiaozhi-esp32-server-golang/internal/domain/tts/common"
+	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/gorilla/websocket"
@@ -349,7 +349,7 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 	outputOpusChan = make(chan []byte, 1000)
 
 	go func() {
-		mp3Decoder, err := common.CreateAudioDecoder(ctx, pipeReader, outputOpusChan, frameDuration, "mp3")
+		mp3Decoder, err := util.CreateAudioDecoder(ctx, pipeReader, outputOpusChan, frameDuration, "mp3")
 		if err != nil {
 			log.Errorf("创建MP3解码器失败: %v", err)
 			close(outputOpusChan)
