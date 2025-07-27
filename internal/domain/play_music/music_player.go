@@ -36,7 +36,7 @@ func getHTTPClient() *http.Client {
 		}
 		httpClient = &http.Client{
 			Transport: transport,
-			Timeout:   30 * time.Second,
+			//Timeout:   30 * time.Second,
 		}
 	})
 	return httpClient
@@ -69,7 +69,7 @@ func PlayMusicStream(ctx context.Context, url string, sampleRate int, frameDurat
 	client := getHTTPClient()
 
 	// 创建输出通道
-	outputChan = make(chan []byte, 100)
+	outputChan = make(chan []byte, 10000)
 
 	// 启动goroutine处理流式响应
 	go func() {

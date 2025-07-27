@@ -44,20 +44,27 @@ func NewWebSocketConn(conn *websocket.Conn, deviceID string, isMqttUdpBridge boo
 	}
 
 	go func() {
+		recvFailCount := 0
 		for {
 			select {
 			case <-instance.ctx.Done():
 				return
 			default:
-				instance.conn.SetReadDeadline(time.Now().Add(120 * time.Second))
-				msgType, audio, err := instance.conn.ReadMessage()
-				if err != nil {
-					log.Errorf("read message error: %v", err)
+				if recvFailCount > 3 {
+					log.Errorf("recv message timeout: %v", recvFailCount)
 					for _, cb := range instance.onCloseCbList {
 						cb(instance.deviceID) //通知注册方退出
 					}
 					return
 				}
+				instance.conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+				msgType, audio, err := instance.conn.ReadMessage()
+				if err != nil {
+					log.Errorf("read message error: %v", err)
+					recvFailCount = recvFailCount + 1
+					continue
+				}
+				recvFailCount = 0
 
 				if msgType == websocket.TextMessage {
 					select {

@@ -102,6 +102,7 @@ func (c *ChatSession) InitAsrLlmTts() error {
 }
 
 func (c *ChatSession) CmdMessageLoop(ctx context.Context) {
+	recvFailCount := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -110,11 +111,18 @@ func (c *ChatSession) CmdMessageLoop(ctx context.Context) {
 		default:
 		}
 
+		if recvFailCount > 3 {
+			log.Errorf("recv cmd timeout: %v", recvFailCount)
+			return
+		}
+
 		message, err := c.serverTransport.RecvCmd(120)
 		if err != nil {
 			log.Errorf("recv cmd error: %v", err)
+			recvFailCount = recvFailCount + 1
 			return
 		}
+		recvFailCount = 0
 		log.Infof("收到文本消息: %s", string(message))
 		if err := c.HandleTextMessage(message); err != nil {
 			log.Errorf("处理文本消息失败: %v", err)

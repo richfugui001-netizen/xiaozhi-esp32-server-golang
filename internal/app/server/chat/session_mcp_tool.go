@@ -80,7 +80,10 @@ func (c *ChatManager) LocalMcpPlayMusic(ctx context.Context, musicName string) e
 
 	// 这里可以根据音乐名称获取音乐URL
 	// 目前简化实现，假设musicName就是URL或者从配置中获取
-	musicURL, realMusicName := c.getMusicURL(musicName)
+	musicURL, realMusicName, err := c.getMusicURL(musicName)
+	if err != nil {
+		return fmt.Errorf("获取音乐URL失败: %v", err)
+	}
 	if musicURL == "" {
 		return fmt.Errorf("未找到音乐: %s", musicName)
 	}
@@ -95,7 +98,10 @@ func (c *ChatManager) LocalMcpPlayMusic(ctx context.Context, musicName string) e
 
 	// 发送音频流到客户端
 	go func() {
+		playText := fmt.Sprintf("正在播放音乐: %s", realMusicName)
+		c.session.serverTransport.SendSentenceStart(playText)
 		defer func() {
+			c.session.serverTransport.SendSentenceEnd(playText)
 			if c.session != nil && c.session.serverTransport != nil {
 				c.session.serverTransport.SendTtsStop()
 			}
@@ -130,7 +136,8 @@ func (c *ChatManager) LocalMcpPlayMusic(ctx context.Context, musicName string) e
 }
 
 // getMusicURL 根据音乐名称获取URL
-func (c *ChatManager) getMusicURL(musicName string) (string, string) {
+func (c *ChatManager) getMusicURL(musicName string) (string, string, error) {
+
 	musicURL := "https://freetyst.nf.migu.cn/public%2Fproduct9th%2Fproduct46%2F2024%2F08%2F2317%2F2016%E5%B9%B401%E6%9C%8820%E6%97%A511%E7%82%B929%E5%88%86%E5%86%85%E5%AE%B9%E5%87%86%E5%85%A5%E6%AD%A3%E4%B8%9C537%E9%A6%96%2F%E5%85%A8%E6%9B%B2%E8%AF%95%E5%90%AC%2FMp3_64_22_16%2F6005660FVS8174331.mp3?Key=d3b04946ff6297ec&Tim=1753430018842&channelid=01&msisdn=06c3638197af48a98d0c7d91200c8279"
-	return musicURL, musicName
+	return musicURL, musicName, nil
 }
