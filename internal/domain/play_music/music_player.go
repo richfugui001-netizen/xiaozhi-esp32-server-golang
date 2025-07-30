@@ -175,6 +175,10 @@ func PlayMusicFromAudioData(ctx context.Context, audioData []byte, sampleRate in
 
 	// 启动goroutine处理流式响应
 	go func() {
+		defer func() {
+			close(outputChan)
+		}()
+
 		// 从 audioData 创建一个 io.ReadCloser
 		audioReader := io.NopCloser(bytes.NewReader(audioData))
 
@@ -184,7 +188,6 @@ func PlayMusicFromAudioData(ctx context.Context, audioData []byte, sampleRate in
 			mp3Decoder, err := util.CreateAudioDecoderWithSampleRate(ctx, audioReader, outputChan, frameDuration, audioFormat, sampleRate)
 			if err != nil {
 				log.Errorf("创建MP3解码器失败: %v", err)
-				close(outputChan)
 				return
 			}
 
@@ -203,7 +206,6 @@ func PlayMusicFromAudioData(ctx context.Context, audioData []byte, sampleRate in
 			}
 		} else {
 			log.Errorf("当前仅支持MP3格式的流式播放，传入格式: %s", audioFormat)
-			close(outputChan)
 		}
 	}()
 

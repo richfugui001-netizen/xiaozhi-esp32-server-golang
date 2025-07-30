@@ -370,41 +370,17 @@ func (l *LLMManager) handleAudioContent(ctx context.Context, realMusicName strin
 		return fmt.Errorf("播放音乐失败: %v", err)
 	}
 
-	// 发送音频流到客户端
-	go func() {
-		playText := fmt.Sprintf("正在播放音乐: %s", realMusicName)
-		l.serverTransport.SendSentenceStart(playText)
-		defer func() {
-			l.serverTransport.SendSentenceEnd(playText)
-			if l.serverTransport != nil {
-				l.serverTransport.SendTtsStop()
-			}
-			log.Infof("音乐播放完成: %s", realMusicName)
-		}()
-
-		for {
-			select {
-			case <-ctx.Done():
-				log.Debugf("音乐播放上下文取消: %s", realMusicName)
-				return
-			case audioFrame, ok := <-audioChan:
-				if !ok {
-					// 音频流结束
-					log.Debugf("音乐播放结束: %s", realMusicName)
-					return
-				}
-
-				// 发送音频帧到客户端
-				if l.serverTransport != nil {
-					if err := l.serverTransport.SendAudio(audioFrame); err != nil {
-						log.Errorf("发送音乐音频帧失败: %v", err)
-						return
-					}
-					time.Sleep(time.Duration(l.clientState.OutputAudioFormat.FrameDuration) * time.Millisecond)
-				}
-			}
+	playText := fmt.Sprintf("正在播放音乐: %s", realMusicName)
+	l.serverTransport.SendSentenceStart(playText)
+	defer func() {
+		l.serverTransport.SendSentenceEnd(playText)
+		if l.serverTransport != nil {
+			l.serverTransport.SendTtsStop()
 		}
+		log.Infof("音乐播放完成: %s", realMusicName)
 	}()
+
+	l.ttsManager.SendTTSAudio(ctx, audioChan, true)
 
 	return nil
 }
