@@ -452,3 +452,18 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 
 	return nil
 }
+
+// GetAudioFormatByMimeType 根据MIME类型获取音频格式
+func GetAudioFormatByMimeType(mimeType string) string {
+	switch mimeType {
+	case "audio/mpeg", "audio/mp3", "audio/mpeg3", "audio/x-mpeg-3":
+		return "mp3"
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return "wav"
+	case "audio/pcm", "audio/x-pcm":
+		return "pcm"
+	default:
+		// 默认返回mp3格式
+		return "mp3"
+	}
+}

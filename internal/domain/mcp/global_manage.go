@@ -2,15 +2,16 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -22,7 +23,9 @@ import (
 // MCPServerConfig MCP服务器配置
 type MCPServerConfig struct {
 	Name    string `json:"name" mapstructure:"name"`
-	SSEUrl  string `json:"sse_url" mapstructure:"sse_url"`
+	Type    string `json:"type" mapstructure:"type"`
+	Url     string `json:"url" mapstructure:"url"`
+	SSEUrl  string `json:"sse_url" mapstructure:"sse_url"` //向后兼容sse_url字段
 	Enabled bool   `json:"enabled" mapstructure:"enabled"`
 }
 
@@ -101,8 +104,8 @@ func (g *GlobalMCPManager) Start() error {
 
 	// 详细记录每个服务器配置
 	for i, config := range serverConfigs {
-		log.Infof("MCP服务器[%d]: Name=%s, SSEUrl=%s, Enabled=%v",
-			i+1, config.Name, config.SSEUrl, config.Enabled)
+		log.Infof("MCP服务器[%d]: Type=%s, Name=%s, Url=%s, SSEUrl=%s, Enabled=%v",
+			i+1, config.Type, config.Name, config.Url, config.SSEUrl, config.Enabled)
 	}
 
 	// 连接启用的服务器
@@ -156,9 +159,9 @@ func (g *GlobalMCPManager) connectToServer(config MCPServerConfig) error {
 		return fmt.Errorf("MCP服务器名称不能为空")
 	}
 
-	if config.SSEUrl == "" {
-		log.Warnf("MCP服务器 %s 的SSE URL为空，跳过连接", config.Name)
-		return fmt.Errorf("MCP服务器 %s 的SSE URL为空", config.Name)
+	if !config.Enabled {
+		log.Infof("MCP服务器 %s 已禁用，跳过连接", config.Name)
+		return nil
 	}
 
 	log.Infof("正在连接MCP服务器: %s (URL: %s)", config.Name, config.SSEUrl)
@@ -168,14 +171,31 @@ func (g *GlobalMCPManager) connectToServer(config MCPServerConfig) error {
 		tools:  make(map[string]tool.InvokableTool),
 	}
 
-	// 创建 SSE 传输层
-	sseTransport, err := transport.NewSSE(config.SSEUrl)
-	if err != nil {
-		return fmt.Errorf("创建SSE传输层失败: %v", err)
+	var transportInstance transport.Interface
+	var err error
+
+	if config.SSEUrl != "" || config.Type == "sse" {
+		var endpoint string
+		if config.SSEUrl != "" {
+			endpoint = config.SSEUrl
+		}
+		if config.Type == "sse" && config.Url != "" {
+			endpoint = config.Url
+		}
+		sseTransport, err := transport.NewSSE(endpoint)
+		if err != nil {
+			return fmt.Errorf("创建SSE传输层失败: %v", err)
+		}
+		transportInstance = sseTransport
+	} else if config.Type == "streamablehttp" {
+		transportInstance, err = transport.NewStreamableHTTP(config.Url)
+		if err != nil {
+			return fmt.Errorf("创建StreamableHTTP传输层失败: %v", err)
+		}
 	}
 
 	// 使用 client.NewClient 创建 MCP 客户端
-	mcpClient := client.NewClient(sseTransport)
+	mcpClient := client.NewClient(transportInstance)
 
 	conn.client = mcpClient
 
@@ -279,19 +299,27 @@ func (conn *MCPServerConnection) refreshTools(ctx context.Context) error {
 func ConvertMcpToolListToInvokableToolList(tools []mcp.Tool, serverName string, client *client.Client) map[string]tool.InvokableTool {
 	invokeTools := make(map[string]tool.InvokableTool)
 	for _, tool := range tools {
-		// 转换InputSchema类型
-		var inputSchema map[string]interface{}
-		// 通过JSON序列化和反序列化来转换类型
-		if schemaBytes, err := json.Marshal(tool.InputSchema); err == nil {
-			json.Unmarshal(schemaBytes, &inputSchema)
+
+		marshaledInputSchema, err := sonic.Marshal(tool.InputSchema)
+		if err != nil {
+			log.Errorf("convert mcp tool to invokeable tool err: %+v", err)
+			continue
+		}
+		inputSchema := &openapi3.Schema{}
+		err = sonic.Unmarshal(marshaledInputSchema, inputSchema)
+		if err != nil {
+			log.Errorf("convert mcp tool to invokeable tool err: %+v", err)
+			continue
 		}
 
 		mcpToolInstance := &mcpTool{
-			name:        tool.Name,
-			description: tool.Description,
-			inputSchema: inputSchema,
-			serverName:  serverName,
-			client:      client,
+			info: &schema.ToolInfo{
+				Name:        tool.Name,
+				Desc:        tool.Description,
+				ParamsOneOf: schema.NewParamsOneOfByOpenAPIV3(inputSchema),
+			},
+			serverName: serverName,
+			client:     client,
 		}
 		invokeTools[tool.Name] = mcpToolInstance
 	}
@@ -493,96 +521,6 @@ func (g *GlobalMCPManager) reconnectServer(serverName string) (*client.Client, e
 	}
 
 	return conn.client, nil
-}
-
-// mcpTool MCP工具实现
-type mcpTool struct {
-	name        string
-	description string
-	inputSchema map[string]interface{}
-	serverName  string
-	client      *client.Client
-}
-
-// Info 获取工具信息，实现BaseTool接口
-func (t *mcpTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	// 创建参数定义
-	var paramsOneOf *schema.ParamsOneOf
-	if t.inputSchema != nil {
-		paramsOneOf = &schema.ParamsOneOf{
-			// 简化的参数定义，实际使用中需要完善
-		}
-	}
-
-	return &schema.ToolInfo{
-		Name:        t.name,
-		Desc:        t.description,
-		ParamsOneOf: paramsOneOf,
-	}, nil
-}
-
-// InvokableRun 调用工具，实现InvokableTool接口
-func (t *mcpTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	// 检查客户端是否可用
-	if t.client == nil {
-		return "", fmt.Errorf("调用MCP工具失败: MCP客户端未初始化")
-	}
-
-	// 解析参数
-	var arguments map[string]interface{}
-	if argumentsInJSON != "" {
-		if err := json.Unmarshal([]byte(argumentsInJSON), &arguments); err != nil {
-			return "", fmt.Errorf("解析工具参数失败: %v", err)
-		}
-	}
-
-	// 准备调用请求
-	callRequest := mcp.CallToolRequest{
-		Params: mcp.CallToolParams{
-			Name:      t.name,
-			Arguments: arguments,
-		},
-	}
-
-	// 第一次尝试调用
-	result, err := t.client.CallTool(ctx, callRequest)
-	if err != nil && isSessionClosedError(err) {
-		log.Warnf("工具 %s 调用失败(session closed): %v，尝试重连后重试", t.name, err)
-
-		// 重连并获取新的client
-		newClient, err := GetGlobalMCPManager().reconnectServer(t.serverName)
-		if err != nil {
-			return "", fmt.Errorf("重连服务器失败: %v", err)
-		}
-
-		// 更新工具的client引用
-		t.client = newClient
-
-		// 重试调用
-		result, err = t.client.CallTool(ctx, callRequest)
-		if err != nil {
-			return "", fmt.Errorf("重连后调用仍然失败: %v", err)
-		}
-	} else if err != nil {
-		return "", fmt.Errorf("调用工具失败: %v", err)
-	}
-
-	// 处理结果
-	if len(result.Content) > 0 {
-		// 将结果转换为字符串
-		if textContent, ok := result.Content[0].(mcp.TextContent); ok {
-			return textContent.Text, nil
-		}
-
-		// 如果是其他类型的内容，尝试序列化为JSON
-		contentBytes, err := json.Marshal(result.Content[0])
-		if err != nil {
-			return "", fmt.Errorf("序列化工具结果失败: %v", err)
-		}
-		return string(contentBytes), nil
-	}
-
-	return "", fmt.Errorf("工具调用未返回任何内容")
 }
 
 // ping 发送ping请求检测连接状态

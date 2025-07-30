@@ -43,28 +43,49 @@ func NewWebSocketConn(conn *websocket.Conn, deviceID string, isMqttUdpBridge boo
 		recvAudioChan:   make(chan []byte, 100),
 	}
 
+	// 设置pong处理器
+	conn.SetPongHandler(func(appData string) error {
+		log.Debugf("收到pong消息，设备ID: %s", deviceID)
+		return nil
+	})
+
+	// 启动心跳检测goroutine
 	go func() {
-		recvFailCount := 0
+		ticker := time.NewTicker(30 * time.Second) // 每30秒发送一次ping
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if err := instance.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
+					log.Errorf("发送ping消息失败，设备ID: %s, 错误: %v", deviceID, err)
+					// 心跳失败，关闭连接
+					for _, cb := range instance.onCloseCbList {
+						cb(instance.deviceID)
+					}
+					return
+				}
+				log.Debugf("发送ping消息成功，设备ID: %s", deviceID)
+			case <-instance.ctx.Done():
+				return
+			}
+		}
+	}()
+
+	go func() {
 		for {
 			select {
 			case <-instance.ctx.Done():
 				return
 			default:
-				if recvFailCount > 3 {
-					log.Errorf("recv message timeout: %v", recvFailCount)
+				msgType, audio, err := instance.conn.ReadMessage()
+				if err != nil {
+					log.Errorf("read message error: %v", err)
 					for _, cb := range instance.onCloseCbList {
 						cb(instance.deviceID) //通知注册方退出
 					}
 					return
 				}
-				instance.conn.SetReadDeadline(time.Now().Add(120 * time.Second))
-				msgType, audio, err := instance.conn.ReadMessage()
-				if err != nil {
-					log.Errorf("read message error: %v", err)
-					recvFailCount = recvFailCount + 1
-					continue
-				}
-				recvFailCount = 0
 
 				if msgType == websocket.TextMessage {
 					select {

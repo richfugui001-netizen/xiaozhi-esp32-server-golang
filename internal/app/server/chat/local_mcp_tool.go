@@ -6,79 +6,85 @@ import (
 	"fmt"
 	"time"
 
-	"xiaozhi-esp32-server-golang/internal/domain/mcp"
+	mcp_manager "xiaozhi-esp32-server-golang/internal/domain/mcp"
 	log "xiaozhi-esp32-server-golang/logger"
 
-	"github.com/cloudwego/eino/schema"
+	"github.com/spf13/viper"
 )
+
+type LocalMcpTool struct {
+	Name        string
+	Description string
+	Params      any
+	Handle      mcp_manager.LocalToolHandler
+}
 
 // InitChatLocalMCPTools 初始化聊天相关的本地MCP工具
 func InitChatLocalMCPTools() {
-	manager := mcp.GetLocalMCPManager()
+	manager := mcp_manager.GetLocalMCPManager()
 
 	log.Info("初始化聊天相关的本地MCP工具...")
 
-	// 注册当前时间和日期工具
-	err := manager.RegisterToolFunc(
-		"get_current_datetime",
-		"获取当前时间和日期信息",
-		getCurrentDateTimeHandler,
-		&schema.ParamsOneOf{
-			// 可以接受一个可选的timezone参数
+	localTools := map[string]LocalMcpTool{
+		/*"get_current_datetime": {
+			Name:        "get_current_datetime",
+			Description: "获取当前时间和日期信息",
+			Params:      struct{}{},
+			Handle:      getCurrentDateTimeHandler,
+		},*/
+		"exit_conversation": {
+			Name:        "exit_conversation",
+			Description: "当用户明确表示要结束对话、退出系统或告别时使用，用于优雅地关闭当前聊天会话",
+			Params:      struct{}{},
+			Handle:      exitConversationHandler,
 		},
-	)
-	if err != nil {
-		log.Errorf("注册当前时间日期工具失败: %v", err)
-	} else {
-		log.Info("成功注册工具: get_current_datetime")
+		"clear_conversation_history": {
+			Name:        "clear_conversation_history",
+			Description: "当用户要求清空、清除或重置历史对话记录时使用，用于清空当前会话的所有历史对话内容",
+			Params:      struct{}{},
+			Handle:      clearConversationHistoryHandler,
+		},
+		"play_music": {
+			Name:        "play_music",
+			Description: "当用户想听歌、无聊时、想放空大脑时使用，用于播放指定名称的音乐，当用户想随便听一首音乐时请推荐出具体的歌曲名称，当有多个音乐播放工具时优先使用此工具，**此工具调用耗时较长，需要先返回友好的过渡性提示语**",
+			Params:      PlayMusicParams{},
+			Handle:      playMusicHandler,
+		},
 	}
 
-	// 注册退出工具
-	err = manager.RegisterToolFunc(
-		"exit_conversation",
-		"当用户明确表示要结束对话、退出系统或告别时使用，用于优雅地关闭当前聊天会话",
-		exitConversationHandler,
-		&schema.ParamsOneOf{
-			// 可以接受一个可选的reason参数
-		},
-	)
-	if err != nil {
-		log.Errorf("注册退出对话工具失败: %v", err)
-	} else {
-		log.Info("成功注册工具: exit_conversation")
-	}
-
-	// 注册清空历史对话工具
-	err = manager.RegisterToolFunc(
-		"clear_conversation_history",
-		"当用户要求清空、清除或重置历史对话记录时使用，用于清空当前会话的所有历史对话内容",
-		clearConversationHistoryHandler,
-		&schema.ParamsOneOf{
-			// 可以接受一个可选的reason参数
-		},
-	)
-	if err != nil {
-		log.Errorf("注册清空历史对话工具失败: %v", err)
-	} else {
-		log.Info("成功注册工具: clear_conversation_history")
-	}
-
-	// 注册播放音乐工具
-	err = manager.RegisterToolFunc(
-		"play_music",
-		"播放指定名称的音乐。参数格式: {\"name\": \"音乐名称\"}",
-		playMusicHandler,
-		&schema.ParamsOneOf{
-			// 只接受音乐名称参数
-		},
-	)
-	if err != nil {
-		log.Errorf("注册播放音乐工具失败: %v", err)
-	} else {
-		log.Info("成功注册工具: play_music")
+	for toolName, localTool := range localTools {
+		// 只有当配置明确设为false时才跳过，配置不存在或为true时都启用
+		if viper.IsSet("local_mcp."+toolName) && !viper.GetBool("local_mcp."+toolName) {
+			continue
+		}
+		err := manager.RegisterToolFunc(
+			localTool.Name,
+			localTool.Description,
+			localTool.Params,
+			localTool.Handle,
+		)
+		if err != nil {
+			log.Errorf("注册本地MCP工具 %s 失败: %+v", toolName, err)
+		}
 	}
 
 	log.Info("聊天相关的本地MCP工具初始化完成")
+}
+
+func RegisterLocalMcpFunc(name string, description string, params any, handle mcp_manager.LocalToolHandler) error {
+	manager := mcp_manager.GetLocalMCPManager()
+
+	err := manager.RegisterToolFunc(
+		name,
+		description,
+		params,
+		handle,
+	)
+	if err != nil {
+		log.Errorf("注册本地MCP工具 %s 失败: %+v", name, err)
+		return err
+	}
+	return nil
 }
 
 // playMusicHandler 播放音乐的处理函数
@@ -86,57 +92,33 @@ func playMusicHandler(ctx context.Context, argumentsInJSON string) (string, erro
 	log.Info("执行播放音乐工具")
 
 	// 解析参数
-	var params map[string]interface{}
-	musicName := "" // 音乐名称
+	var params PlayMusicParams
 
 	if argumentsInJSON != "" {
 		if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
 			response := NewErrorResponse("play_music", "参数解析失败", "PARSE_ERROR", "请检查参数格式是否正确")
 			return response.ToJSON()
 		}
-		if name, ok := params["name"].(string); ok && name != "" {
-			musicName = name
-		}
 	}
 
-	if musicName == "" {
-		response := NewErrorResponse("play_music", "缺少必需的参数: name", "MISSING_PARAM", "请提供音乐名称参数")
+	log.Infof("找到ChatSessionOperator，正在调用LocalMcpPlayMusic方法播放音乐: %s", params.Name)
+	audioData, realMusicName, err := GetMusicAudioData(ctx, &params)
+	if err != nil {
+		log.Errorf("获取音乐数据失败: %v", err)
+		response := NewErrorResponse("play_music", fmt.Sprintf("获取音乐数据失败: %v", err), "PLAYBACK_ERROR", "请检查音乐名称或网络连接")
 		return response.ToJSON()
-	}
-
-	// 从context中获取ChatSessionOperator并调用LocalMcpPlayMusic方法
-	if chatSessionOperatorValue := ctx.Value("chat_session_operator"); chatSessionOperatorValue != nil {
-		if chatSessionOperator, ok := chatSessionOperatorValue.(ChatSessionOperator); ok {
-			log.Infof("找到ChatSessionOperator，正在调用LocalMcpPlayMusic方法播放音乐: %s", musicName)
-			if err := chatSessionOperator.LocalMcpPlayMusic(ctx, musicName); err != nil {
-				log.Errorf("播放音乐失败: %v", err)
-				response := NewErrorResponse("play_music", fmt.Sprintf("播放音乐失败: %v", err), "PLAYBACK_ERROR", "请检查音乐名称或网络连接")
-				return response.ToJSON()
-			} else {
-				// 成功播放 - 动作类响应，终止后续处理
-				response := NewAudioResponse("play_music", "play_music", fmt.Sprintf("开始播放音乐: %s", musicName), "playing", true)
-				response.UserState = "listening_music"
-				response.Instruction = "音乐已开始播放，请保持安静，不要生成额外的文本回复"
-				response.Metadata = map[string]string{
-					"music_name": musicName,
-				}
-				log.Infof("开始播放音乐: %s", musicName)
-				return response.ToJSON()
-			}
-		} else {
-			log.Warn("从context中获取的chat_session_operator不是ChatSessionOperator类型")
-			response := NewErrorResponse("play_music", "无法找到有效的会话操作接口", "INTERFACE_ERROR", "系统内部错误，请重试")
-			return response.ToJSON()
-		}
 	} else {
-		log.Warn("从context中未找到chat_session_operator")
-		response := NewErrorResponse("play_music", "未找到会话操作接口", "NO_INTERFACE", "系统内部错误，请重试")
+		// 成功播放 - 动作类响应，终止后续处理
+		response := NewAudioResponse("play_music", "play_music", fmt.Sprintf("开始播放音乐: %s", realMusicName), true, audioData)
+		response.MusicName = realMusicName
 		return response.ToJSON()
 	}
+
 }
 
+/*
 // getCurrentDateTimeHandler 获取当前时间和日期的处理函数
-func getCurrentDateTimeHandler(ctx context.Context, argumentsInJSON string) (string, error) {
+func getCurrentDateTimeHandler(ctx context.Context, argumentsInJSON string) ([]mcp.Content, error) {
 	log.Info("执行获取当前时间日期工具")
 
 	// 解析参数
@@ -191,7 +173,7 @@ func getCurrentDateTimeHandler(ctx context.Context, argumentsInJSON string) (str
 	log.Infof("获取当前时间日期成功: %s", now.Format("2006-01-02 15:04:05"))
 	return response.ToJSON()
 }
-
+*/
 // exitConversationHandler 退出对话的处理函数
 func exitConversationHandler(ctx context.Context, argumentsInJSON string) (string, error) {
 	log.Info("执行退出对话工具")
@@ -233,7 +215,12 @@ func exitConversationHandler(ctx context.Context, argumentsInJSON string) (strin
 		log.Warn("从context中未找到chat_session_operator")
 	}
 
-	return response.ToJSON()
+	responseStr, err := response.ToJSON()
+	if err != nil {
+		return "", err
+	}
+
+	return responseStr, nil
 }
 
 // clearConversationHistoryHandler 清空历史对话的处理函数
@@ -258,10 +245,7 @@ func clearConversationHistoryHandler(ctx context.Context, argumentsInJSON string
 			log.Info("找到ChatSessionOperator，正在调用LocalMcpClearHistory方法清空历史")
 			if err := chatSessionOperator.LocalMcpClearHistory(); err != nil {
 				log.Errorf("清空历史对话失败: %v", err)
-				return NewErrorResponse("clear_conversation_history",
-					fmt.Sprintf("清空历史失败: %v", err),
-					"CLEAR_FAILED",
-					"请重试清空操作").ToJSON()
+				return "", err
 			} else {
 				// 成功清空 - 动作类响应，但不终止对话
 				response := NewActionResponse("clear_conversation_history", "clear_history", "历史对话已成功清空，您可以开始全新的对话。", "completed", false)
@@ -270,22 +254,16 @@ func clearConversationHistoryHandler(ctx context.Context, argumentsInJSON string
 					"status": "cleared",
 				}
 				log.Info("历史对话清空成功")
+
 				return response.ToJSON()
 			}
 		} else {
 			log.Warn("从context中获取的chat_session_operator不是ChatSessionOperator类型")
-			return NewErrorResponse("clear_conversation_history",
-				"无法找到有效的会话操作接口",
-				"INTERFACE_ERROR",
-				"系统内部错误，请重试").ToJSON()
+			return "", fmt.Errorf("从context中获取的chat_session_operator不是ChatSessionOperator类型")
 		}
-	} else {
-		log.Warn("从context中未找到chat_session_operator")
-		return NewErrorResponse("clear_conversation_history",
-			"未找到会话操作接口",
-			"NO_INTERFACE",
-			"系统内部错误，请重试").ToJSON()
 	}
+	log.Warn("从context中未找到chat_session_operator")
+	return "", fmt.Errorf("从context中未找到chat_session_operator")
 }
 
 // getWeekNumber 获取周数
@@ -330,14 +308,4 @@ func getWeekdayChinese(weekday time.Weekday) string {
 // RegisterChatMCPTools 公共函数，供外部调用注册聊天MCP工具
 func RegisterChatMCPTools() {
 	InitChatLocalMCPTools()
-}
-
-// GetRegisteredChatTools 获取已注册的聊天工具列表
-func GetRegisteredChatTools() []string {
-	return []string{
-		"get_current_datetime",
-		"exit_conversation",
-		"clear_conversation_history",
-		"play_music",
-	}
 }

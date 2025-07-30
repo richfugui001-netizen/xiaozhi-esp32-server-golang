@@ -90,3 +90,7 @@ func (t *IotOverMcpTransport) SetNotificationHandler(handler func(notification m
 func (t *IotOverMcpTransport) Close() error {
 	return nil
 }
+
+func (t *IotOverMcpTransport) GetSessionId() string {
+	return ""
+}

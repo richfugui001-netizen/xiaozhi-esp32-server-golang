@@ -2,14 +2,16 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
-	"xiaozhi-esp32-server-golang/internal/domain/play_music"
 	log "xiaozhi-esp32-server-golang/logger"
 )
 
@@ -74,70 +76,111 @@ func (c *ChatManager) LocalMcpClearHistory() error {
 	return nil
 }
 
-// 播放音乐
-func (c *ChatManager) LocalMcpPlayMusic(ctx context.Context, musicName string) error {
-	log.Infof("搜索音乐: %s 中", musicName)
+type PlayMusicParams struct {
+	Name string `json:"name,omitempty" description:"音乐的名称"`
+	//Welcome string `json:"welcome" description:"搜索音乐会耗时过长，用于安抚用户的提示语" required:"true"`
+}
 
-	// 这里可以根据音乐名称获取音乐URL
-	// 目前简化实现，假设musicName就是URL或者从配置中获取
-	musicURL, realMusicName, err := c.getMusicURL(musicName)
-	if err != nil {
-		return fmt.Errorf("获取音乐URL失败: %v", err)
-	}
+// 播放音乐
+func (c *ChatManager) LocalMcpPlayMusic(ctx context.Context, musicParams *PlayMusicParams) error {
+	musicName := musicParams.Name
+	//welcome := musicParams.Welcome
+	welcome := ""
+	log.Infof("搜索音乐: %s 中, welcome: %s", musicName, welcome)
+	var musicURL, realMusicName string
+	var wg sync.WaitGroup
+	var ierr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		// 这里可以根据音乐名称获取音乐URL
+		// 目前简化实现，假设musicName就是URL或者从配置中获取
+		musicURL, realMusicName, ierr = getMusicURL(musicName)
+		if ierr != nil {
+			log.Errorf("获取音乐URL失败: %v", ierr)
+			return
+		}
+
+		return
+	}()
+	go func() {
+		defer wg.Done()
+		//c.session.ttsManager.handleTts(ctx, common.LLMResponseStruct{Text: welcome, IsStart: true})
+	}()
+
+	wg.Wait()
+
 	if musicURL == "" {
+		log.Errorf("未找到音乐: %s", musicName)
 		return fmt.Errorf("未找到音乐: %s", musicName)
 	}
+
 	log.Infof("找到音乐: %s, URL: %s", realMusicName, musicURL)
-
-	// 使用music_player播放音乐
-	audioChan, err := play_music.PlayMusicStream(ctx, musicURL, c.clientState.OutputAudioFormat.SampleRate, c.clientState.OutputAudioFormat.FrameDuration, "mp3")
-	if err != nil {
-		log.Errorf("播放音乐失败: %v", err)
-		return fmt.Errorf("播放音乐失败: %v", err)
-	}
-
-	// 发送音频流到客户端
-	go func() {
-		playText := fmt.Sprintf("正在播放音乐: %s", realMusicName)
-		c.session.serverTransport.SendSentenceStart(playText)
-		defer func() {
-			c.session.serverTransport.SendSentenceEnd(playText)
-			if c.session != nil && c.session.serverTransport != nil {
-				c.session.serverTransport.SendTtsStop()
-			}
-			log.Infof("音乐播放完成: %s", realMusicName)
-		}()
-
-		for {
-			select {
-			case <-ctx.Done():
-				log.Debugf("音乐播放上下文取消: %s", realMusicName)
-				return
-			case audioFrame, ok := <-audioChan:
-				if !ok {
-					// 音频流结束
-					log.Debugf("音乐播放结束: %s", realMusicName)
-					return
-				}
-
-				// 发送音频帧到客户端
-				if c.session != nil && c.session.serverTransport != nil {
-					if err := c.session.serverTransport.SendAudio(audioFrame); err != nil {
-						log.Errorf("发送音乐音频帧失败: %v", err)
-						return
-					}
-					time.Sleep(time.Duration(c.clientState.OutputAudioFormat.FrameDuration) * time.Millisecond)
-				}
-			}
-		}
-	}()
 
 	return nil
 }
 
-// getMusicURL 根据音乐名称获取URL
-func (c *ChatManager) getMusicURL(musicName string) (string, string, error) {
+// searchMusicFromAPI 从API搜索音乐
+func getMusicURL(musicName string) (string, string, error) {
+	client := getHTTPClient()
 
-	musicURL := "https://freetyst.nf.migu.cn/public%2Fproduct9th%2Fproduct46%2F2024%2F08%2F2317%2F2016%E5%B9%B401%E6%9C%8820%E6%97%A511%E7%82%B929%E5%88%86%E5%86%85%E5%AE%B9%E5%87%86%E5%85%A5%E6%AD%A3%E4%B8%9C537%E9%A6%96%2F%E5%85%A8%E6%9B%B2%E8%AF%95%E5%90%AC%2FMp3_64_22_16%2F6005660FVS8174331.mp3?Key=d3b04946ff6297ec&Tim=1753430018842&channelid=01&msisdn=06c3638197af48a98d0c7d91200c8279"
-	return musicURL, musicName, nil
+	// 构建请求体
+	data := fmt.Sprintf("input=%s&filter=name&type=migu&page=1",
+		url.QueryEscape(musicName))
+
+	req, err := http.NewRequest("POST", "https://music.txqq.pro/",
+		strings.NewReader(data))
+	if err != nil {
+		return "", "", fmt.Errorf("创建请求失败: %v", err)
+	}
+
+	// 设置请求头，模拟浏览器请求
+	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+	req.Header.Set("Origin", "https://music.txqq.pro")
+	req.Header.Set("Pragma", "no-cache")
+	req.Header.Set("Referer", "https://music.txqq.pro/")
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("sec-ch-ua", `"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"`)
+	req.Header.Set("sec-ch-ua-mobile", "?0")
+	req.Header.Set("sec-ch-ua-platform", `"Windows"`)
+
+	// 设置超时
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("API请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("API请求失败，状态码: %d", resp.StatusCode)
+	}
+
+	// 解析响应
+	var searchResp MusicSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return "", "", fmt.Errorf("解析响应失败: %v", err)
+	}
+
+	if searchResp.Code != 200 {
+		return "", "", fmt.Errorf("API返回错误: %s", searchResp.Error)
+	}
+
+	if len(searchResp.Data) == 0 {
+		return "", "", fmt.Errorf("未找到音乐: %s", musicName)
+	}
+	musicItem := searchResp.Data[0]
+	// 返回第一个搜索结果的URL
+	return musicItem.URL, musicItem.Title, nil
 }

@@ -1,8 +1,12 @@
 package chat
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"time"
+
+	mcp_go "github.com/mark3labs/mcp-go/mcp"
 )
 
 // MCPResponseType 定义MCP响应的类型
@@ -46,25 +50,20 @@ type MCPActionResponse struct {
 // MCPActionResponse 动作类响应 - 用于播放音乐、退出对话等需要执行动作的场景
 type MCPAudioResponse struct {
 	MCPResponseBase
-	Action   string            `json:"action"`
-	Message  string            `json:"message"`
-	Status   string            `json:"status"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Data      []byte            `json:"data"`
+	MusicName string            `json:"music_name"`
+	Action    string            `json:"action"`
+	Status    string            `json:"status"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 	// 控制标志
-	FinalAction       bool   `json:"final_action"`
-	NoFurtherResponse bool   `json:"no_further_response"`
-	SilenceLLM        bool   `json:"silence_llm"`
-	UserState         string `json:"user_state"`
-	Instruction       string `json:"instruction,omitempty"`
+	FinalAction bool `json:"final_action"`
 }
 
 // MCPContentResponse 内容类响应 - 用于获取时间、查询信息等返回数据的场景
 type MCPContentResponse struct {
 	MCPResponseBase
-	Data        interface{} `json:"data"`
-	Message     string      `json:"message"`
-	Format      string      `json:"format,omitempty"`       // 数据格式说明
-	DisplayHint string      `json:"display_hint,omitempty"` // 显示提示
+	Data    interface{} `json:"data"`
+	Message string      `json:"message"`
 }
 
 // MCPErrorResponse 错误类响应 - 统一的错误处理
@@ -82,30 +81,63 @@ type MCPResponse interface {
 	GetSuccess() bool
 	IsTerminal() bool // 是否是终止性操作
 	ToJSON() (string, error)
-	GetContent() string
+	GetContent() []mcp_go.Content
 }
 
 // 实现MCPResponse接口
 func (r *MCPActionResponse) GetType() MCPResponseType { return MCPResponseTypeAction }
 func (r *MCPActionResponse) GetSuccess() bool         { return r.Success }
 func (r *MCPActionResponse) IsTerminal() bool         { return r.FinalAction || r.NoFurtherResponse }
-func (r *MCPActionResponse) GetContent() string       { return r.Message }
+func (r *MCPActionResponse) GetContent() []mcp_go.Content {
+	return []mcp_go.Content{
+		mcp_go.TextContent{
+			Type: "text",
+			Text: r.Message,
+		},
+	}
+}
 
 // 为MCPAudioResponse添加接口方法实现
 func (r *MCPAudioResponse) GetType() MCPResponseType { return MCPResponseTypeAudio }
 func (r *MCPAudioResponse) GetSuccess() bool         { return r.Success }
-func (r *MCPAudioResponse) IsTerminal() bool         { return r.FinalAction || r.NoFurtherResponse }
-func (r *MCPAudioResponse) GetContent() string       { return r.Message }
+func (r *MCPAudioResponse) IsTerminal() bool         { return r.FinalAction }
+func (r *MCPAudioResponse) GetContent() []mcp_go.Content {
+	return []mcp_go.Content{
+		mcp_go.TextContent{
+			Type: "text",
+			Text: r.MusicName,
+		},
+		mcp_go.AudioContent{
+			Type:     "audio",
+			Data:     base64.StdEncoding.EncodeToString(r.Data),
+			MIMEType: "audio/mpeg",
+		},
+	}
+}
 
 func (r *MCPContentResponse) GetType() MCPResponseType { return MCPResponseTypeContent }
 func (r *MCPContentResponse) GetSuccess() bool         { return r.Success }
 func (r *MCPContentResponse) IsTerminal() bool         { return false } // 内容类通常不终止
-func (r *MCPContentResponse) GetContent() string       { return r.Message }
+func (r *MCPContentResponse) GetContent() []mcp_go.Content {
+	return []mcp_go.Content{
+		mcp_go.TextContent{
+			Type: "text",
+			Text: r.Message,
+		},
+	}
+}
 
 func (r *MCPErrorResponse) GetType() MCPResponseType { return MCPResponseTypeError }
 func (r *MCPErrorResponse) GetSuccess() bool         { return r.Success }
 func (r *MCPErrorResponse) IsTerminal() bool         { return false } // 错误类允许后续处理
-func (r *MCPErrorResponse) GetContent() string       { return r.Error }
+func (r *MCPErrorResponse) GetContent() []mcp_go.Content {
+	return []mcp_go.Content{
+		mcp_go.TextContent{
+			Type: "text",
+			Text: r.Error,
+		},
+	}
+}
 
 // ToJSON 方法实现
 func (r *MCPActionResponse) ToJSON() (string, error) {
@@ -150,7 +182,7 @@ func NewActionResponse(toolName, action, message, status string, terminal bool) 
 }
 
 // NewAudioResponse 创建音频类响应 - 修正返回类型
-func NewAudioResponse(toolName, action, message, status string, terminal bool) *MCPAudioResponse {
+func NewAudioResponse(toolName, action, status string, terminal bool, data []byte) *MCPAudioResponse {
 	return &MCPAudioResponse{
 		MCPResponseBase: MCPResponseBase{
 			Type:      MCPResponseTypeAudio,
@@ -158,12 +190,10 @@ func NewAudioResponse(toolName, action, message, status string, terminal bool) *
 			Timestamp: time.Now().Unix(),
 			ToolName:  toolName,
 		},
-		Action:            action,
-		Message:           message,
-		Status:            status,
-		FinalAction:       terminal,
-		NoFurtherResponse: terminal,
-		SilenceLLM:        terminal,
+		Data:        data,
+		Action:      action,
+		Status:      status,
+		FinalAction: terminal,
 	}
 }
 
@@ -229,6 +259,6 @@ func ParseMCPResponse(jsonStr string) (MCPResponse, error) {
 		}
 		return &response, nil
 	default:
-		return NewErrorResponse("unknown", "未知的响应类型", "INVALID_TYPE", "请检查工具实现"), nil
+		return NewErrorResponse("unknown", "未知的响应类型", "INVALID_TYPE", "请检查工具实现"), fmt.Errorf("未知的响应类型: %s", base.Type)
 	}
 }

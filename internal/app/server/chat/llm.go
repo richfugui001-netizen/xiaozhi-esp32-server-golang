@@ -3,6 +3,8 @@ package chat
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,10 +13,12 @@ import (
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
+	"xiaozhi-esp32-server-golang/internal/domain/play_music"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/schema"
+	mcp_go "github.com/mark3labs/mcp-go/mcp"
 )
 
 type LLMResponseChannelItem struct {
@@ -29,6 +33,8 @@ type LLMManager struct {
 	clientState     *ClientState
 	serverTransport *ServerTransport
 	ttsManager      *TTSManager
+
+	einoTools []*schema.ToolInfo
 
 	llmResponseQueue *util.Queue[LLMResponseChannelItem]
 }
@@ -61,9 +67,9 @@ func (l *LLMManager) processLLMResponseQueue(ctx context.Context) {
 		if item.onStartFunc != nil {
 			item.onStartFunc()
 		}
-		_, mcpResponseType, err := l.handleLLMResponse(item.ctx, item.requestEinoMessages, item.responseChan)
+		_, err = l.handleLLMResponse(item.ctx, item.requestEinoMessages, item.responseChan)
 		if item.onEndFunc != nil {
-			item.onEndFunc(err, mcpResponseType)
+			item.onEndFunc(err)
 		}
 	}
 }
@@ -105,12 +111,6 @@ func (l *LLMManager) HandleLLMResponseChannelAsync(ctx context.Context, requestE
 			l.serverTransport.SendTtsStart()
 		}
 		onEndFunc = func(err error, args ...any) {
-			// 检查是否有参数传入，如果第一个参数为 false 则不执行 SendTtsStop
-			if len(args) > 0 {
-				if shouldSendStop, ok := args[0].(MCPResponseType); ok && shouldSendStop == MCPResponseTypeAudio {
-					return
-				}
-			}
 			l.serverTransport.SendTtsStop()
 		}
 	}
@@ -130,7 +130,7 @@ func (l *LLMManager) HandleLLMResponseChannelAsync(ctx context.Context, requestE
 	return nil
 }
 
-func (l *LLMManager) HandleLLMResponseChannelSync(ctx context.Context, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
+func (l *LLMManager) HandleLLMResponseChannelSync(ctx context.Context, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct, einoTools []*schema.ToolInfo) (bool, error) {
 	needSendTtsCmd := true
 	val := ctx.Value("nest")
 	log.Debugf("AddLLMResponseChannel nest: %+v", val)
@@ -142,10 +142,7 @@ func (l *LLMManager) HandleLLMResponseChannelSync(ctx context.Context, requestEi
 	if needSendTtsCmd {
 		l.serverTransport.SendTtsStart()
 	}
-	ok, mcpRespType, err := l.handleLLMResponse(ctx, requestEinoMessages, llmResponseChannel)
-	if mcpRespType == MCPResponseTypeAudio {
-		return ok, err
-	}
+	ok, err := l.handleLLMResponse(ctx, requestEinoMessages, llmResponseChannel)
 	if needSendTtsCmd {
 		l.serverTransport.SendTtsStop()
 	}
@@ -154,14 +151,13 @@ func (l *LLMManager) HandleLLMResponseChannelSync(ctx context.Context, requestEi
 }
 
 // HandleLLMResponse 处理LLM响应
-func (l *LLMManager) handleLLMResponse(ctx context.Context, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, MCPResponseType, error) {
+func (l *LLMManager) handleLLMResponse(ctx context.Context, requestEinoMessages []*schema.Message, llmResponseChannel chan llm_common.LLMResponseStruct) (bool, error) {
 	log.Debugf("handleLLMResponse start")
 	defer log.Debugf("handleLLMResponse end")
-	var mcpRespType MCPResponseType
 	select {
 	case <-ctx.Done():
 		log.Debugf("handleLLMResponse ctx done, return")
-		return false, mcpRespType, nil
+		return false, nil
 	default:
 	}
 
@@ -176,7 +172,7 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, requestEinoMessages 
 			// 上下文已取消，优先处理取消逻辑
 			log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
 			//sendTtsStartEndFunc(false)
-			return false, mcpRespType, nil
+			return false, nil
 		default:
 			// 非阻塞检查，如果ctx没有Done，继续处理LLM响应
 			select {
@@ -184,7 +180,7 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, requestEinoMessages 
 				if !ok {
 					// 通道已关闭，退出协程
 					log.Infof("LLM 响应通道已关闭，退出协程")
-					return true, mcpRespType, nil
+					return true, nil
 				}
 
 				log.Debugf("LLM 响应: %+v", llmResponse)
@@ -198,7 +194,7 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, requestEinoMessages 
 					//hasTextResponse = true
 					// 处理文本内容响应
 					if err := l.ttsManager.handleTextResponse(ctx, llmResponse, true); err != nil {
-						return true, mcpRespType, err
+						return true, err
 					}
 					fullText.WriteString(llmResponse.Text)
 				}
@@ -222,43 +218,39 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, requestEinoMessages 
 							}*/
 
 						lctx := context.WithValue(ctx, "nest", 2)
-						invokeToolSuccess, mcpRetType, err := l.handleToolCallResponse(lctx, requestEinoMessages, toolCalls)
-						mcpRespType = mcpRetType
+						invokeToolSuccess, err := l.handleToolCallResponse(lctx, requestEinoMessages, toolCalls)
 						if err != nil {
 							log.Errorf("处理工具调用响应失败: %v", err)
-							return true, mcpRespType, fmt.Errorf("处理工具调用响应失败: %v", err)
+							return true, fmt.Errorf("处理工具调用响应失败: %v", err)
 						}
 						if !invokeToolSuccess {
 							//工具调用失败
 							if err := l.ttsManager.handleTextResponse(ctx, llmResponse, false); err != nil {
-								return true, mcpRespType, err
+								return true, err
 							}
 							fullText.WriteString(llmResponse.Text)
 							//sendTtsStartEndFunc(false)
-						}
-						if mcpRespType == MCPResponseTypeAudio {
-							return true, mcpRespType, nil
 						}
 					} else {
 						//sendTtsStartEndFunc(false)
 					}
 
-					return ok, mcpRespType, nil
+					return ok, nil
 				}
 			case <-ctx.Done():
 				// 上下文已取消，退出协程
 				log.Infof("%s 上下文已取消，停止处理LLM响应, context done, exit", state.DeviceID)
 				//sendTtsStartEndFunc(false)
-				return false, mcpRespType, nil
+				return false, nil
 			}
 		}
 	}
 }
 
 // handleToolCallResponse 处理工具调用响应
-func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMessages []*schema.Message, tools []schema.ToolCall) (bool, MCPResponseType, error) {
+func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMessages []*schema.Message, tools []schema.ToolCall) (bool, error) {
 	if len(tools) == 0 {
-		return false, "", nil
+		return false, nil
 	}
 
 	state := l.clientState
@@ -267,7 +259,6 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 
 	var invokeToolSuccess bool
 	msgList := make([]*schema.Message, 0)
-	var shouldStopLLMProcessing bool
 
 	// 从 context 中获取 chat_session_operator（如果存在）
 	// 如果不存在，说明没有需要 ChatSession 操作的工具，可以正常执行
@@ -276,6 +267,8 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 		// 在 context 中传递 chat_session_operator，供 local mcp tool 使用
 		toolCtx = context.WithValue(ctx, "chat_session_operator", chatSessionOperator)
 	}
+
+	var shouldStopLLMProcessing bool
 
 	for _, toolCall := range tools {
 		toolName := toolCall.Function.Name
@@ -293,48 +286,154 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, requestEinoMess
 		}
 		costTs := time.Now().UnixMilli() - startTs
 		invokeToolSuccess = true
-		log.Infof("工具调用结果: %s, 耗时: %dms", fcResult, costTs)
+		if len(fcResult) > 2048 {
+			log.Infof("工具调用结果 len: %d, 耗时: %dms", len(fcResult), costTs)
+		} else {
+			log.Infof("工具调用结果 %s, 耗时: %dms", fcResult, costTs)
+		}
 
 		var result string = fcResult
-		// 首先尝试解析新的结构化响应
-		if response, err := ParseMCPResponse(fcResult); err == nil {
-			log.Debugf("解析到结构化MCP响应，类型: %s", response.GetType())
-			if response.IsTerminal() {
-				log.Infof("工具响应类型: %s, 成功: %t, 终止: %t", response.GetType(), response.GetSuccess(), response.IsTerminal())
-				return invokeToolSuccess, response.GetType(), nil
+		var contentList []mcp_go.Content
+		if mcpResp, ok := l.handleLocalToolResult(fcResult); ok {
+			/*if mcpResp.IsTerminal() {
+				log.Infof("工具调用结果: %s, 终止: %t", fcResult, mcpResp.IsTerminal())
+				return invokeToolSuccess, nil
+			}*/
+			contentList = mcpResp.GetContent()
+		} else if toolCallResult, ok := l.handleToolResult(fcResult); ok {
+			if toolCallResult.IsError {
+				log.Errorf("工具调用失败: %s, 错误: %s", fcResult, toolCallResult.IsError)
 			}
-			result = response.GetContent()
+			contentList = toolCallResult.Content
+		}
+		if len(contentList) > 0 {
+			var mcpContent string
+			//如果有audio数据, 则进行播放
+			for _, content := range contentList {
+				if audioContent, ok := content.(mcp_go.AudioContent); ok {
+					log.Debugf("调用工具 %s 返回音频资源长度: %d", toolName, len(audioContent.Data))
+					//播放音频资源,此时mcpContent是
+					err := l.handleAudioContent(ctx, mcpContent, audioContent)
+					if err != nil {
+						log.Errorf("mcp播放音频资源失败: %v", err)
+					}
+					mcpContent = ""
+					result = ""
+					shouldStopLLMProcessing = true
+					break
+				} else if textContent, ok := content.(mcp_go.TextContent); ok {
+					log.Debugf("调用工具 %s 返回文本资源长度: %s", toolName, textContent.Text)
+					mcpContent += textContent.Text
+				}
+			}
+			if mcpContent != "" {
+				result = mcpContent
+			}
 		}
 
-		msg := []*schema.Message{
-			&schema.Message{
-				Role:      schema.Assistant,
-				ToolCalls: []schema.ToolCall{toolCall},
-			},
-			&schema.Message{
-				Role:       schema.Tool,
-				ToolCallID: toolCall.ID,
-				Content:    result,
-			},
+		if result != "" {
+			msg := []*schema.Message{
+				&schema.Message{
+					Role:      schema.Assistant,
+					ToolCalls: []schema.ToolCall{toolCall},
+				},
+				&schema.Message{
+					Role:       schema.Tool,
+					ToolCallID: toolCall.ID,
+					Content:    result,
+				},
+			}
+			msgList = append(msgList, msg...)
 		}
-		msgList = append(msgList, msg...)
 	}
 
 	// 如果工具调用成功且没有被标记为停止处理，则继续LLM调用
 	if invokeToolSuccess && !shouldStopLLMProcessing {
 		requestEinoMessages = append(requestEinoMessages, msgList...)
-		//不需要带tool进行调用
-		l.DoLLmRequest(ctx, requestEinoMessages, nil, true)
-	} else if shouldStopLLMProcessing {
-		log.Infof("根据工具返回标志，跳过后续LLM处理")
+		l.DoLLmRequest(ctx, requestEinoMessages, l.einoTools, true)
 	}
 
-	return invokeToolSuccess, "", nil
+	return invokeToolSuccess, nil
+}
+
+func (l *LLMManager) handleAudioContent(ctx context.Context, realMusicName string, audioContent mcp_go.AudioContent) error {
+	rawAudioData, err := base64.StdEncoding.DecodeString(audioContent.Data)
+	if err != nil {
+		log.Errorf("解码音频数据失败: %v", err)
+		return fmt.Errorf("解码音频数据失败: %v", err)
+	}
+	audioFormat := util.GetAudioFormatByMimeType(audioContent.MIMEType)
+	// 使用music_player播放音乐
+	audioChan, err := play_music.PlayMusicFromAudioData(ctx, rawAudioData, l.clientState.OutputAudioFormat.SampleRate, l.clientState.OutputAudioFormat.FrameDuration, audioFormat)
+	if err != nil {
+		log.Errorf("播放音乐失败: %v", err)
+		return fmt.Errorf("播放音乐失败: %v", err)
+	}
+
+	// 发送音频流到客户端
+	go func() {
+		playText := fmt.Sprintf("正在播放音乐: %s", realMusicName)
+		l.serverTransport.SendSentenceStart(playText)
+		defer func() {
+			l.serverTransport.SendSentenceEnd(playText)
+			if l.serverTransport != nil {
+				l.serverTransport.SendTtsStop()
+			}
+			log.Infof("音乐播放完成: %s", realMusicName)
+		}()
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Debugf("音乐播放上下文取消: %s", realMusicName)
+				return
+			case audioFrame, ok := <-audioChan:
+				if !ok {
+					// 音频流结束
+					log.Debugf("音乐播放结束: %s", realMusicName)
+					return
+				}
+
+				// 发送音频帧到客户端
+				if l.serverTransport != nil {
+					if err := l.serverTransport.SendAudio(audioFrame); err != nil {
+						log.Errorf("发送音乐音频帧失败: %v", err)
+						return
+					}
+					time.Sleep(time.Duration(l.clientState.OutputAudioFormat.FrameDuration) * time.Millisecond)
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (l *LLMManager) handleLocalToolResult(toolResult string) (MCPResponse, bool) {
+	// 首先尝试解析新的结构化响应
+	var response MCPResponse
+	var err error
+	if response, err = ParseMCPResponse(toolResult); err != nil {
+		return nil, false
+	}
+	return response, true
+}
+
+func (l *LLMManager) handleToolResult(toolResultStr string) (mcp_go.CallToolResult, bool) {
+	var toolResult mcp_go.CallToolResult
+	if err := json.Unmarshal([]byte(toolResultStr), &toolResult); err != nil {
+		log.Errorf("解析工具结果失败: %v", err)
+		return toolResult, false
+	}
+
+	return toolResult, true
 }
 
 func (l *LLMManager) DoLLmRequest(ctx context.Context, requestEinoMessages []*schema.Message, einoTools []*schema.ToolInfo, isSync bool) error {
 	log.Debugf("发送带工具的 LLM 请求, seesionID: %s, requestEinoMessages: %+v", l.clientState.SessionID, requestEinoMessages)
 	clientState := l.clientState
+
+	l.einoTools = einoTools
 
 	clientState.SetStatus(ClientStatusLLMStart)
 	responseSentences, err := llm.HandleLLMWithContextAndTools(
@@ -352,7 +451,7 @@ func (l *LLMManager) DoLLmRequest(ctx context.Context, requestEinoMessages []*sc
 	log.Debugf("DoLLmRequest goroutine开始 - SessionID: %s, context状态: %v", l.clientState.SessionID, ctx.Err())
 
 	if isSync {
-		_, err := l.HandleLLMResponseChannelSync(ctx, requestEinoMessages, responseSentences)
+		_, err := l.HandleLLMResponseChannelSync(ctx, requestEinoMessages, responseSentences, einoTools)
 		if err != nil {
 			log.Errorf("处理 LLM 响应失败, seesionID: %s, error: %v", l.clientState.SessionID, err)
 			return err
