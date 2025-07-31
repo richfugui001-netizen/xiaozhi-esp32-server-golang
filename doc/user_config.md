@@ -8,10 +8,10 @@ xiaozhi:global:config
 ```
 xiaozhi:userconfig:{deviceid}
     "llm": {
-        "type": "deepseek",         //与 配置文件 llm中的key对应
+        "provider": "deepseek",         //与 配置文件 llm中的key对应
     },
     "tts": {
-        "type": "cosyvoice",        //与 配置文件 tts中的key对应
+        "provider": "cosyvoice",        //与 配置文件 tts中的key对应
     }
 ```
 
