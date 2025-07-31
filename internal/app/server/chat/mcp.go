@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 
 	. "xiaozhi-esp32-server-golang/internal/data/client"
@@ -46,8 +47,8 @@ func (c *McpTransport) SendMcpMsg(payload []byte) error {
 	return c.ServerTransport.SendMcpMsg(payload)
 }
 
-func (c *McpTransport) RecvMcpMsg(timeOut int) ([]byte, error) {
-	return c.ServerTransport.RecvMcpMsg(timeOut)
+func (c *McpTransport) RecvMcpMsg(ctx context.Context, timeOut int) ([]byte, error) {
+	return c.ServerTransport.RecvMcpMsg(ctx, timeOut)
 }
 
 func initMcp(clientState *ClientState, serverTransport *ServerTransport) {

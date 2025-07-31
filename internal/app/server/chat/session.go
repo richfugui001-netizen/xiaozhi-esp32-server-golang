@@ -116,11 +116,11 @@ func (c *ChatSession) CmdMessageLoop(ctx context.Context) {
 			return
 		}
 
-		message, err := c.serverTransport.RecvCmd(120)
+		message, err := c.serverTransport.RecvCmd(ctx, 120)
 		if err != nil {
 			log.Errorf("recv cmd error: %v", err)
 			recvFailCount = recvFailCount + 1
-			return
+			continue
 		}
 		recvFailCount = 0
 		log.Infof("收到文本消息: %s", string(message))
@@ -139,7 +139,7 @@ func (c *ChatSession) AudioMessageLoop(ctx context.Context) {
 			return
 		default:
 		}
-		message, err := c.serverTransport.RecvAudio(300)
+		message, err := c.serverTransport.RecvAudio(ctx, 600)
 		if err != nil {
 			log.Errorf("recv audio error: %v", err)
 			return

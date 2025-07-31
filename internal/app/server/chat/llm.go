@@ -374,9 +374,6 @@ func (l *LLMManager) handleAudioContent(ctx context.Context, realMusicName strin
 	l.serverTransport.SendSentenceStart(playText)
 	defer func() {
 		l.serverTransport.SendSentenceEnd(playText)
-		if l.serverTransport != nil {
-			l.serverTransport.SendTtsStop()
-		}
 		log.Infof("音乐播放完成: %s", realMusicName)
 	}()
 

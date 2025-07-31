@@ -178,6 +178,7 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 		case frame, ok := <-audioChan:
 			if !ok {
 				// 通道已关闭，所有帧已处理完毕
+				log.Debugf("SendTTSAudio audioChan closed, exit")
 				return nil
 			}
 			// 发送当前帧

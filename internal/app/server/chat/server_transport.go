@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -207,8 +208,10 @@ func (s *ServerTransport) SendMcpMsg(payload []byte) error {
 	return nil
 }
 
-func (s *ServerTransport) RecvMcpMsg(timeOut int) ([]byte, error) {
+func (s *ServerTransport) RecvMcpMsg(ctx context.Context, timeOut int) ([]byte, error) {
 	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case msg, ok := <-s.McpRecvMsgChan:
 		if !ok {
 			return nil, fmt.Errorf("transport is closed")
@@ -237,10 +240,10 @@ func (s *ServerTransport) Close() error {
 	return s.transport.Close()
 }
 
-func (s *ServerTransport) RecvAudio(timeOut int) ([]byte, error) {
-	return s.transport.RecvAudio(timeOut)
+func (s *ServerTransport) RecvAudio(ctx context.Context, timeOut int) ([]byte, error) {
+	return s.transport.RecvAudio(ctx, timeOut)
 }
 
-func (s *ServerTransport) RecvCmd(timeOut int) ([]byte, error) {
-	return s.transport.RecvCmd(timeOut)
+func (s *ServerTransport) RecvCmd(ctx context.Context, timeOut int) ([]byte, error) {
+	return s.transport.RecvCmd(ctx, timeOut)
 }

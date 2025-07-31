@@ -177,9 +177,12 @@ func (w *WebSocketConn) SendAudio(audio []byte) error {
 	return nil
 }
 
-func (w *WebSocketConn) RecvCmd(timeout int) ([]byte, error) {
+func (w *WebSocketConn) RecvCmd(ctx context.Context, timeout int) ([]byte, error) {
 	for {
 		select {
+		case <-ctx.Done():
+			log.Debugf("recv cmd context done")
+			return nil, ctx.Err()
 		case msg, ok := <-w.recvCmdChan:
 			if !ok {
 				return nil, errors.New("connection is closed")
@@ -191,9 +194,12 @@ func (w *WebSocketConn) RecvCmd(timeout int) ([]byte, error) {
 	}
 }
 
-func (w *WebSocketConn) RecvAudio(timeout int) ([]byte, error) {
+func (w *WebSocketConn) RecvAudio(ctx context.Context, timeout int) ([]byte, error) {
 	for {
 		select {
+		case <-ctx.Done():
+			log.Debugf("recv audio context done")
+			return nil, ctx.Err()
 		case audio, ok := <-w.recvAudioChan:
 			if !ok {
 				return nil, errors.New("connection is closed")

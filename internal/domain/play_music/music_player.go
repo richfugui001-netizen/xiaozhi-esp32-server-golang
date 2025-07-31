@@ -175,10 +175,6 @@ func PlayMusicFromAudioData(ctx context.Context, audioData []byte, sampleRate in
 
 	// 启动goroutine处理流式响应
 	go func() {
-		defer func() {
-			close(outputChan)
-		}()
-
 		// 从 audioData 创建一个 io.ReadCloser
 		audioReader := io.NopCloser(bytes.NewReader(audioData))
 

@@ -31,7 +31,7 @@ type Interface interface {
 
 type ConnInterface interface {
 	SendMcpMsg(payload []byte) error
-	RecvMcpMsg(timeOut int) ([]byte, error)
+	RecvMcpMsg(ctx context.Context, timeOut int) ([]byte, error)
 }
 
 type IotOverMcpTransport struct {
@@ -67,7 +67,7 @@ func (t *IotOverMcpTransport) SendRequest(ctx context.Context, request transport
 	}
 
 	var response transport.JSONRPCResponse
-	msg, err := t.conn.RecvMcpMsg(15000) //15秒超时
+	msg, err := t.conn.RecvMcpMsg(ctx, 15000) //15秒超时
 	if err != nil {
 		return nil, err
 	}
