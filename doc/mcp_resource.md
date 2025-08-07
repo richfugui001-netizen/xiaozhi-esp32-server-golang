@@ -53,52 +53,83 @@ if audioContent, ok := content.(mcp_go.AudioContent); ok {
 - 包含资源 URI 和元数据
 - 支持分页读取大型资源
 - 流式处理，适合大文件
+- 使用 Pipe 机制实现实时音频流播放
 
 **处理流程**:
 ```go
 if resourceLink, ok := content.(mcp_go.ResourceLink); ok {
-    // 分页读取资源
-    resourceResult, err := client.ReadResource(readCtx, mcp_go.ReadResourceRequest{
-        Params: mcp_go.ReadResourceParams{
-            URI: fmt.Sprintf("%s?start=%d&end=%d", resourceLink.URI, start, start+page),
-        },
-    })
-    // 处理 BlobResourceContents
-    if audioContent, ok := content.(mcp_go.BlobResourceContents); ok {
-        // 解码并播放音频数据
-    }
+    // 创建 Pipe 用于流式传输
+    pipeReader, pipeWriter = io.Pipe()
+    
+    // 启动分页读取协程
+    go func() {
+        // 分页读取资源
+        resourceResult, err := client.ReadResource(readCtx, mcp_go.ReadResourceRequest{
+            Params: mcp_go.ReadResourceParams{
+                URI: resourceLink.URI,
+                Arguments: map[string]any{
+                    "url": resourceLink.Description, 
+                    "start": start, 
+                    "end": start + page
+                },
+            },
+        })
+        
+        // 处理 BlobResourceContents
+        for _, content := range resourceResult.Contents {
+            if audioContent, ok := content.(mcp_go.BlobResourceContents); ok {
+                // 解码并发送到音频流通道
+                rawAudioData, err := base64.StdEncoding.DecodeString(audioContent.Blob)
+                streamChan <- rawAudioData
+            }
+        }
+    }()
+    
+    // 使用 music_player 播放音频流
+    audioChan, err := play_music.PlayMusicFromPipe(ctx, pipeReader, ...)
 }
 ```
 
-**分页取资源参数详解**:
+**分页读取参数详解**:
 
-#### URI 参数格式
-```
-{resourceLink.URI}?start={start}&end={end}
+#### 请求参数格式
+```go
+Arguments: map[string]any{
+    "url": resourceLink.Description,  // 实际资源URL
+    "start": start,                   // 起始字节位置
+    "end": start + page,              // 结束字节位置
+}
 ```
 
 #### 参数说明
+- **url**: 实际资源的 URL 地址，来自 `resourceLink.Description`
 - **start**: 起始字节位置，从0开始计数
 - **end**: 结束字节位置（不包含），即读取范围 [start, end)
-- **分页大小**: 由 `McpReadResourcePageSize` 常量定义
+- **分页大小**: 由 `McpReadResourcePageSize` 常量定义，默认 100KB
 
 #### 分页读取流程
 ```go
 start := 0
-page := McpReadResourcePageSize
+page := McpReadResourcePageSize  // 100 * 1024
 totalRead := 0
 pageCount := 0
 
 for {
-    // 构建分页请求URI
-    requestURI := fmt.Sprintf("%s?start=%d&end=%d", resourceLink.URI, start, start+page)
+    // 创建带超时的上下文
+    readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
     
     // 发送分页读取请求
     resourceResult, err := client.ReadResource(readCtx, mcp_go.ReadResourceRequest{
         Params: mcp_go.ReadResourceParams{
-            URI: requestURI,
+            URI: resourceLink.URI,
+            Arguments: map[string]any{
+                "url": resourceLink.Description, 
+                "start": start, 
+                "end": start + page
+            },
         },
     })
+    cancel()
     
     // 处理返回的 BlobResourceContents
     for _, content := range resourceResult.Contents {
@@ -117,9 +148,67 @@ for {
         }
     }
     
+    // 检查读取完成条件
+    if len(rawAudioData) < page || !hasData {
+        return nil // 读取完成
+    }
+    
     // 更新起始位置
     start += page
     pageCount++
+}
+```
+
+#### 流式处理机制
+
+**Pipe 传输架构**:
+```go
+// 创建 Pipe 用于音频流传输
+pipeReader, pipeWriter = io.Pipe()
+
+// 启动数据写入协程
+go func() {
+    for {
+        select {
+        case audioData, ok := <-streamChan:
+            if !ok {
+                pipeWriter.Close()
+                return
+            }
+            pipeWriter.Write(audioData)
+        case <-ctx.Done():
+            return
+        }
+    }
+}()
+
+// 使用 music_player 从 Pipe 播放音频
+audioChan, err := play_music.PlayMusicFromPipe(ctx, pipeReader, ...)
+```
+
+#### 错误处理机制
+
+**超时重试**:
+```go
+if err != nil {
+    // 如果是超时错误，尝试重试
+    if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline") {
+        log.Warnf("资源读取超时，尝试重试...")
+        time.Sleep(1 * time.Second)
+        continue
+    }
+    return fmt.Errorf("读取资源失败: %v", err)
+}
+```
+
+**上下文取消**:
+```go
+select {
+case <-ctx.Done():
+    log.Debugf("资源读取被取消")
+    return nil
+case streamChan <- rawAudioData:
+    // 正常发送数据
 }
 ```
 
@@ -128,16 +217,20 @@ for {
 - **流式处理**: 边读取边播放，支持实时音频流
 - **自动结束**: 检测 `McpReadResourceStreamDoneFlag` 标志判断读取完成
 - **错误恢复**: 支持超时重试和上下文取消
+- **实时播放**: 使用 Pipe 机制实现边读取边播放
+- **超时控制**: 每次分页读取都有30秒超时限制
 
 #### 配置参数
-- **McpReadResourcePageSize**: 分页大小，默认值根据系统配置
-- **McpReadResourceStreamDoneFlag**: 流结束标志，通常为 `"[DONE]"`
+- **McpReadResourcePageSize**: 分页大小，默认 100KB (100 * 1024)
+- **McpReadResourceStreamDoneFlag**: 流结束标志，为 `"[DONE]"`
 - **读取超时**: 每次分页读取的超时时间，默认30秒
+- **重试机制**: 超时错误自动重试，间隔1秒
 
 **使用场景**:
 - 大型音频文件播放
 - 流媒体资源处理
 - 网络资源访问
+- 实时音频流播放
 
 ### 3. 文本内容 (TextContent)
 
@@ -262,10 +355,10 @@ if invokeToolSuccess && !shouldStopLLMProcessing {
 
 | 内容类型 | 终止性 | 处理方式 | 使用场景 | 示例工具 |
 |----------|--------|----------|----------|----------|
-| **AudioContent** | 终止 | 直接播放 | 音乐播放 | play_music |
-| **ResourceLink** | 终止 | 分页读取 | 大文件播放 | music_player |
+| **AudioContent** | 终止 | 直接播放 | 小音频文件 | play_music |
+| **ResourceLink** | 终止 | 分页读取+流式播放 | 大文件/流媒体 | music_player |
 | **TextContent** | 不终止 | 累积文本 | 信息查询 | get_datetime |
-| **BlobResourceContents** | 终止 | 流式处理 | 流媒体 | audio_stream |
+| **BlobResourceContents** | 终止 | 流式处理 | 音频流数据 | audio_stream |
 
 ## 🎯 最佳实践
 
@@ -275,9 +368,10 @@ if invokeToolSuccess && !shouldStopLLMProcessing {
 - **动作工具**: 使用结构化响应系统
 
 ### 2. 性能优化
-- 大文件使用 `ResourceLink` 进行分页处理
-- 小音频文件直接使用 `AudioContent`
+- 大文件使用 `ResourceLink` 进行分页处理，支持流式播放
+- 小音频文件直接使用 `AudioContent`，减少网络开销
 - 文本内容避免过长，影响响应速度
+- 使用 Pipe 机制实现边读取边播放，提升用户体验
 
 ### 3. 错误处理
 - 使用 `MCPErrorResponse` 统一错误格式
@@ -287,12 +381,15 @@ if invokeToolSuccess && !shouldStopLLMProcessing {
 ## 🔧 配置参数
 
 ### 分页配置
-- `McpReadResourcePageSize`: 资源读取分页大小
-- `McpReadResourceStreamDoneFlag`: 流结束标志
+- `McpReadResourcePageSize`: 资源读取分页大小，默认 100KB (100 * 1024)
+- `McpReadResourceStreamDoneFlag`: 流结束标志，为 `"[DONE]"`
+- **读取超时**: 每次分页读取的超时时间，默认30秒
+- **重试机制**: 超时错误自动重试，间隔1秒
 
 ### 音频配置
 - `OutputAudioFormat.SampleRate`: 输出音频采样率
 - `OutputAudioFormat.FrameDuration`: 输出音频帧时长
+- **音频格式**: 根据 `resourceLink.MIMEType` 自动识别
 
 ## 📝 扩展指南
 
@@ -327,8 +424,9 @@ if invokeToolSuccess && !shouldStopLLMProcessing {
 - **参数**: volume (1-100)
 
 #### 3. 音频资源模板
-- **URI 格式**: `audio://music/{musicUrl}?start={start}&end={end}`
-- **功能**: 支持分页读取音频数据
+- **URI 格式**: `resource://read_from_http`
+- **功能**: 支持分页读取音频数据，通过 Arguments 传递参数
+- **参数**: url (实际音乐URL), start (起始位置), end (结束位置)
 - **返回**: `BlobResourceContents` 类型的音频数据
 
 ### 关键特性
@@ -336,8 +434,11 @@ if invokeToolSuccess && !shouldStopLLMProcessing {
 - **分页读取**: 支持大文件的流式处理
 - **HTTP Range 请求**: 实现音频数据的分段获取
 - **错误处理**: 处理 416 状态码等异常情况
+- **超时重试**: 自动重试超时错误，间隔1秒
+- **上下文取消**: 支持优雅的资源读取取消
 - **Base64 编码**: 安全传递音乐 URL 参数
 - **多传输支持**: stdio 和 HTTP 两种传输方式
+- **实时播放**: 使用 Pipe 机制实现边读取边播放
 
 ### 使用示例
 

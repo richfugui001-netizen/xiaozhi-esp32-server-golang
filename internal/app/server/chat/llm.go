@@ -441,13 +441,14 @@ func (l *LLMManager) handleResourceLink(ctx context.Context, resourceLink mcp_go
 				// 读取资源
 				resourceResult, err := client.ReadResource(readCtx, mcp_go.ReadResourceRequest{
 					Params: mcp_go.ReadResourceParams{
-						URI: fmt.Sprintf("%s?start=%d&end=%d", resourceLink.URI, start, start+page),
+						URI:       resourceLink.URI,
+						Arguments: map[string]any{"url": resourceLink.Description, "start": start, "end": start + page},
 					},
 				})
 				cancel()
 
 				if err != nil {
-					log.Errorf("读取资源失败 (第 %d 页): %v", pageCount, err)
+					log.Errorf("读取资源失败 (第 %d 页), resourceUri: %s, resourceResult: %+v, err: %v", pageCount, resourceLink.Description, resourceResult, err)
 
 					// 如果是超时错误，尝试重试
 					if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "deadline") {
