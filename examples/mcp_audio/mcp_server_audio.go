@@ -331,10 +331,20 @@ func GetMusicUrlByName(musicName string) (string, string, error) {
 	if len(searchResp.Data) == 0 {
 		return "", "", fmt.Errorf("未找到音乐: %s", musicName)
 	}
-	musicItem := searchResp.Data[0]
-	if musicItem.URL == "" {
-		return "", "", fmt.Errorf("未找到音乐: %s", musicName)
+
+	// 遍历数组，找到第一个URL不为空的音乐项
+	var musicItem *MusicItem
+	for i := range searchResp.Data {
+		if searchResp.Data[i].URL != "" {
+			musicItem = &searchResp.Data[i]
+			break
+		}
 	}
+
+	if musicItem == nil {
+		return "", "", fmt.Errorf("未找到有效的音乐链接: %s", musicName)
+	}
+
 	return musicItem.Title, musicItem.URL, nil
 }
 
