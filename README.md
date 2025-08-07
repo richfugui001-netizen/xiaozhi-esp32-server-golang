@@ -20,6 +20,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 - ♻️ **高效资源池与连接复用**：外部资源连接池机制，显著降低响应耗时，提升系统吞吐能力。
 - 🧠 **多引擎 AI 能力集成，基于 Eino 框架**：项目基于 Eino 框架开发，支持 FunASR、Eino LLM、OpenAI、Ollama、Doubao、EdgeTTS、CosyVoice 等多种主流 AI 引擎，灵活切换与扩展。
 - 🛡️ **模块化与可扩展架构**：各核心能力（VAD/ASR/LLM/TTS/MCP/视觉）均为独立模块，便于定制、扩展和集成更多 AI 服务。
+- 🎵 **MCP Audio Server 支持**：内置完整的 MCP Audio Server 实现，支持音频资源的分页获取和流式处理，提供音乐播放、音量控制等功能，详见 [MCP 资源处理文档](doc/mcp_resource.md)。
 - 📦 **一键 Docker 部署 & 跨平台支持**：官方 Dockerfile，支持主流 Linux 发行版与本地编译，快速落地部署。
 - 📊 **高性能与低资源占用**：Golang 原生高并发架构，基于 Eino 框架优化，适配边缘设备与云端，资源占用低，稳定性强。
 - 🔒 **安全与权限体系（规划中）**：预留用户认证、权限管理接口，便于后续集成企业级安全体系。
@@ -82,7 +83,8 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
    - [MQTT+UDP 服务器配置流程 »](doc/mqtt_udp.md)
    - [MQTT UDP 协议与数据流程 »](doc/mqtt_udp_protocol.md)
    - [Vision 视觉识别 »](doc/vision.md)
-   - [mcp 架构 »](doc/mcp.md)
+   - [MCP 架构 »](doc/mcp.md)
+   - [MCP 音频服务说明(支持分页获取资源) »](doc/mcp_resource.md)
 
    ---
 

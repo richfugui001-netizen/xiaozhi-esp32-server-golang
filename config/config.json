@@ -249,7 +249,7 @@
           "enabled": true
         }
       ],
-      "reconnect_interval": 5,
+      "reconnect_interval": 300,
       "max_reconnect_attempts": 10
     },
     "device": {

@@ -312,7 +312,7 @@ func ConvertMcpToolListToInvokableToolList(tools []mcp.Tool, serverName string, 
 			continue
 		}
 
-		mcpToolInstance := &mcpTool{
+		mcpToolInstance := &McpTool{
 			info: &schema.ToolInfo{
 				Name:        tool.Name,
 				Desc:        tool.Description,
@@ -352,7 +352,7 @@ func (g *GlobalMCPManager) updateGlobalTools(serverName string, tools map[string
 
 	// 移除该服务器的旧工具
 	for name, mcpToolInterface := range g.tools {
-		if mt, ok := mcpToolInterface.(*mcpTool); ok && mt.serverName == serverName {
+		if mt, ok := mcpToolInterface.(*McpTool); ok && mt.serverName == serverName {
 			delete(g.tools, name)
 		}
 	}
@@ -402,7 +402,7 @@ func isSessionClosedError(err error) bool {
 // monitorConnections 监控连接状态
 func (g *GlobalMCPManager) monitorConnections() {
 	ticker := time.NewTicker(g.reconnectConf.Interval)
-	pingTicker := time.NewTicker(30 * time.Second) // 每30秒ping一次
+	pingTicker := time.NewTicker(60 * time.Second) // 每30秒ping一次
 	defer ticker.Stop()
 	defer pingTicker.Stop()
 
@@ -450,7 +450,7 @@ func (g *GlobalMCPManager) monitorConnections() {
 							conn.mu.Unlock()
 						}
 					} else {
-						log.Debugf("MCP服务器 %s ping成功", name)
+						//log.Debugf("MCP服务器 %s ping成功", name)
 					}
 				}(name, conn)
 			}

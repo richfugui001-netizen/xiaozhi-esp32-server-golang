@@ -135,15 +135,23 @@ func (t *TTSManager) handleTts(ctx context.Context, llmResponse llm_common.LLMRe
 	return nil
 }
 
+// getAlignedDuration 计算当前时间与开始时间的差值，向上对齐到frameDuration
+func getAlignedDuration(startTime time.Time, frameDuration time.Duration) time.Duration {
+	elapsed := time.Since(startTime)
+	// 向上对齐到frameDuration
+	alignedMs := ((elapsed.Milliseconds() + frameDuration.Milliseconds() - 1) / frameDuration.Milliseconds()) * frameDuration.Milliseconds()
+	return time.Duration(alignedMs) * time.Millisecond
+}
+
 func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, isStart bool) error {
 	totalFrames := 0 // 跟踪已发送的总帧数
 
 	isStatistic := true
 	//首次发送180ms音频, 根据outputAudioFormat.FrameDuration计算
-	cacheFrameCount := 60 / t.clientState.OutputAudioFormat.FrameDuration
-	if cacheFrameCount > 20 || cacheFrameCount < 3 {
+	cacheFrameCount := 120 / t.clientState.OutputAudioFormat.FrameDuration
+	/*if cacheFrameCount > 20 || cacheFrameCount < 3 {
 		cacheFrameCount = 5
-	}
+	}*/
 
 	// 记录开始发送的时间戳
 	startTime := time.Now()
@@ -151,23 +159,19 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 	// 基于绝对时间的精确流控
 	frameDuration := time.Duration(t.clientState.OutputAudioFormat.FrameDuration) * time.Millisecond
 
+	log.Debugf("SendTTSAudio 开始，缓存帧数: %d, 帧时长: %v", cacheFrameCount, frameDuration)
+
 	// 使用滑动窗口机制，确保对端始终缓存 cacheFrameCount 帧数据
 	for {
-		// 计算当前时间与预期时间的差值
+		// 计算下一帧应该发送的时间点
+		nextFrameTime := startTime.Add(time.Duration(totalFrames-cacheFrameCount) * frameDuration)
 		now := time.Now()
 
-		//理论上应该发送多少帧
-		shouldSendFrameCount := int(now.Sub(startTime)/frameDuration) + cacheFrameCount
-		//实际已发送多少帧
-		actualSendFrameCount := totalFrames
-
-		if actualSendFrameCount >= shouldSendFrameCount {
-			diffFrameCount := actualSendFrameCount - shouldSendFrameCount
-			//log.Debugf("diffFrameCount: %+v", diffFrameCount)
-			if diffFrameCount > 0 {
-				// 直接使用 time.Sleep，更简单且无内存泄露风险
-				time.Sleep(time.Duration(diffFrameCount) * frameDuration)
-			}
+		// 如果下一帧时间还没到，需要等待
+		if now.Before(nextFrameTime) {
+			sleepDuration := nextFrameTime.Sub(now)
+			//log.Debugf("SendTTSAudio 流控等待: %v", sleepDuration)
+			time.Sleep(sleepDuration)
 		}
 
 		// 尝试获取并发送下一帧
@@ -178,15 +182,19 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 		case frame, ok := <-audioChan:
 			if !ok {
 				// 通道已关闭，所有帧已处理完毕
-				log.Debugf("SendTTSAudio audioChan closed, exit")
+				log.Debugf("SendTTSAudio audioChan closed, exit, 总共发送 %d 帧", totalFrames)
 				return nil
 			}
 			// 发送当前帧
 			if err := t.serverTransport.SendAudio(frame); err != nil {
+				log.Errorf("发送 TTS 音频失败: 第 %d 帧, len: %d, 错误: %v", totalFrames, len(frame), err)
 				return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
 			}
-			//log.Debugf("发送 TTS 音频: %d 帧, len: %d", totalFrames, len(frame))
+
 			totalFrames++
+			if totalFrames%100 == 0 {
+				log.Debugf("SendTTSAudio 已发送 %d 帧", totalFrames)
+			}
 
 			// 统计信息记录（仅在开始时记录一次）
 			if isStart && isStatistic && totalFrames == 1 {

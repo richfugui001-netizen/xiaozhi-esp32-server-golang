@@ -16,7 +16,7 @@ import (
 type LocalToolHandler func(ctx context.Context, argumentsInJSON string) (string, error)
 
 // mcpTool MCP工具实现，支持远程和本地工具
-type mcpTool struct {
+type McpTool struct {
 	info       *schema.ToolInfo
 	serverName string
 	client     *client.Client
@@ -27,11 +27,11 @@ type mcpTool struct {
 }
 
 // Info 获取工具信息，实现BaseTool接口
-func (t *mcpTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
+func (t *McpTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return t.info, nil
 }
 
-func (t *mcpTool) InvokeableLocalRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
+func (t *McpTool) InvokeableLocalRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	toolInfo := t.info
 	if t.localHandler == nil {
 		return "", fmt.Errorf("本地工具 %s 的处理函数未定义", toolInfo.Name)
@@ -54,7 +54,7 @@ func (t *mcpTool) InvokeableLocalRun(ctx context.Context, argumentsInJSON string
 }
 
 // InvokableRun 调用工具，实现InvokableTool接口
-func (t *mcpTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
+func (t *McpTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	// 如果是本地工具，直接调用本地处理函数
 	if t.isLocal {
 		return t.InvokeableLocalRun(ctx, argumentsInJSON, opts...)
@@ -113,4 +113,8 @@ func (t *mcpTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 	}
 
 	return string(resultStr), nil
+}
+
+func (t *McpTool) GetClient() *client.Client {
+	return t.client
 }

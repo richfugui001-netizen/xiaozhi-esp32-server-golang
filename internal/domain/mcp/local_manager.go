@@ -16,7 +16,7 @@ import (
 
 // LocalMCPManager 本地MCP工具管理器
 type LocalMCPManager struct {
-	tools map[string]*mcpTool // 工具名称 -> 工具定义
+	tools map[string]*McpTool // 工具名称 -> 工具定义
 	mu    sync.RWMutex        // 读写锁保护并发访问
 }
 
@@ -29,7 +29,7 @@ var (
 func GetLocalMCPManager() *LocalMCPManager {
 	localOnce.Do(func() {
 		localManager = &LocalMCPManager{
-			tools: make(map[string]*mcpTool),
+			tools: make(map[string]*McpTool),
 		}
 		// 初始化默认的本地工具
 		localManager.initDefaultTools()
@@ -44,7 +44,7 @@ func (l *LocalMCPManager) initDefaultTools() {
 }
 
 // RegisterTool 注册本地工具
-func (l *LocalMCPManager) RegisterTool(tool *mcpTool) error {
+func (l *LocalMCPManager) RegisterTool(tool *McpTool) error {
 	if tool == nil {
 		return fmt.Errorf("工具不能为空")
 	}
@@ -97,7 +97,7 @@ func (l *LocalMCPManager) RegisterToolFunc(name, description string, inputParams
 		log.Errorf("Failed to convert struct to openapi3 schema: %v", err)
 		return err
 	}
-	tool := &mcpTool{
+	tool := &McpTool{
 		info: &schema.ToolInfo{
 			Name:        name,
 			Desc:        description,

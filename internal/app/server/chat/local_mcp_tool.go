@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"time"
 
 	mcp_manager "xiaozhi-esp32-server-golang/internal/domain/mcp"
@@ -44,12 +46,12 @@ func InitChatLocalMCPTools() {
 			Params:      struct{}{},
 			Handle:      clearConversationHistoryHandler,
 		},
-		"play_music": {
+		/*"play_music": {
 			Name:        "play_music",
 			Description: "当用户想听歌、无聊时、想放空大脑时使用，用于播放指定名称的音乐，当用户想随便听一首音乐时请推荐出具体的歌曲名称，当有多个音乐播放工具时优先使用此工具，**此工具调用耗时较长，需要先返回友好的过渡性提示语**",
 			Params:      PlayMusicParams{},
 			Handle:      playMusicHandler,
-		},
+		},*/
 	}
 
 	for toolName, localTool := range localTools {
@@ -308,4 +310,42 @@ func getWeekdayChinese(weekday time.Weekday) string {
 // RegisterChatMCPTools 公共函数，供外部调用注册聊天MCP工具
 func RegisterChatMCPTools() {
 	InitChatLocalMCPTools()
+}
+
+// 播放音乐
+func GetMusicAudioData(ctx context.Context, musicParams *PlayMusicParams) ([]byte, string, error) {
+	musicName := musicParams.Name
+	//welcome := musicParams.Welcome
+	welcome := ""
+	log.Infof("搜索音乐: %s 中, welcome: %s", musicName, welcome)
+	// 这里可以根据音乐名称获取音乐URL
+	// 目前简化实现，假设musicName就是URL或者从配置中获取
+	musicURL, realMusicName, ierr := getMusicURL(musicName)
+	if ierr != nil {
+		log.Errorf("获取音乐URL失败: %v", ierr)
+		return nil, "", fmt.Errorf("获取音乐URL失败: %v", ierr)
+	}
+
+	log.Infof("搜索音乐成功 URL: %s, 音乐名称: %s", musicURL, realMusicName)
+
+	client := getHTTPClient()
+	req, err := http.NewRequest("GET", musicURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("创建请求失败: %v", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("API请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	audioData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("读取响应失败: %v", err)
+	}
+
+	log.Infof("获取音乐 %s 数据成功, 音频数据长度: %d", realMusicName, len(audioData))
+
+	return audioData, realMusicName, nil
 }

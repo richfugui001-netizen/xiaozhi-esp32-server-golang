@@ -68,15 +68,10 @@ func (m *Memory) getSystemPromptKey(deviceID string) string {
 }
 
 // AddMessage 添加一条新的对话消息到记忆体
-func (m *Memory) AddMessage(ctx context.Context, deviceID string, role schema.RoleType, content string) error {
+func (m *Memory) AddMessage(ctx context.Context, deviceID string, msg schema.Message) error {
 	if m.redisClient == nil {
 		log.Log().Warn("redis client is nil")
 		return nil
-	}
-
-	msg := schema.Message{
-		Role:    role,
-		Content: content,
 	}
 
 	msgBytes, err := json.Marshal(msg)
@@ -98,10 +93,10 @@ func (m *Memory) AddMessage(ctx context.Context, deviceID string, role schema.Ro
 }
 
 // GetMessages 获取设备的所有对话记忆
-func (m *Memory) GetMessages(ctx context.Context, deviceID string, count int) ([]schema.Message, error) {
+func (m *Memory) GetMessages(ctx context.Context, deviceID string, count int) ([]*schema.Message, error) {
 	if m.redisClient == nil {
 		log.Log().Warn("redis client is nil")
-		return []schema.Message{}, nil
+		return []*schema.Message{}, nil
 	}
 
 	key := m.getMemoryKey(deviceID)
@@ -112,29 +107,32 @@ func (m *Memory) GetMessages(ctx context.Context, deviceID string, count int) ([
 
 	// 使用 ZREVRANGE 获取最新的 N 条消息
 	// 分数（时间戳）大的在前，所以需要反转顺序以保证旧消息在前
-	results, err := m.redisClient.ZRevRange(ctx, key, 0, int64(count-1)).Result()
+	startIndex := int64(-(count))
+	results, err := m.redisClient.ZRange(ctx, key, startIndex, -1).Result()
 	if err != nil {
 		return nil, fmt.Errorf("get messages failed: %w", err)
 	}
 
 	// 预分配切片
-	messages := make([]schema.Message, len(results))
+	messages := make([]*schema.Message, 0)
 
-	// 反向遍历，使旧消息在前，新消息在后
 	for i := 0; i < len(results); i++ {
-		if err := json.Unmarshal([]byte(results[len(results)-1-i]), &messages[i]); err != nil {
+		msg := schema.Message{}
+		if err := json.Unmarshal([]byte(results[i]), &msg); err != nil {
 			return nil, fmt.Errorf("unmarshal message failed: %w", err)
 		}
+
+		messages = append(messages, &msg)
 	}
 
 	return messages, nil
 }
 
 // GetMessagesForLLM 获取适用于 LLM 的消息格式
-func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count int) ([]schema.Message, error) {
+func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count int) ([]*schema.Message, error) {
 	if m.redisClient == nil {
 		log.Log().Warn("redis client is nil")
-		return []schema.Message{}, nil
+		return []*schema.Message{}, nil
 	}
 
 	// 获取历史消息（已经是按时间顺序：旧->新）
@@ -143,15 +141,7 @@ func (m *Memory) GetMessagesForLLM(ctx context.Context, deviceID string, count i
 		return nil, err
 	}
 
-	// 预分配足够的容量
-	messages := make([]schema.Message, 0, len(memoryMessages)+1)
-
-	// 添加历史消息（已经是按时间顺序：旧->新）
-	for _, msg := range memoryMessages {
-		messages = append(messages, msg)
-	}
-
-	return messages, nil
+	return memoryMessages, nil
 }
 
 // SetSystemPrompt 设置或更新设备的系统 prompt

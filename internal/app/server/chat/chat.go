@@ -11,6 +11,7 @@ import (
 	types_audio "xiaozhi-esp32-server-golang/internal/data/audio"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	userconfig "xiaozhi-esp32-server-golang/internal/domain/config"
+	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/vad/silero_vad"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -113,6 +114,12 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		},
 		SessionCtx: Ctx{},
 	}
+
+	historyMessages, err := llm_memory.Get().GetMessages(ctx, deviceID, 15)
+	if err != nil {
+		log.Errorf("获取对话历史失败: %v", err)
+	}
+	clientState.InitMessages(historyMessages)
 
 	ttsType := clientState.DeviceConfig.Tts.Provider
 	//如果使用 xiaozhi tts，则固定使用24000hz, 20ms帧长
