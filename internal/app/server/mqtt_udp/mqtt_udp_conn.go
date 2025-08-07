@@ -7,6 +7,8 @@ import (
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
 
+	log "xiaozhi-esp32-server-golang/logger"
+
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
@@ -80,8 +82,11 @@ func (c *MqttUdpConn) PushMsgToRecvCmd(msg []byte) error {
 }
 
 // RecvCmd 接收命令/信令数据
-func (c *MqttUdpConn) RecvCmd(timeout int) ([]byte, error) {
+func (c *MqttUdpConn) RecvCmd(ctx context.Context, timeout int) ([]byte, error) {
 	select {
+	case <-ctx.Done():
+		log.Debugf("mqtt udp conn recv cmd context done")
+		return nil, ctx.Err()
 	case msg := <-c.recvCmdChan:
 		return msg, nil
 	case <-time.After(time.Duration(timeout) * time.Second):
@@ -111,8 +116,11 @@ func (c *MqttUdpConn) SendAudio(audio []byte) error {
 }
 
 // RecvAudio 接收音频数据
-func (c *MqttUdpConn) RecvAudio(timeout int) ([]byte, error) {
+func (c *MqttUdpConn) RecvAudio(ctx context.Context, timeout int) ([]byte, error) {
 	select {
+	case <-ctx.Done():
+		log.Debugf("mqtt udp conn recv audio context done")
+		return nil, ctx.Err()
 	case audio, ok := <-c.UdpSession.RecvChannel:
 		if ok {
 			c.lastActiveTs = time.Now().Unix()

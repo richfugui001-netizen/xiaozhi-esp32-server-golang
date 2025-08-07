@@ -1,5 +1,7 @@
 package types
 
+import "context"
+
 // IConn 是协议无关的连接接口，由 websocket/mqtt_udp 等协议适配器实现
 // 你可以根据实际需要扩展方法
 
@@ -12,11 +14,11 @@ type IConn interface {
 	// 发送命令/信令数据
 	SendCmd(msg []byte) error
 	// 接收命令/信令数据
-	RecvCmd(timeout int) ([]byte, error)
+	RecvCmd(ctx context.Context, timeout int) ([]byte, error)
 	// 发送语音数据
 	SendAudio(audio []byte) error
 	// 接收语音数据
-	RecvAudio(timeout int) ([]byte, error)
+	RecvAudio(ctx context.Context, timeout int) ([]byte, error)
 
 	GetDeviceID() string
 

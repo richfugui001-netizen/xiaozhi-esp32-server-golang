@@ -343,6 +343,10 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 
 	currentFramePos := 0 // 当前填充到pcmBuffer的位置
 	var firstFrame bool
+	frameCount := 0
+
+	log.Debugf("MP3解码器开始，目标采样率: %d, 帧大小: %d", opusSampleRate, frameSize)
+
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -354,8 +358,9 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 			if !firstFrame {
 				log.Infof("tts云端首帧耗时: %d ms", time.Now().UnixMilli()-startTs)
 			}
-			//fmt.Printf("for loop, n: %d\n", n)
+
 			if !ok {
+				log.Debugf("MP3流读取结束，处理剩余数据")
 				// 处理剩余不足一帧的数据
 				if currentFramePos > 0 {
 					// 创建一个完整的帧缓冲区，用0填充剩余部分
@@ -373,7 +378,7 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 					// 编码补齐后的完整帧
 					n, err := enc.Encode(opusPcmBuffer, opusBuffer)
 					if err != nil {
-						log.Errorf("编码剩余数据失败: %v\n", err)
+						log.Errorf("编码剩余数据失败: %v", err)
 						return fmt.Errorf("编码剩余数据失败: %v", err)
 					} else {
 						frameData := make([]byte, n)
@@ -383,8 +388,9 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 						case <-d.ctx.Done():
 							log.Debugf("mp3Decoder context done, exit")
 							return nil
-						default:
-							d.outputOpusChan <- frameData
+						case d.outputOpusChan <- frameData:
+							frameCount++
+							log.Debugf("MP3解码完成，总共处理 %d 帧", frameCount)
 						}
 					}
 				}
@@ -394,6 +400,7 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 			if n == 0 {
 				continue
 			}
+
 			// 将浮点音频数据转换为PCM格式(16位整数)
 			for i := 0; i < n; i++ {
 				// 先在浮点数阶段计算平均值，避免整数相加时溢出
@@ -423,7 +430,9 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 					// 将float32转换为int16
 					opusLen, err := enc.Encode(opusPcmBuffer, opusBuffer)
 					if err != nil {
-						log.Errorf("编码失败: %v\n", err)
+						log.Errorf("MP3解码编码失败: %v", err)
+						// 编码失败时，跳过这一帧但继续处理
+						currentFramePos = 0 // 重置帧位置
 						continue
 					}
 
@@ -435,13 +444,16 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 					case <-d.ctx.Done():
 						log.Debugf("mp3Decoder context done, exit")
 						return nil
-					default:
+					case d.outputOpusChan <- frameData:
+						frameCount++
 						if !firstFrame {
 							firstFrame = true
 							log.Infof("tts云端->首帧解码完成耗时: %d ms", time.Now().UnixMilli()-startTs)
 						}
 
-						d.outputOpusChan <- frameData
+						if frameCount%100 == 0 {
+							log.Debugf("MP3解码已处理 %d 帧", frameCount)
+						}
 					}
 
 					currentFramePos = 0 // 重置帧位置
@@ -449,6 +461,19 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 			}
 		}
 	}
+}
 
-	return nil
+// GetAudioFormatByMimeType 根据MIME类型获取音频格式
+func GetAudioFormatByMimeType(mimeType string) string {
+	switch mimeType {
+	case "audio/mpeg", "audio/mp3", "audio/mpeg3", "audio/x-mpeg-3":
+		return "mp3"
+	case "audio/wav", "audio/wave", "audio/x-wav":
+		return "wav"
+	case "audio/pcm", "audio/x-pcm":
+		return "pcm"
+	default:
+		// 默认返回mp3格式
+		return "mp3"
+	}
 }

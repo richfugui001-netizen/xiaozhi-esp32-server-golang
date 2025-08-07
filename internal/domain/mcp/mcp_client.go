@@ -4,6 +4,7 @@ import (
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/components/tool"
+	mcp_go "github.com/mark3labs/mcp-go/mcp"
 )
 
 func GetToolByName(deviceId string, toolName string) (tool.InvokableTool, bool) {
@@ -79,4 +80,17 @@ func GetToolsByDeviceId(deviceId string) (map[string]tool.InvokableTool, error) 
 	log.Infof("设备 %s 总共获取到 %d 个工具", deviceId, len(retTools))
 
 	return retTools, nil
+}
+
+func GetAudioResourceByTool(tool McpTool, resourceLink mcp_go.ResourceLink) (mcp_go.ReadResourceResult, error) {
+	/*client := tool.GetClient()
+	resourceRequest := mcp_go.ReadResourceRequest{
+		Request: mcp_go.Request{
+			Params: mcp_go.ReadResourceParams{
+				URI: resourceLink.URL,
+			},
+		},
+	}
+	client.ReadResource(context.Background(), resourceRequest)*/
+	return mcp_go.ReadResourceResult{}, nil
 }

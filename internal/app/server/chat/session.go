@@ -19,7 +19,6 @@ import (
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
-	llm_memory "xiaozhi-esp32-server-golang/internal/domain/llm/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
 	"xiaozhi-esp32-server-golang/internal/util"
@@ -116,11 +115,11 @@ func (c *ChatSession) CmdMessageLoop(ctx context.Context) {
 			return
 		}
 
-		message, err := c.serverTransport.RecvCmd(120)
+		message, err := c.serverTransport.RecvCmd(ctx, 120)
 		if err != nil {
 			log.Errorf("recv cmd error: %v", err)
 			recvFailCount = recvFailCount + 1
-			return
+			continue
 		}
 		recvFailCount = 0
 		log.Infof("收到文本消息: %s", string(message))
@@ -139,7 +138,7 @@ func (c *ChatSession) AudioMessageLoop(ctx context.Context) {
 			return
 		default:
 		}
-		message, err := c.serverTransport.RecvAudio(300)
+		message, err := c.serverTransport.RecvAudio(ctx, 600)
 		if err != nil {
 			log.Errorf("recv audio error: %v", err)
 			return
@@ -358,7 +357,6 @@ func (s *ChatSession) AddTextToTTSQueue(text string) error {
 func (s *ChatSession) HandleAbortMessage(msg *ClientMessage) error {
 	// 设置打断状态
 	s.clientState.Abort = true
-	s.clientState.Dialogue.Messages = nil // 清空对话历史
 
 	s.StopSpeaking(true)
 
@@ -624,35 +622,10 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
 
 	sessionID := clientState.SessionID
 
-	systemPrompt := schema.Message{
-		Role:    schema.System,
-		Content: clientState.SystemPrompt,
-	}
-	//system prompt
-	requestMessages := []schema.Message{
-		systemPrompt,
-	}
-	userMemoryMessages, err := llm_memory.Get().GetMessagesForLLM(ctx, clientState.DeviceID, 10)
-	if err != nil {
-		log.Errorf("获取对话历史失败: %v", err)
-	}
-	//历史对话
-	requestMessages = append(requestMessages, userMemoryMessages...)
 	// 直接创建Eino原生消息
 	userMessage := &schema.Message{
 		Role:    schema.User,
 		Content: text,
-	}
-	//当前用户对话
-	requestMessages = append(requestMessages, *userMessage)
-
-	// 添加用户消息到对话历史
-	//llm_memory.Get().AddMessage(ctx, clientState.DeviceID, schema.User, text)
-
-	// 直接传递Eino原生消息，无需转换
-	requestEinoMessages := make([]*schema.Message, len(requestMessages))
-	for i, msg := range requestMessages {
-		requestEinoMessages[i] = &msg
 	}
 
 	// 获取全局MCP工具列表
@@ -683,7 +656,7 @@ func (s *ChatSession) actionDoChat(ctx context.Context, text string) error {
 	// 发送带工具的LLM请求
 	log.Infof("使用 %d 个MCP工具发送LLM请求, tools: %+v", len(einoTools), toolNameList)
 
-	err = s.llmManager.DoLLmRequest(ctx, requestEinoMessages, einoTools, true)
+	err = s.llmManager.DoLLmRequest(ctx, userMessage, einoTools, true)
 	if err != nil {
 		log.Errorf("发送带工具的 LLM 请求失败, seesionID: %s, error: %v", sessionID, err)
 		return fmt.Errorf("发送带工具的 LLM 请求失败: %v", err)

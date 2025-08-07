@@ -135,95 +135,72 @@ func (t *TTSManager) handleTts(ctx context.Context, llmResponse llm_common.LLMRe
 	return nil
 }
 
-func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, isStart bool) error {
-	// 步骤1: 收集前三帧（或更少）
-	preBuffer := make([][]byte, 0, 3)
-	preBufferCount := 0
+// getAlignedDuration 计算当前时间与开始时间的差值，向上对齐到frameDuration
+func getAlignedDuration(startTime time.Time, frameDuration time.Duration) time.Duration {
+	elapsed := time.Since(startTime)
+	// 向上对齐到frameDuration
+	alignedMs := ((elapsed.Milliseconds() + frameDuration.Milliseconds() - 1) / frameDuration.Milliseconds()) * frameDuration.Milliseconds()
+	return time.Duration(alignedMs) * time.Millisecond
+}
 
-	totalFrames := preBufferCount // 跟踪已发送的总帧数
+func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, isStart bool) error {
+	totalFrames := 0 // 跟踪已发送的总帧数
 
 	isStatistic := true
 	//首次发送180ms音频, 根据outputAudioFormat.FrameDuration计算
-	firstFrameCount := 60 / t.clientState.OutputAudioFormat.FrameDuration
-	if firstFrameCount > 20 || firstFrameCount < 3 {
-		firstFrameCount = 5
-	}
-	// 收集前180ms音频
-	for totalFrames < firstFrameCount {
+	cacheFrameCount := 120 / t.clientState.OutputAudioFormat.FrameDuration
+	/*if cacheFrameCount > 20 || cacheFrameCount < 3 {
+		cacheFrameCount = 5
+	}*/
+
+	// 记录开始发送的时间戳
+	startTime := time.Now()
+
+	// 基于绝对时间的精确流控
+	frameDuration := time.Duration(t.clientState.OutputAudioFormat.FrameDuration) * time.Millisecond
+
+	log.Debugf("SendTTSAudio 开始，缓存帧数: %d, 帧时长: %v", cacheFrameCount, frameDuration)
+
+	// 使用滑动窗口机制，确保对端始终缓存 cacheFrameCount 帧数据
+	for {
+		// 计算下一帧应该发送的时间点
+		nextFrameTime := startTime.Add(time.Duration(totalFrames-cacheFrameCount) * frameDuration)
+		now := time.Now()
+
+		// 如果下一帧时间还没到，需要等待
+		if now.Before(nextFrameTime) {
+			sleepDuration := nextFrameTime.Sub(now)
+			//log.Debugf("SendTTSAudio 流控等待: %v", sleepDuration)
+			time.Sleep(sleepDuration)
+		}
+
+		// 尝试获取并发送下一帧
 		select {
 		case <-ctx.Done():
-			log.Debugf("SendTTSAudio context done, exit, totalFrames: %d", totalFrames)
+			log.Debugf("SendTTSAudio context done, exit")
 			return nil
-		default:
-			select {
-			case frame, ok := <-audioChan:
-				if isStart && isStatistic {
-					log.Debugf("从接收音频结束 asr->llm->tts首帧 整体 耗时: %d ms", t.clientState.GetAsrLlmTtsDuration())
-					isStatistic = false
-				}
-				if !ok {
-					// 通道已关闭，发送已收集的帧并返回
-					for _, f := range preBuffer {
-						if err := t.serverTransport.SendAudio(f); err != nil {
-							return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(f), err)
-						}
-					}
-					return nil
-				}
-				select {
-				case <-ctx.Done():
-					log.Debugf("SendTTSAudio context done, exit, totalFrames: %d", totalFrames)
-					return nil
-				default:
-					if err := t.serverTransport.SendAudio(frame); err != nil {
-						return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
-					}
-					log.Debugf("发送 TTS 音频: %d 帧, len: %d", totalFrames, len(frame))
-					totalFrames++
-				}
-			case <-ctx.Done():
-				// 上下文已取消
-				log.Infof("SendTTSAudio context done, exit, totalFrames: %d", totalFrames)
+		case frame, ok := <-audioChan:
+			if !ok {
+				// 通道已关闭，所有帧已处理完毕
+				log.Debugf("SendTTSAudio audioChan closed, exit, 总共发送 %d 帧", totalFrames)
 				return nil
 			}
-		}
-	}
-
-	// 步骤3: 设置定时器，每60ms发送一帧
-	ticker := time.NewTicker(time.Duration(t.clientState.OutputAudioFormat.FrameDuration) * time.Millisecond)
-	defer ticker.Stop()
-
-	// 循环处理剩余帧
-	for {
-		select {
-		case <-ticker.C:
-			// 时间到，尝试获取并发送下一帧
-			select {
-			case frame, ok := <-audioChan:
-				if !ok {
-					// 通道已关闭，所有帧已处理完毕
-					return nil
-				}
-
-				select {
-				case <-ctx.Done():
-					log.Debugf("SendTTSAudio context done, exit")
-					return nil
-				default:
-					// 发送当前帧
-					if err := t.serverTransport.SendAudio(frame); err != nil {
-						return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
-					}
-					totalFrames++
-					//log.Debugf("发送 TTS 音频: %d 帧, len: %d", totalFrames, len(frame))
-				}
-			default:
-				// 没有帧可获取，等待下一个周期
+			// 发送当前帧
+			if err := t.serverTransport.SendAudio(frame); err != nil {
+				log.Errorf("发送 TTS 音频失败: 第 %d 帧, len: %d, 错误: %v", totalFrames, len(frame), err)
+				return fmt.Errorf("发送 TTS 音频 len: %d 失败: %v", len(frame), err)
 			}
-		case <-ctx.Done():
-			// 上下文已取消
-			log.Infof("SendTTSAudio context done, exit, totalFrames: %d", totalFrames)
-			return nil
+
+			totalFrames++
+			if totalFrames%100 == 0 {
+				log.Debugf("SendTTSAudio 已发送 %d 帧", totalFrames)
+			}
+
+			// 统计信息记录（仅在开始时记录一次）
+			if isStart && isStatistic && totalFrames == 1 {
+				log.Debugf("从接收音频结束 asr->llm->tts首帧 整体 耗时: %d ms", t.clientState.GetAsrLlmTtsDuration())
+				isStatistic = false
+			}
 		}
 	}
 }

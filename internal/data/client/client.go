@@ -25,7 +25,7 @@ import (
 
 // Dialogue 表示对话历史
 type Dialogue struct {
-	Messages []schema.Message
+	Messages []*schema.Message
 }
 
 const (
@@ -90,6 +90,55 @@ type ClientState struct {
 	IsTtsStart        bool //是否tts开始
 	IsWelcomeSpeaking bool //是否已经欢迎语
 }
+
+// 历史消息相关的方法开始
+func (c *ClientState) AddMessage(msg *schema.Message) {
+	if msg == nil {
+		log.Warnf("尝试添加 nil 消息到对话历史")
+		return
+	}
+	c.Dialogue.Messages = append(c.Dialogue.Messages, msg)
+}
+
+func (c *ClientState) GetMessages(count int) []*schema.Message {
+	// 添加边界检查，防止数组越界
+	if len(c.Dialogue.Messages) == 0 {
+		return []*schema.Message{}
+	}
+
+	// 计算起始索引，确保不会越界
+	startIndex := len(c.Dialogue.Messages) - count
+	if startIndex < 0 {
+		startIndex = 0
+	}
+
+	return AlignMessage(c.Dialogue.Messages[startIndex:])
+}
+
+func AlignMessage(messages []*schema.Message) []*schema.Message {
+	findMsgTypeUser := false
+	// 为保证消息完整性, 遍历 找到第一个User之后的消息
+	for i := 0; i < len(messages); i++ {
+		msg := messages[i]
+		if msg == nil {
+			continue
+		}
+		if !findMsgTypeUser {
+			if msg.Role == schema.User {
+				return messages[i:]
+			}
+			continue
+		}
+	}
+	return messages
+}
+
+func (c *ClientState) InitMessages(messages []*schema.Message) error {
+	c.Dialogue.Messages = AlignMessage(messages)
+	return nil
+}
+
+//历史消息相关的方法结束
 
 func (c *ClientState) SetTtsStart(isStart bool) {
 	c.IsTtsStart = isStart

@@ -83,6 +83,7 @@ func getHTTPClient() *http.Client {
 
 // NewEinoLLMProvider 创建新的Eino LLM提供者，根据type支持openai和ollama
 func NewEinoLLMProvider(config map[string]interface{}) (*EinoLLMProvider, error) {
+	//log.Debugf("NewEinoLLMProvider config: %+v", config)
 	providerType, _ := config["type"].(string)
 	if providerType == "" {
 		return nil, fmt.Errorf("type不能为空，必须是 'openai' 或 'ollama'")
@@ -219,12 +220,23 @@ func (p *EinoLLMProvider) ResponseWithContext(ctx context.Context, sessionID str
 
 	log.Infof("[Eino-LLM] 开始处理带工具的请求 - SessionID: %s, Type: %s", sessionID, p.providerType)
 
+	logMessages(dialogue)
 	// 直接调用EinoResponseWithTools获取Eino原生响应
 	einoResponseChan := p.EinoResponseWithTools(ctx, sessionID, dialogue, functions)
 
 	log.Infof("[Eino-LLM] 工具调用请求处理完成 - SessionID: %s", sessionID)
 
 	return einoResponseChan
+}
+
+func logMessages(messages []*schema.Message) {
+	for _, msg := range messages {
+		if msg == nil {
+			log.Debugf("history llm msg: <nil>")
+			continue
+		}
+		log.Debugf("history llm msg: %s\n", msg.String())
+	}
 }
 
 // EinoResponseWithTools 直接使用Eino类型的带工具响应

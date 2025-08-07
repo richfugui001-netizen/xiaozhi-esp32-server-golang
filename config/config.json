@@ -238,16 +238,18 @@
       "servers": [
         {
           "name": "filesystem",
-          "sse_url": "http://localhost:3001/sse",
+          "type": "sse",
+          "url": "http://localhost:3001/sse",
           "enabled": true
         },
         {
           "name": "memory",
-          "sse_url": "http://localhost:3002/sse",
-          "enabled": false
+          "type": "streamablehttp",
+          "url": "http://localhost:3002/mcp",
+          "enabled": true
         }
       ],
-      "reconnect_interval": 5,
+      "reconnect_interval": 300,
       "max_reconnect_attempts": 10
     },
     "device": {
@@ -255,6 +257,10 @@
       "websocket_path": "/xiaozhi/mcp/",
       "max_connections_per_device": 5
     }
+  },
+  "local_mcp": {
+    "exit_conversation": true,
+    "clear_conversation_history": true
   },
   "enable_greeting": true,
   "greeting_list": [

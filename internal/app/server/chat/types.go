@@ -12,7 +12,7 @@ type ChatSessionOperator interface {
 	LocalMcpClearHistory() error
 
 	// LocalMcpPlayMusic 播放音乐
-	LocalMcpPlayMusic(ctx context.Context, musicName string) error
+	LocalMcpPlayMusic(ctx context.Context, params *PlayMusicParams) error
 
 	// 未来可以根据需要添加其他操作
 	// GetDeviceID() string

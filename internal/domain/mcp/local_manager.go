@@ -1,32 +1,23 @@
 package mcp
 
 import (
-	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	log "xiaozhi-esp32-server-golang/logger"
 
+	"github.com/bytedance/sonic"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/getkin/kin-openapi/openapi3"
+
+	mcp_protocol "github.com/ThinkInAIXYZ/go-mcp/protocol"
 )
-
-// LocalToolHandler 本地工具处理函数类型
-type LocalToolHandler func(ctx context.Context, argumentsInJSON string) (string, error)
-
-// LocalTool 本地工具定义
-type LocalTool struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	InputSchema *schema.ParamsOneOf `json:"input_schema,omitempty"`
-	Handler     LocalToolHandler    `json:"-"` // 不序列化处理函数
-}
 
 // LocalMCPManager 本地MCP工具管理器
 type LocalMCPManager struct {
-	tools map[string]*LocalTool // 工具名称 -> 工具定义
-	mu    sync.RWMutex          // 读写锁保护并发访问
+	tools map[string]*McpTool // 工具名称 -> 工具定义
+	mu    sync.RWMutex        // 读写锁保护并发访问
 }
 
 var (
@@ -38,7 +29,7 @@ var (
 func GetLocalMCPManager() *LocalMCPManager {
 	localOnce.Do(func() {
 		localManager = &LocalMCPManager{
-			tools: make(map[string]*LocalTool),
+			tools: make(map[string]*McpTool),
 		}
 		// 初始化默认的本地工具
 		localManager.initDefaultTools()
@@ -48,48 +39,21 @@ func GetLocalMCPManager() *LocalMCPManager {
 
 // initDefaultTools 初始化默认的本地工具
 func (l *LocalMCPManager) initDefaultTools() {
-	// 示例：系统信息工具
-	systemInfoTool := &LocalTool{
-		Name:        "get_system_info",
-		Description: "获取系统基本信息",
-		InputSchema: &schema.ParamsOneOf{},
-		Handler: func(ctx context.Context, argumentsInJSON string) (string, error) {
-			timestamp := "unknown"
-			if ts := ctx.Value("timestamp"); ts != nil {
-				timestamp = fmt.Sprintf("%v", ts)
-			} else {
-				timestamp = fmt.Sprintf("%d", time.Now().Unix())
-			}
-			return `{"status": "running", "version": "1.0.0", "timestamp": "` + timestamp + `"}`, nil
-		},
-	}
-	l.RegisterTool(systemInfoTool)
-
-	// 示例：健康检查工具
-	healthCheckTool := &LocalTool{
-		Name:        "health_check",
-		Description: "系统健康检查",
-		InputSchema: &schema.ParamsOneOf{},
-		Handler: func(ctx context.Context, argumentsInJSON string) (string, error) {
-			return `{"status": "healthy", "message": "服务运行正常"}`, nil
-		},
-	}
-	l.RegisterTool(healthCheckTool)
 
 	log.Info("本地MCP管理器默认工具初始化完成")
 }
 
 // RegisterTool 注册本地工具
-func (l *LocalMCPManager) RegisterTool(tool *LocalTool) error {
+func (l *LocalMCPManager) RegisterTool(tool *McpTool) error {
 	if tool == nil {
 		return fmt.Errorf("工具不能为空")
 	}
 
-	if tool.Name == "" {
+	if tool.info.Name == "" {
 		return fmt.Errorf("工具名称不能为空")
 	}
 
-	if tool.Handler == nil {
+	if !tool.isLocal || tool.localHandler == nil {
 		return fmt.Errorf("工具处理函数不能为空")
 	}
 
@@ -97,22 +61,50 @@ func (l *LocalMCPManager) RegisterTool(tool *LocalTool) error {
 	defer l.mu.Unlock()
 
 	// 检查工具是否已存在
-	if _, exists := l.tools[tool.Name]; exists {
-		log.Warnf("本地工具 %s 已存在，将被覆盖", tool.Name)
+	if _, exists := l.tools[tool.info.Name]; exists {
+		log.Warnf("本地工具 %s 已存在，将被覆盖", tool.info.Name)
 	}
 
-	l.tools[tool.Name] = tool
-	log.Infof("成功注册本地工具: %s - %s", tool.Name, tool.Description)
+	l.tools[tool.info.Name] = tool
+	log.Infof("成功注册本地工具: %s - %s", tool.info.Name, tool.info.Desc)
 	return nil
 }
 
+func (l *LocalMCPManager) convertStructToOpenaipi3Schema(inputParams any) (*openapi3.Schema, error) {
+	//使用github.com/ThinkInAIXYZ/go-mcp 通过struct生成 tool, 然后转换成openapi3.Schema
+	toolInstance, err := mcp_protocol.NewTool("get_system_info", "获取系统基本信息", inputParams)
+	if err != nil {
+		return nil, err
+	}
+
+	marshaledInputSchema, err := sonic.Marshal(toolInstance.InputSchema)
+	if err != nil {
+		return nil, err
+	}
+
+	inputSchema := &openapi3.Schema{}
+	err = sonic.Unmarshal(marshaledInputSchema, inputSchema)
+	if err != nil {
+		return nil, err
+	}
+	return inputSchema, nil
+}
+
 // RegisterToolFunc 注册工具函数（简化版本）
-func (l *LocalMCPManager) RegisterToolFunc(name, description string, handler LocalToolHandler, inputSchema *schema.ParamsOneOf) error {
-	tool := &LocalTool{
-		Name:        name,
-		Description: description,
-		InputSchema: inputSchema,
-		Handler:     handler,
+func (l *LocalMCPManager) RegisterToolFunc(name, description string, inputParams any, handler LocalToolHandler) error {
+	inputSchema, err := l.convertStructToOpenaipi3Schema(inputParams)
+	if err != nil {
+		log.Errorf("Failed to convert struct to openapi3 schema: %v", err)
+		return err
+	}
+	tool := &McpTool{
+		info: &schema.ToolInfo{
+			Name:        name,
+			Desc:        description,
+			ParamsOneOf: schema.NewParamsOneOfByOpenAPIV3(inputSchema),
+		},
+		isLocal:      true,
+		localHandler: handler,
 	}
 	return l.RegisterTool(tool)
 }
@@ -137,8 +129,8 @@ func (l *LocalMCPManager) GetAllTools() map[string]tool.InvokableTool {
 	defer l.mu.RUnlock()
 
 	result := make(map[string]tool.InvokableTool)
-	for name, localTool := range l.tools {
-		result[name] = &LocalToolWrapper{localTool: localTool}
+	for name, mcpTool := range l.tools {
+		result[name] = mcpTool
 	}
 	return result
 }
@@ -148,12 +140,12 @@ func (l *LocalMCPManager) GetToolByName(name string) (tool.InvokableTool, bool) 
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	localTool, exists := l.tools[name]
+	mcpTool, exists := l.tools[name]
 	if !exists {
 		return nil, false
 	}
 
-	return &LocalToolWrapper{localTool: localTool}, true
+	return mcpTool, true
 }
 
 // GetToolNames 获取所有工具名称列表
@@ -173,38 +165,6 @@ func (l *LocalMCPManager) GetToolCount() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return len(l.tools)
-}
-
-// LocalToolWrapper Eino工具接口的本地工具包装器
-type LocalToolWrapper struct {
-	localTool *LocalTool
-}
-
-// Info 获取工具信息，实现tool.BaseTool接口
-func (w *LocalToolWrapper) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name:        w.localTool.Name,
-		Desc:        w.localTool.Description,
-		ParamsOneOf: w.localTool.InputSchema,
-	}, nil
-}
-
-// InvokableRun 执行工具，实现tool.InvokableTool接口
-func (w *LocalToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	if w.localTool.Handler == nil {
-		return "", fmt.Errorf("本地工具 %s 的处理函数未定义", w.localTool.Name)
-	}
-
-	log.Infof("执行本地工具: %s, 参数: %s", w.localTool.Name, argumentsInJSON)
-
-	result, err := w.localTool.Handler(ctx, argumentsInJSON)
-	if err != nil {
-		log.Errorf("本地工具 %s 执行失败: %v", w.localTool.Name, err)
-		return "", fmt.Errorf("本地工具执行失败: %v", err)
-	}
-
-	log.Infof("本地工具 %s 执行成功，结果: %s", w.localTool.Name, result)
-	return result, nil
 }
 
 // Start 启动本地管理器（预留接口）

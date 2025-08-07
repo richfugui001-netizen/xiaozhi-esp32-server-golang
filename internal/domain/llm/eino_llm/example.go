@@ -504,3 +504,7 @@ func EinoNativeExample() {
 		}
 	}
 }
+
+func main() {
+	BasicUsageExample()
+}
