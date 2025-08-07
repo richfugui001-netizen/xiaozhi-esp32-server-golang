@@ -107,7 +107,7 @@ func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, 
 					fullText += message.Content
 					buffer.WriteString(message.Content)
 					if containsSentenceSeparator(message.Content, isFirst) {
-						sentences, remaining := extractSmartSentences(buffer.String(), 5, 100, isFirst)
+						sentences, remaining := extractSmartSentences(buffer.String(), 2, 100, isFirst)
 						if len(sentences) > 0 {
 							for _, sentence := range sentences {
 								if sentence != "" {
