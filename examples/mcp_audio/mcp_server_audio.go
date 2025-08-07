@@ -53,45 +53,41 @@ func NewMCPServer() *server.MCPServer {
 		),
 	), handleVolumeControlTool)
 
-	mcpServer.AddResourceTemplate(
-		mcp.NewResourceTemplate(
-			"audio://music/{musicUrl}?start={start}&end={end}",
+	mcpServer.AddResource(
+		mcp.NewResource(
+			"resource://read_from_http",
+			//"audio://music/{musicUrl}?start={start}&end={end}",
 			"audio resource",
 		),
-		handleAudioResourceTemplate,
+		handleAudioResource,
 	)
 
 	return mcpServer
 }
 
-func handleAudioResourceTemplate(
+func handleAudioResource(
 	ctx context.Context,
 	request mcp.ReadResourceRequest,
 ) ([]mcp.ResourceContents, error) {
 	log.Printf("request.params: %+v\n", request.Params.Arguments)
 
-	var base64MusicUrl string
-	if url, ok := request.Params.Arguments["musicUrl"]; ok {
-		if realUrlList, ok := url.([]string); ok {
-			base64MusicUrl = realUrlList[0]
+	var realMusicUrl string
+	if url, ok := request.Params.Arguments["url"]; ok {
+		if realUrlList, ok := url.(string); ok {
+			realMusicUrl = realUrlList
 		}
-	}
-	realMusicUrl, err := base64.StdEncoding.DecodeString(base64MusicUrl)
-	if err != nil {
-		log.Printf("base64 decode error: %+v\n", err)
-		return nil, fmt.Errorf("base64 decode error: %+v", err)
 	}
 
 	var start, end int
-	if strStart, ok := request.Params.Arguments["start"]; ok {
-		if istart, ok := strStart.([]string); ok {
-			start, _ = strconv.Atoi(istart[0])
+	if floatStart, ok := request.Params.Arguments["start"]; ok {
+		if startInt, ok := floatStart.(float64); ok {
+			start = int(startInt)
 		}
 	}
 
-	if strEnd, ok := request.Params.Arguments["end"]; ok {
-		if iEnd, ok := strEnd.([]string); ok {
-			end, _ = strconv.Atoi(iEnd[0])
+	if floatEnd, ok := request.Params.Arguments["end"]; ok {
+		if endInt, ok := floatEnd.(float64); ok {
+			end = int(endInt)
 		}
 	}
 
@@ -197,16 +193,23 @@ func handleSearchMusic(files []string, query string) (*mcp.CallToolResult, error
 func handlePlayMusic(musicName string) (*mcp.CallToolResult, error) {
 	realMusicName, musicUrl, err := GetMusicUrlByName(musicName)
 	if err != nil {
-		return nil, fmt.Errorf("播放音乐文件失败: %v", err)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("🔍 没有找到 \"%s\" 的音乐文件", musicName),
+				},
+			},
+		}, nil
 	}
 
-	base64MusicUrl := base64.StdEncoding.EncodeToString([]byte(musicUrl))
+	//base64MusicUrl := base64.StdEncoding.EncodeToString([]byte(musicUrl))
 
 	log.Printf("realMusicName: %s, musicUrl: %s\n", realMusicName, musicUrl)
-	resourceLink := fmt.Sprintf("audio://music/%s", base64MusicUrl)
+	resourceLink := fmt.Sprintf("resource://read_from_http")
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewResourceLink(resourceLink, realMusicName, realMusicName, "audio/mpeg"),
+			mcp.NewResourceLink(resourceLink, realMusicName, musicUrl, "audio/mpeg"),
 		},
 	}, nil
 }
