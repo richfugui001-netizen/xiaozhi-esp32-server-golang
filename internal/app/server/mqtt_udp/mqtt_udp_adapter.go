@@ -13,6 +13,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/logger"
+	log "xiaozhi-esp32-server-golang/logger"
 )
 
 type MqttConfig struct {
@@ -234,7 +235,20 @@ func (s *MqttUdpAdapter) getDeviceIdByTopic(topic string) (string, string) {
 	strList := strings.Split(topic, "/")
 	if len(strList) == 4 {
 		topicMacAddr = strList[3]
-		deviceId = strings.ReplaceAll(topicMacAddr, "_", ":")
+
+		// 检查是否为新格式: "GID_test@@@ba_8f_17_de_94_94@@@e4b0c442-98fc-4e1b-8c3d-6a5b6a5b6a6d"
+		if strings.Contains(topicMacAddr, "@@@") {
+			parts := strings.Split(topicMacAddr, "@@@")
+			if len(parts) >= 2 {
+				// 提取中间部分作为MAC地址
+				macAddr := parts[1]
+				deviceId = strings.ReplaceAll(macAddr, "_", ":")
+			}
+		} else {
+			deviceId = strings.ReplaceAll(topicMacAddr, "_", ":")
+		}
 	}
+
+	log.Log().Debugf("topicMacAddr: %s, deviceId: %s", topicMacAddr, deviceId)
 	return topicMacAddr, deviceId
 }

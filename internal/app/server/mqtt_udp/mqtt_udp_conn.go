@@ -44,6 +44,7 @@ type MqttUdpConn struct {
 // NewMqttUdpConn 创建一个新的 MqttUdpConn 实例
 func NewMqttUdpConn(deviceID string, pubTopic string, mqttClient mqtt.Client, udpServer *UdpServer, udpSession *UdpSession) *MqttUdpConn {
 	ctx, cancel := context.WithCancel(context.Background())
+	log.Log().Debugf("NewMqttUdpConn pubTopic: %s", pubTopic)
 	return &MqttUdpConn{
 		ctx:      ctx,
 		cancel:   cancel,
