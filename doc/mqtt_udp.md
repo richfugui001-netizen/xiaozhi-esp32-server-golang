@@ -241,6 +241,27 @@ OTA（Over-the-Air）配置用于设备远程获取服务器、MQTT、WebSocket�
 > - 以上Topic映射规则仅在对接EMQX等第三方MQTT Broker时生效。
 > - 若使用内置MQTT服务端，Topic可根据实际需求自定义。
 
+### EMQX消息重定向配置
+
+为了实现设备消息的自动路由和转发，需要在EMQX中配置以下规则：
+
+#### 1. 自动订阅新增配置
+- **topic**: `/p2p/device_sub/${clientid}`
+
+#### 2. 消息重转发
+在规则中新增一项，配置如下：
+
+**SQL规则**：
+```sql
+SELECT clientid, first(regex_extract(clientid, 'GID.+@@@([^@]+)@@@.+' )) as device_id, payload FROM "device-server"
+```
+
+**配置参数**：
+- **数据输入**: `"device-server"`
+- **动作输出类型**: `"消息重发布"`
+- **topic**: `/p2p/device_public/${clientid}`
+- **payload**: `${payload}`
+
 ## 8. MQTT UDP 数据流程
 
 本节简要介绍设备与服务器之间通过 MQTT+UDP 进行数据交互的整体流程，包括会话建立、数据上报与下发等关键步骤。
