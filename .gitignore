@@ -3,3 +3,4 @@
 *.pem
 *.key
 config_shijingbo.json
+.idea
