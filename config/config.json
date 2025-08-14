@@ -105,7 +105,6 @@
       "enable_punc": true,
       "enable_itn": true,
       "enable_ddc": false,
-      "chunk_duration": 200,
       "timeout": 30
     }
   },
