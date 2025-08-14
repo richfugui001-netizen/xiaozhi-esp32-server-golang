@@ -1,4 +1,4 @@
-package doubao_v2
+package doubao
 
 // DoubaoV2Config 豆包ASR配置结构体
 type DoubaoV2Config struct {

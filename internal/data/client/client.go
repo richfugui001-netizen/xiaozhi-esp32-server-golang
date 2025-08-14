@@ -302,6 +302,9 @@ func (s *ClientState) InitLlm() error {
 
 func (s *ClientState) InitAsr() error {
 	asrConfig := s.DeviceConfig.Asr
+
+	log.Infof("初始化asr, asrConfig: %+v", asrConfig)
+
 	//初始化asr
 	asrProvider, err := asr.NewAsrProvider(asrConfig.Provider, asrConfig.Config)
 	if err != nil {

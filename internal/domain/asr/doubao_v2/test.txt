@@ -1,4 +1,0 @@
-
-
-现在config.json 里面写好doubao asr 的配置,
-然后运行: go run .\internal\domain\asr\funasr\example\streaming_example.go

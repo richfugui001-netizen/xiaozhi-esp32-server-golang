@@ -3,9 +3,9 @@ package asr
 import (
 	"context"
 	"fmt"
-	"xiaozhi-esp32-server-golang/internal/domain/asr/doubao_v2"
 
 	"xiaozhi-esp32-server-golang/constants"
+	"xiaozhi-esp32-server-golang/internal/domain/asr/doubao"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -31,7 +31,7 @@ func NewAsrProvider(asrType string, config map[string]interface{}) (AsrProvider,
 		return NewFunasrAdapter(config)
 	case constants.AsrTypeDoubao:
 		log.Info("使用 豆包ASR 提供者")
-		provider, err := doubao_v2.NewDoubaoV2Adapter(config)
+		provider, err := doubao.NewDoubaoV2Adapter(config)
 		if err != nil {
 			log.Errorf("豆包ASR适配器创建失败: %v", err)
 		} else {
