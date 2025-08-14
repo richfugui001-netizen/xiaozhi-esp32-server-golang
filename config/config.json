@@ -94,6 +94,19 @@
       "max_connections": 5,
       "timeout": 30,
       "auto_end": true
+    },
+    "doubao": {
+      "appid": "xxx",
+      "access_token": "xxx-Cu",
+      "host": "openspeech.bytedance.com",
+      "ws_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream",
+      "model_name": "bigmodel",
+      "end_window_size": 800,
+      "enable_punc": true,
+      "enable_itn": true,
+      "enable_ddc": false,
+      "chunk_duration": 200,
+      "timeout": 30
     }
   },
   "tts": {
