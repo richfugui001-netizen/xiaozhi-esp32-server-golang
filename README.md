@@ -99,7 +99,7 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 | 模块      | 功能简介                       | 技术栈/说明                |
 |-----------|-------------------------------|----------------------------|
 | VAD       | 声音活动检测（Silero VAD）    | Silero VAD, Webrtc vad                    |
-| ASR       | 语音识别（FunASR对接）        | FunASR          |
+| ASR       | 语音识别（FunASR对接）        | FunASR, Doubao Asr       |
 | LLM       | 大语言模型（OpenAI兼容接口）  | Eino框架兼容的 LLM, openai, ollama       |
 | TTS       | 语音合成（多引擎支持）        | Doubao, EdgeTTS, CosyVoice |
 | MCP       | 多协议接入 | 支持全局MCP、MCP接入点、端侧MCP Server）       |
