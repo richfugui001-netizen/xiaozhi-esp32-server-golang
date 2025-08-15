@@ -182,6 +182,14 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 		case frame, ok := <-audioChan:
 			if !ok {
 				// 通道已关闭，所有帧已处理完毕
+				// 为确保终端播放完成：等待已发送帧的总时长与从开始发送以来的实际耗时之间的差值
+				elapsed := time.Since(startTime)
+				totalDuration := time.Duration(totalFrames) * frameDuration
+				if totalDuration > elapsed {
+					waitDuration := totalDuration - elapsed
+					log.Debugf("SendTTSAudio 等待客户端播放剩余缓冲: %v (totalFrames=%d, frameDuration=%v)", waitDuration, totalFrames, frameDuration)
+					time.Sleep(waitDuration)
+				}
 				log.Debugf("SendTTSAudio audioChan closed, exit, 总共发送 %d 帧", totalFrames)
 				return nil
 			}

@@ -317,6 +317,12 @@ func (s *ClientState) InitAsr() error {
 		AsrEnd:          make(chan bool, 1),
 		AsrResult:       bytes.Buffer{},
 	}
+
+	if rawAutoEnd, ok := asrConfig.Config["auto_end"]; ok {
+		if autoEnd, ok := rawAutoEnd.(bool); ok {
+			s.Asr.AutoEnd = autoEnd
+		}
+	}
 	return nil
 }
 

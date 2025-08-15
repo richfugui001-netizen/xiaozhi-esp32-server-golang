@@ -356,6 +356,7 @@ func (f *Funasr) forwardStreamAudio(ctx context.Context, cancelFunc context.Canc
 			IsSpeaking:    false,
 		}
 		endMessageBytes, _ := json.Marshal(endMessage)
+		log.Debugf("funasr forwardStreamAudio 发送结束消息: %v", string(endMessageBytes))
 		err := f.writeMessage(conn, websocket.TextMessage, endMessageBytes)
 		if err != nil {
 			log.Debugf("funasr forwardStreamAudio 发送结束消息失败: %v", err)
