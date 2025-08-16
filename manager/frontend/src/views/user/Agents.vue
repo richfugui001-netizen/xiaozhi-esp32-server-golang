@@ -1,0 +1,587 @@
+<template>
+  <div class="agents-page">
+    <div class="page-header">
+      <div class="header-left">
+        <h2>我的智能体</h2>
+        <p class="page-subtitle">管理您的智能体配置</p>
+      </div>
+      <div class="header-right">
+        <el-button type="primary" @click="showAddAgentDialog = true">
+              <el-icon><Plus /></el-icon>
+              添加智能体
+            </el-button>
+      </div>
+    </div>
+
+    <div v-if="agents.length === 0" class="welcome-section">
+      <el-card class="welcome-card">
+        <div class="welcome-content">
+          <el-icon size="64" color="#409EFF"><Monitor /></el-icon>
+          <h3>欢迎使用智能体管理</h3>
+          <p>您还没有创建任何智能体。智能体是您的AI助手，可以帮助您处理各种任务。</p>
+          <div class="welcome-actions">
+            <el-button type="primary" size="large" @click="showAddAgentDialog = true">
+              <el-icon><Plus /></el-icon>
+              创建第一个智能体
+            </el-button>
+          </div>
+        </div>
+      </el-card>
+    </div>
+
+    <div v-else class="agents-grid">
+      <el-row :gutter="24">
+        <el-col :xs="24" :sm="12" :md="8" :lg="6" v-for="agent in agents" :key="agent.id">
+          <div class="agent-card">
+            <div class="agent-header">
+              <div class="agent-avatar">
+                <el-icon size="28"><Monitor /></el-icon>
+              </div>
+              <div class="agent-info">
+                <h3 class="agent-name">{{ agent.name }}</h3>
+                <p class="agent-desc">智能助手</p>
+              </div>
+              <div class="agent-status">
+                <span class="status-dot active"></span>
+                <span class="status-text">在线</span>
+              </div>
+            </div>
+            
+            <div class="agent-meta">
+              <div class="meta-row">
+                <span class="meta-label">角色音色</span>
+                <span class="meta-value">{{ getVoiceType(agent) }}</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">语言模型</span>
+                <span class="meta-value">{{ getLLMProvider(agent) }}</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">最近对话</span>
+                <span class="meta-value">{{ formatDate(agent.updated_at) }}</span>
+              </div>
+            </div>
+            
+            <div class="agent-actions">
+              <el-button type="primary" size="small" @click="editAgent(agent.id)">
+                <el-icon><Setting /></el-icon>
+                配置
+              </el-button>
+              <el-button size="small" @click="handleChatHistory(agent.id)">
+                <el-icon><ChatDotRound /></el-icon>
+                对话
+              </el-button>
+              <el-button size="small" @click="handleManageDevices(agent.id)">
+                <el-icon><Monitor /></el-icon>
+                设备
+              </el-button>
+            </div>
+          </div>
+        </el-col>
+      </el-row>
+    </div>
+
+    <!-- 添加设备弹窗 -->
+    <el-dialog
+      v-model="showAddDeviceDialog"
+      title="添加设备"
+      width="500px"
+    >
+      <el-form
+        ref="deviceFormRef"
+        :model="deviceForm"
+        :rules="deviceRules"
+        label-width="100px"
+      >
+        <el-form-item label="设备激活码" prop="device_code">
+          <el-input
+            v-model="deviceForm.device_code"
+            placeholder="请输入设备激活码"
+          />
+        </el-form-item>
+        <el-form-item label="设备名称" prop="device_name">
+          <el-input
+            v-model="deviceForm.device_name"
+            placeholder="请输入设备名称"
+          />
+        </el-form-item>
+      </el-form>
+      
+      <template #footer>
+        <el-button @click="showAddDeviceDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleAddDevice">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 添加智能体弹窗 -->
+    <el-dialog
+      v-model="showAddAgentDialog"
+      title="添加智能体"
+      width="400px"
+      :before-close="handleCloseAddAgent"
+    >
+      <el-form
+        ref="agentFormRef"
+        :model="agentForm"
+        :rules="agentRules"
+        size="large"
+      >
+        <el-form-item prop="name">
+          <el-input
+            v-model="agentForm.name"
+            placeholder="请输入智能体名称"
+            size="large"
+            :maxlength="50"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+      
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="handleCloseAddAgent" size="large">取消</el-button>
+          <el-button type="primary" @click="handleAddAgent" :loading="adding" size="large">
+            确定
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 添加设备弹窗 -->
+    <el-dialog
+      v-model="showAddDeviceDialog"
+      title="添加设备"
+      width="400px"
+      :before-close="handleCloseAddDevice"
+    >
+      <div class="device-dialog-content">
+        <div class="device-icon">
+          <el-icon size="48"><Monitor /></el-icon>
+        </div>
+        <p class="device-tip">请输入设备验证码</p>
+        <el-form
+          ref="deviceFormRef"
+          :model="deviceForm"
+          :rules="deviceRules"
+        >
+          <el-form-item prop="code">
+            <el-input
+              v-model="deviceForm.code"
+              placeholder="请输入6位验证码"
+              size="large"
+              :maxlength="6"
+              style="text-align: center; font-size: 18px; letter-spacing: 4px;"
+            />
+          </el-form-item>
+        </el-form>
+      </div>
+      
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="handleCloseAddDevice" size="large">取消</el-button>
+          <el-button type="primary" @click="handleAddDevice" :loading="addingDevice" size="large">
+            确定
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Setting, Microphone, ChatDotRound, Monitor } from '@element-plus/icons-vue'
+import api from '../../utils/api'
+
+const router = useRouter()
+
+const loading = ref(false)
+const agents = ref([])
+const showAddAgentDialog = ref(false)
+const showAddDeviceDialog = ref(false)
+const adding = ref(false)
+const addingDevice = ref(false)
+const agentFormRef = ref()
+const deviceFormRef = ref()
+
+const deviceForm = reactive({
+  code: ''
+})
+
+const agentForm = reactive({
+  name: ''
+})
+
+const deviceRules = {
+  code: [
+    { required: true, message: '请输入设备验证码', trigger: 'blur' },
+    { len: 6, message: '验证码长度为6位', trigger: 'blur' }
+  ]
+}
+
+const agentRules = {
+  name: [
+    { required: true, message: '请输入智能体名称', trigger: 'blur' },
+    { min: 2, max: 50, message: '长度在 2 到 50 个字符', trigger: 'blur' }
+  ]
+}
+
+const loadAgents = async () => {
+  try {
+    const response = await api.get('/user/agents')
+    agents.value = response.data.data || []
+  } catch (error) {
+    ElMessage.error('加载智能体列表失败')
+  }
+}
+
+const handleAddAgent = async () => {
+  if (!agentFormRef.value) return
+  
+  try {
+    await agentFormRef.value.validate()
+    adding.value = true
+    
+    const response = await api.post('/user/agents', {
+      name: agentForm.name
+    })
+    
+    if (response.data.success) {
+      ElMessage.success('智能体添加成功')
+      handleCloseAddAgent() // 使用统一的关闭方法
+      await loadAgents() // 等待加载完成
+    }
+  } catch (error) {
+    console.error('添加智能体失败:', error)
+    ElMessage.error('添加智能体失败')
+  } finally {
+    adding.value = false
+  }
+}
+
+const handleAddDevice = async () => {
+  if (!deviceFormRef.value) return
+  
+  try {
+    await deviceFormRef.value.validate()
+    addingDevice.value = true
+    
+    const response = await api.post('/user/devices', {
+      code: deviceForm.code
+    })
+    
+    if (response.data.success) {
+      ElMessage.success('设备添加成功')
+      showAddDeviceDialog.value = false
+      Object.assign(deviceForm, { code: '' })
+      // 可以在这里刷新设备列表或其他相关操作
+    }
+  } catch (error) {
+    console.error('添加设备失败:', error)
+    ElMessage.error('添加设备失败')
+  } finally {
+    addingDevice.value = false
+  }
+}
+
+const handleCloseAddAgent = () => {
+  showAddAgentDialog.value = false
+  if (agentFormRef.value) {
+    agentFormRef.value.resetFields()
+  }
+  Object.assign(agentForm, { name: '' })
+}
+
+const handleCloseAddDevice = () => {
+  showAddDeviceDialog.value = false
+  if (deviceFormRef.value) {
+    deviceFormRef.value.resetFields()
+  }
+  Object.assign(deviceForm, { code: '' })
+}
+
+const editAgent = (id) => {
+  router.push(`/user/agents/${id}/edit`)
+}
+
+const handleVoiceRecognition = (id) => {
+  ElMessage.info('声效识别功能开发中')
+}
+
+const handleChatHistory = (id) => {
+  router.push(`/user/agents/${id}/history`)
+}
+
+const handleManageDevices = (id) => {
+  router.push(`/user/agents/${id}/devices`)
+}
+
+const getVoiceType = (agent) => {
+  try {
+    const config = JSON.parse(agent.config || '{}')
+    return config.tts_provider || '未设置'
+  } catch {
+    return '未设置'
+  }
+}
+
+const getLLMProvider = (agent) => {
+  try {
+    const config = JSON.parse(agent.config || '{}')
+    return config.llm_provider || '未设置'
+  } catch {
+    return '未设置'
+  }
+}
+
+const formatDate = (dateString) => {
+  return new Date(dateString).toLocaleString('zh-CN')
+}
+
+onMounted(() => {
+  loadAgents()
+})
+</script>
+
+<style scoped>
+.agents-page {
+  padding: 0;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 20px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.header-left h2 {
+  margin: 0;
+  color: #333;
+}
+
+.page-subtitle {
+  margin: 5px 0 0 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.header-right {
+  display: flex;
+  gap: 10px;
+}
+
+.agents-grid {
+  padding: 0 20px;
+}
+
+.agent-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #f0f0f0;
+  margin-bottom: 24px;
+  padding: 20px;
+  transition: all 0.3s ease;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  border-color: #409EFF;
+}
+
+.agent-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.agent-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #409EFF 0%, #67C23A 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+  color: white;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
+}
+
+.agent-info {
+  flex: 1;
+}
+
+.agent-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0 0 4px 0;
+  line-height: 1.4;
+}
+
+.agent-desc {
+  font-size: 12px;
+  color: #909399;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.agent-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #67C23A;
+}
+
+.status-dot.active {
+  background: #67C23A;
+  box-shadow: 0 0 0 2px rgba(103, 194, 58, 0.2);
+}
+
+.status-text {
+  font-size: 12px;
+  color: #67C23A;
+  font-weight: 500;
+}
+
+.agent-meta {
+  flex: 1;
+  margin-bottom: 16px;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 6px 0;
+}
+
+.meta-row:last-child {
+  margin-bottom: 0;
+}
+
+.meta-label {
+  font-size: 13px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.meta-value {
+  font-size: 13px;
+  color: #303133;
+  text-align: right;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid #f5f5f5;
+}
+
+.agent-actions .el-button {
+  flex: 1;
+  border-radius: 6px;
+  font-size: 12px;
+  height: 32px;
+}
+
+.agent-actions .el-button .el-icon {
+  margin-right: 4px;
+}
+
+.agent-actions .el-button--primary {
+  background: linear-gradient(135deg, #409EFF 0%, #67C23A 100%);
+  border: none;
+}
+
+.agent-actions .el-button--primary:hover {
+  background: linear-gradient(135deg, #337ecc 0%, #529b2e 100%);
+}
+ 
+ .dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+
+  .device-dialog-content {
+    text-align: center;
+    padding: 20px 0;
+  }
+
+  .device-icon {
+    margin-bottom: 16px;
+    color: #409EFF;
+  }
+
+  .device-tip {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 24px;
+  }
+
+  .device-dialog-content .el-input__inner {
+    text-align: center;
+    font-size: 18px;
+    letter-spacing: 4px;
+  }
+ 
+ .welcome-section {
+  padding: 40px 20px;
+}
+
+.welcome-card {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.welcome-content {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.welcome-content h3 {
+  margin: 20px 0 15px 0;
+  color: #333;
+  font-size: 24px;
+}
+
+.welcome-content p {
+  color: #666;
+  font-size: 16px;
+  line-height: 1.6;
+  margin-bottom: 30px;
+}
+
+.welcome-actions {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+}
+</style>

@@ -2,4 +2,6 @@
 *.log
 *.pem
 *.key
+dist/
+node_modules/
 config_shijingbo.json

@@ -1,0 +1,17 @@
+{
+  "server": {
+    "port": "8080",
+    "mode": "debug"
+  },
+  "database": {
+    "host": "192.168.208.214",
+    "port": "3306",
+    "username": "root",
+    "password": "mysql",
+    "database": "xiaozhi_admin"
+  },
+  "jwt": {
+    "secret": "xiaozhi_admin_secret_key",
+    "expire_hour": 24
+  }
+}
