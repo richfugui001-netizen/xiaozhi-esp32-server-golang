@@ -7,6 +7,7 @@ const (
 
 const (
 	AsrTypeFunAsr = "funasr"
+	AsrTypeDoubao = "doubao"
 )
 
 const (
