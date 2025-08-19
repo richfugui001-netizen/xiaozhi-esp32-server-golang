@@ -8,34 +8,30 @@
 
 视觉识别相关配置文件位于：
 
-- `config/config.json`：主配置文件，包含 vision 相关参数。
+- `config/config.yaml`：主配置文件，包含 vision 相关参数。
 
 ## 3. 主要参数说明
 
-`config/config.json` 中 vision 配置示例：
+`config/config.yaml` 中 vision 配置示例：
 
-```json
-"vision": {
-  "enable_auth": false,
-  "vision_url": "http://192.168.208.214:8989/xiaozhi/api/vision",
-  "vllm": {
-    "provider": "aliyun_vision",
-    "aliyun_vision": {
-      "type": "openai",
-      "model_name": "qwen-vl-plus-latest",
-      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "api_key": "api_key",
-      "max_token": 500
-    },
-    "doubao_vision": {
-      "type": "openai",
-      "model_name": "doubao-1.5-vision-lite-250315",
-      "api_key": "api_key",
-      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-      "max_tokens": 500
-    }
-  }
-}
+```yaml
+vision:
+  enable_auth: false
+  vision_url: "http://192.168.208.214:8989/xiaozhi/api/vision"
+  vllm:
+    provider: "aliyun_vision"
+    aliyun_vision:
+      type: "openai"
+      model_name: "qwen-vl-plus-latest"
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      api_key: "api_key"
+      max_token: 500
+    doubao_vision:
+      type: "openai"
+      model_name: "doubao-1.5-vision-lite-250315"
+      api_key: "api_key"
+      base_url: "https://ark.cn-beijing.volces.com/api/v3"
+      max_tokens: 500
 ```
 
 - `enable_auth`：是否启用视觉识别接口的鉴权。
@@ -51,7 +47,7 @@
 ## 4. 配置流程
 
 1. 根据实际需求，选择并注册所需的视觉识别服务（如阿里云、火山豆包等），获取 API Key。
-2. 编辑 `config/config.json`，在 `vision` 字段下填写 vision_url、provider 及对应服务的参数。
+2. 编辑 `config/config.yaml`，在 `vision` 字段下填写 vision_url、provider 及对应服务的参数。
 3. 启动服务，检查日志确认视觉识别模块加载成功。
 4. 通过 API 或前端页面上传图片，验证识别效果。
 

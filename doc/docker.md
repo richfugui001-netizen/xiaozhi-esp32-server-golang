@@ -8,54 +8,48 @@
 #### 二. 克隆代码
 >git clone 'https://github.com/hackers365/xiaozhi-esp32-server-golang'
 
-#### 三. 配置config/config.json，详细参见 [config配置说明](config.md)
+#### 三. 配置config/config.yaml，详细参见 [config配置说明](config.md)
 
 主要修改项如下：
-```
-1. asr语音识别
-  "asr": {
-    "provider": "funasr",
-    "funasr": {
-      "host": "127.0.0.1",      //部署的funasr websocket服务的ip
-      "port": "10096",          //部署的funasr websocket的port
-      "mode": "offline",        //模式, 使用offline即可
-      ...
-    }
-  }
-2. tts
-  "tts": {
-    "provider": "xiaozhi",                                  //使用tts的类型, 建议doubao_ws, 也可以选择免费的edge
-    "doubao_ws": {
-      "appid":        "6886011847",                         //你的appid
-      "access_token": "access_token",                       //你的access token
-      "cluster":      "volcano_tts",
-      "voice":        "zh_female_wanwanxiaohe_moon_bigtts", //音色，默认是湾湾小何
-      "ws_host":      "openspeech.bytedance.com",
-      "use_stream":   true
-    },
-    "edge": {
-      "voice": "zh-CN-XiaoxiaoNeural",
-      "rate": "+0%",
-      "volume": "+0%",
-      "pitch": "+0Hz",
-      "connect_timeout": 10,
-      "receive_timeout": 60
-    },
-    ....
-  }
+```yaml
+# 1. asr语音识别
+asr:
+  provider: "funasr"
+  funasr:
+    host: "127.0.0.1"      # 部署的funasr websocket服务的ip
+    port: "10096"          # 部署的funasr websocket的port
+    mode: "offline"        # 模式, 使用offline即可
+    # ...
 
-3. llm 大模型
-  "llm": {
-    "provider": "deepseek",                             //提供商，对应下面的key
-    "deepseek": {                                       //
-      "type": "openai",                                 //服务端接口兼容的类型
-      "model_name": "Pro/deepseek-ai/DeepSeek-V3",      //模型名称
-      "api_key": "api_key",                             //api key
-      "base_url": "https://api.siliconflow.cn/v1",      //服务接口，默认硅基流动
-      "max_tokens": 500
-    },
-    ...
-  }
+# 2. tts
+tts:
+  provider: "xiaozhi"      # 使用tts的类型, 建议doubao_ws, 也可以选择免费的edge
+  doubao_ws:
+    appid: "6886011847"                         # 你的appid
+    access_token: "access_token"                # 你的access token
+    cluster: "volcano_tts"
+    voice: "zh_female_wanwanxiaohe_moon_bigtts" # 音色，默认是湾湾小何
+    ws_host: "openspeech.bytedance.com"
+    use_stream: true
+  edge:
+    voice: "zh-CN-XiaoxiaoNeural"
+    rate: "+0%"
+    volume: "+0%"
+    pitch: "+0Hz"
+    connect_timeout: 10
+    receive_timeout: 60
+  # ....
+
+# 3. llm 大模型
+llm:
+  provider: "deepseek"                        # 提供商，对应下面的key
+  deepseek:
+    type: "openai"                            # 服务端接口兼容的类型
+    model_name: "Pro/deepseek-ai/DeepSeek-V3" # 模型名称
+    api_key: "api_key"                        # api key
+    base_url: "https://api.siliconflow.cn/v1" # 服务接口，默认硅基流动
+    max_tokens: 500
+  # ...
 
 ```
 

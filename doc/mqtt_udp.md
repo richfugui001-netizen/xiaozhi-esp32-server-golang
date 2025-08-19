@@ -54,7 +54,7 @@ flowchart TD
 - <b>外部Broker模式</b>：主程序仅作为MQTT客户端连接EMQX、或自研MQTT Server等外部Broker，设备通过Broker转发MQTT消息，UDP数据仍直连主程序。
 
 ## 2. 配置文件设置
-在 `config/config.json` 中，需关注以下参数：
+在 `config/config.yaml` 中，需关注以下参数：
 - `mqtt`：**客户端角色**，用于配置本服务作为 MQTT 客户端连接到 Broker（无论是内置还是外部 Broker）。
   - `broker`、`type`、`port`、`client_id`、`username`、`password`
 - `mqtt_server`：内置 MQTT 服务端参数（仅主程序内置时需启用）
@@ -66,29 +66,22 @@ flowchart TD
 
 OTA（Over-the-Air）配置用于设备远程获取服务器、MQTT、WebSocket等连接信息，以及固件升级、激活等参数。根据设备网络环境（如内网/公网），可自动返回不同的OTA配置信息。
 
-- 配置位置：`config/config.json` 的 `ota` 字段。
+- 配置位置：`config/config.yaml` 的 `ota` 字段。
 - 典型结构：
-  ```json
-  "ota": {
-    "test": {
-      "websocket": {
-        "url": "ws://192.168.208.214:8989/xiaozhi/v1/"
-      },
-      "mqtt": {
-        "enable": false,
-        "endpoint": "192.168.208.214"
-      }
-    },
-    "external": {
-      "websocket": {
-        "url": "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
-      },
-      "mqtt": {
-        "enable": false,
-        "endpoint": "www.youdomain.cn"
-      }
-    }
-  }
+  ```yaml
+  ota:
+    test:
+      websocket:
+        url: "ws://192.168.208.214:8989/xiaozhi/v1/"
+      mqtt:
+        enable: false
+        endpoint: "192.168.208.214"
+    external:
+      websocket:
+        url: "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
+      mqtt:
+        enable: false
+        endpoint: "www.youdomain.cn"
   ```
 - 主要参数说明：
   - `test`：内网/测试环境下的OTA返回信息。
@@ -119,87 +112,67 @@ OTA（Over-the-Air）配置用于设备远程获取服务器、MQTT、WebSocket�
 ## 5. 配置示例
 
 **内置 MQTT 服务端模式**（一体化部署）
-```json
-"mqtt": {
-  "broker": "127.0.0.1",
-  "type": "tcp",
-  "port": 2883,
-  "client_id": "xiaozhi_server",
-  "username": "admin",
-  "password": "test!@#"
-},
-"mqtt_server": {
-  "enable": true,
-  "listen_host": "0.0.0.0",
-  "listen_port": 2883
-},
-"udp": {
-  "external_host": "127.0.0.1",
-  "external_port": 8990,
-  "listen_host": "0.0.0.0",
-  "listen_port": 8990
-},
-"ota": {
-  "test": {
-    "websocket": {
-      "url": "ws://192.168.208.214:8989/xiaozhi/v1/"
-    },
-    "mqtt": {
-      "enable": false,
-      "endpoint": "192.168.208.214"
-    }
-  },
-  "external": {
-    "websocket": {
-      "url": "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
-    },
-    "mqtt": {
-      "enable": false,
-      "endpoint": "www.youdomain.cn"
-    }
-  }
-}
+```yaml
+mqtt:
+  broker: "127.0.0.1"
+  type: "tcp"
+  port: 2883
+  client_id: "xiaozhi_server"
+  username: "admin"
+  password: "test!@#"
+mqtt_server:
+  enable: true
+  listen_host: "0.0.0.0"
+  listen_port: 2883
+udp:
+  external_host: "127.0.0.1"
+  external_port: 8990
+  listen_host: "0.0.0.0"
+  listen_port: 8990
+ota:
+  test:
+    websocket:
+      url: "ws://192.168.208.214:8989/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "192.168.208.214"
+  external:
+    websocket:
+      url: "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "www.youdomain.cn"
 ```
 
 **对接外部 MQTT Broker（如 EMQX/自研MQTT Server）**
-```json
-"mqtt": {
-  "broker": "emqx.example.com",
-  "type": "tcp",
-  "port": 1883,
-  "client_id": "xiaozhi_server",
-  "username": "admin",
-  "password": "test!@#"
-},
-"mqtt_server": {
-  "enable": false
-},
-"udp": {
-  "external_host": "公网IP",
-  "external_port": 8990,
-  "listen_host": "0.0.0.0",
-  "listen_port": 8990
-},
-"ota": {
-  "test": {
-    "websocket": {
-      "url": "ws://192.168.1.100:8989/xiaozhi/v1/"
-    },
-    "mqtt": {
-      "enable": false,
-      "endpoint": "192.168.1.100"
-    }
-  },
-  "external": {
-    "websocket": {
-      "url": "wss://emqx.example.com/go_ws/xiaozhi/v1/"
-    },
-    "mqtt": {
-      "enable": false,
-      "endpoint": "emqx.example.com"
-    }
-  }
-}
+```yaml
+mqtt:
+  broker: "emqx.example.com"
+  type: "tcp"
+  port: 1883
+  client_id: "xiaozhi_server"
+  username: "admin"
+  password: "test!@#"
+mqtt_server:
+  enable: false
+udp:
+  external_host: "公网IP"
+  external_port: 8990
+  listen_host: "0.0.0.0"
+  listen_port: 8990
+ota:
+  test:
+    websocket:
+      url: "ws://192.168.1.100:8989/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "192.168.1.100"
+  external:
+    websocket:
+      url: "wss://emqx.example.com/go_ws/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "emqx.example.com"
 ```
 
 ## 6. 推荐场景

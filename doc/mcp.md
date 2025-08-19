@@ -43,25 +43,21 @@ flowchart TD
 
 ## 4. 配置说明
 
-### config.json 示例
-```json
-{
-  "mcp": {
-    "global": {
-      "enabled": true,
-      "servers": [
-        { "name": "filesystem", "sse_url": "http://localhost:3001/sse", "enabled": true }
-      ],
-      "reconnect_interval": 5,
-      "max_reconnect_attempts": 10
-    },
-    "device": {
-      "enabled": true,
-      "websocket_path": "/xiaozhi/mcp/",
-      "max_connections_per_device": 5
-    }
-  }
-}
+### config.yaml 示例
+```yaml
+mcp:
+  global:
+    enabled: true
+    servers:
+      - name: "filesystem"
+        sse_url: "http://localhost:3001/sse"
+        enabled: true
+    reconnect_interval: 5
+    max_reconnect_attempts: 10
+  device:
+    enabled: true
+    websocket_path: "/xiaozhi/mcp/"
+    max_connections_per_device: 5
 ```
 
 ### 参数说明

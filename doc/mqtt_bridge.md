@@ -98,16 +98,15 @@ DEBUG=mqtt-server node app.js
 ### 1. 关键配置项说明
 
 #### 关闭 本地 MQTT 和 UDP服务器
-```json
-"mqtt": {
-  "enable": false,
-  "broker": "127.0.0.1",
-  "type": "tcp",
-  "port": 2883,
-  "client_id": "xiaozhi_server",
-  "username": "admin",
-  "password": "test!@#"
-}
+```yaml
+mqtt:
+  enable: false
+  broker: "127.0.0.1"
+  type: "tcp"
+  port: 2883
+  client_id: "xiaozhi_server"
+  username: "admin"
+  password: "test!@#"
 ```
 
 #### OTA 配置（设备通过 OTA 获取连接参数）
@@ -118,18 +117,21 @@ DEBUG=mqtt-server node app.js
 - `mqtt.enable`：是否启用 MQTT（true 时设备优先用 MQTT+UDP）
 
 
-```json
-"ota": {
-  "signature_key": "mqtt_key",
-  "test": {
-    "websocket": { "url": "ws://192.168.208.214:8989/xiaozhi/v1/" },
-    "mqtt": { "enable": true, "endpoint": "192.168.208.214:5883" }
-  },
-  "external": {
-    "websocket": { "url": "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/" },
-    "mqtt": { "enable": true, "endpoint": "mqtt.youdomain.cn" }
-  }
-}
+```yaml
+ota:
+  signature_key: "mqtt_key"
+  test:
+    websocket:
+      url: "ws://192.168.208.214:8989/xiaozhi/v1/"
+    mqtt:
+      enable: true
+      endpoint: "192.168.208.214:5883"
+  external:
+    websocket:
+      url: "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
+    mqtt:
+      enable: true
+      endpoint: "mqtt.youdomain.cn"
 ```
 ---
 

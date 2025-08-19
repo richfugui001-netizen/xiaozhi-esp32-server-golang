@@ -8,7 +8,7 @@
 
 所有主要配置都在：
 
-- `config/config.json`
+- `config/config.yaml`
 
 如找不到该文件，也可参考 `config/config.json.git`。
 
@@ -20,24 +20,22 @@
 WebSocket服务器用于设备与服务器之间的实时通信。
 
 ### 2.2 关键配置项
-在 `config/config.json` 文件中找到如下内容：
+在 `config/config.yaml` 文件中找到如下内容：
 
-```json
-"websocket": {
-  "host": "0.0.0.0",
-  "port": 8989
-}
+```yaml
+websocket:
+  host: "0.0.0.0"
+  port: 8989
 ```
 - `host`：监听地址，通常保持 `0.0.0.0` 即可。
 - `port`：监听端口，默认 `8989`，可根据需要修改。
 
 ### 2.3 修改方法
 如需更改端口为 9000：
-```json
-"websocket": {
-  "host": "0.0.0.0",
-  "port": 9000
-}
+```yaml
+websocket:
+  host: "0.0.0.0"
+  port: 9000
 ```
 
 ---
@@ -48,29 +46,22 @@ WebSocket服务器用于设备与服务器之间的实时通信。
 OTA用于设备自动获取服务器下发的WebSocket/MQTT连接参数和固件升级信息。
 
 ### 3.2 关键配置项
-在 `config/config.json` 文件中找到 `ota` 部分：
+在 `config/config.yaml` 文件中找到 `ota` 部分：
 
-```json
-"ota": {
-  "test": {
-    "websocket": {
-      "url": "ws://192.168.208.214:8989/xiaozhi/v1/"
-    },
-    "mqtt": {
-      "enable": false,
-      "endpoint": "192.168.208.214"
-    }
-  },
-  "external": {
-    "websocket": {
-      "url": "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
-    },
-    "mqtt": {
-      "enable": false,
-      "endpoint": "www.youdomain.cn"
-    }
-  }
-}
+```yaml
+ota:
+  test:
+    websocket:
+      url: "ws://192.168.208.214:8989/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "192.168.208.214"
+  external:
+    websocket:
+      url: "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "www.youdomain.cn"
 ```
 - `test`：内网环境下设备获取的参数，在程序中判断条件是以 192.168或127.0开头。
 - `external`：外网环境下设备获取的参数。
@@ -80,24 +71,18 @@ OTA用于设备自动获取服务器下发的WebSocket/MQTT连接参数和固件
 
 ### 3.3 常见修改举例
 - 修改内网WebSocket地址：
-  ```json
-  "ota": {
-    "test": {
-      "websocket": {
-        "url": "ws://192.168.1.100:8989/xiaozhi/v1/"
-      }
-    }
-  }
+  ```yaml
+  ota:
+    test:
+      websocket:
+        url: "ws://192.168.1.100:8989/xiaozhi/v1/"
   ```
 - 修改外网WebSocket地址：
-  ```json
-  "ota": {
-    "external": {
-      "websocket": {
-        "url": "wss://yourdomain.com:55555/go_ws/xiaozhi/v1/"
-      }
-    }
-  }
+  ```yaml
+  ota:
+    external:
+      websocket:
+        url: "wss://yourdomain.com:55555/go_ws/xiaozhi/v1/"
   ```
 
 ---
@@ -124,4 +109,4 @@ OTA用于设备自动获取服务器下发的WebSocket/MQTT连接参数和固件
 
 ---
 
-如有疑问，建议先检查 `config/config.json` 配置项，再查阅本说明。
+如有疑问，建议先检查 `config/config.yaml` 配置项，再查阅本说明。
