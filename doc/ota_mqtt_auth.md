@@ -6,35 +6,25 @@ OTA接口现在支持基于HMAC-SHA256签名的MQTT密码验证机制，提供�
 
 ## 配置结构
 
-### 配置文件 (config/config.json)
+### 配置文件 (config/config.yaml)
 
-```json
-{
-  "mqtt_server": {
-    "signature_key": "your_ota_signature_key_here"
-  },
-  "ota": {
-    "signature_key": "your_ota_signature_key_here",
-    "test": {
-      "websocket": {
-        "url": "ws://192.168.208.214:8989/xiaozhi/v1/"
-      },
-      "mqtt": {
-        "enable": false,
-        "endpoint": "192.168.208.214"
-      }
-    },
-    "external": {
-      "websocket": {
-        "url": "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
-      },
-      "mqtt": {
-        "enable": false,
-        "endpoint": "www.youdomain.cn"
-      }
-    }
-  }
-}
+```yaml
+mqtt_server:
+  signature_key: "your_ota_signature_key_here"
+ota:
+  signature_key: "your_ota_signature_key_here"
+  test:
+    websocket:
+      url: "ws://192.168.208.214:8989/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "192.168.208.214"
+  external:
+    websocket:
+      url: "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "www.youdomain.cn"
 ```
 
 ### 配置说明
@@ -103,8 +93,8 @@ GID_test@@@02_4A_7D_E3_89_BF@@@e3b0c442-98fc-4e1a-8c3d-6a5b6a5b6a5b
 
 Base64编码的JSON，包含客户端IP信息：
 
-```json
-{"ip":"1.202.193.194"}
+```yaml
+ip: "1.202.193.194"
 ```
 
 Base64编码后：
@@ -216,31 +206,21 @@ type MqttCredentialInfo struct {
 2. `ota.signature_key` 配置必须与 xiaozhi-mqtt-gateway 中的签名密钥保持一致
 3. 配置 xiaozhi-mqtt-gateway 的websocket后端为本项目地址
 
-```json
-{
-  "mqtt_server": {
-    "enable": false
-  },
-  "ota": {
-    "signature_key": "your_ota_signature_key_here",
-    "test": {         //内网测试的返回
-      "websocket": {
-        "url": "ws://192.168.208.214:8989/xiaozhi/v1/"
-      },
-      "mqtt": {
-        "enable": true,
-        "endpoint": "192.168.208.214:1883" //xiaozhi-mqtt-gateway中的mqtt server地址
-      }
-    },
-    "external": {     //外网的返回
-      "websocket": {
-        "url": "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
-      },
-      "mqtt": {
-        "enable": true,
-        "endpoint": "mqtt.youdomain.com:1883" //xiaozhi-mqtt-gateway中的mqtt  server地
-      }
-    }
-  }
-}
+```yaml
+mqtt_server:
+  enable: false
+ota:
+  signature_key: "your_ota_signature_key_here"
+  test:  # 内网测试的返回
+    websocket:
+      url: "ws://192.168.208.214:8989/xiaozhi/v1/"
+    mqtt:
+      enable: true
+      endpoint: "192.168.208.214:1883"  # xiaozhi-mqtt-gateway中的mqtt server地址
+  external:  # 外网的返回
+    websocket:
+      url: "wss://www.tb263.cn:55555/go_ws/xiaozhi/v1/"
+    mqtt:
+      enable: true
+      endpoint: "mqtt.youdomain.com:1883"  # xiaozhi-mqtt-gateway中的mqtt server地址
 ```

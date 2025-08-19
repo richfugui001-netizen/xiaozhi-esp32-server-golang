@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	"xiaozhi-esp32-server-golang/constants"
+	"xiaozhi-esp32-server-golang/internal/domain/asr/doubao"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
+	log "xiaozhi-esp32-server-golang/logger"
 )
 
 // Asr 语音识别接口
@@ -27,6 +29,15 @@ func NewAsrProvider(asrType string, config map[string]interface{}) (AsrProvider,
 	switch asrType {
 	case constants.AsrTypeFunAsr:
 		return NewFunasrAdapter(config)
+	case constants.AsrTypeDoubao:
+		log.Info("使用 豆包ASR 提供者")
+		provider, err := doubao.NewDoubaoV2Adapter(config)
+		if err != nil {
+			log.Errorf("豆包ASR适配器创建失败: %v", err)
+		} else {
+			log.Info("豆包ASR适配器创建成功")
+		}
+		return provider, err
 	default:
 		return nil, fmt.Errorf("不支持的ASR引擎类型: %s，目前仅支持 'funasr'", asrType)
 	}

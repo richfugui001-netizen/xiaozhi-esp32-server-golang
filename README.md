@@ -70,12 +70,12 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
         ```
 
    4. **准备配置文件**
-      - 复制或编辑 `config/config.json`，根据实际环境调整参数。
+      - 复制或编辑 `config/config.yaml`，根据实际环境调整参数。
       - 详细配置说明请参考 [配置文档](doc/config.md)
 
    5. **启动服务**
       ```bash
-      ./xiaozhi_server -c config/config.json
+      ./xiaozhi_server -c config/config.yaml
       ```
 
    ### 📚 相关文档 | Related Docs
