@@ -2,205 +2,234 @@
   <div class="user-console">
     <!-- 页面头部 -->
     <div class="page-header">
+      <div class="header-bg"></div>
       <div class="header-content">
-        <div class="title-section">
-          <el-icon class="title-icon">
-            <Monitor />
-          </el-icon>
-          <h1 class="page-title">智能体控制台</h1>
+        <div class="welcome-section">
+          <div class="avatar-section">
+            <div class="user-avatar">
+              <el-icon><Avatar /></el-icon>
+            </div>
+            <div class="welcome-text">
+              <h1 class="welcome-title">欢迎回来！</h1>
+              <p class="welcome-subtitle">管理您的智能设备和AI助手</p>
+            </div>
+          </div>
+          <div class="quick-stats">
+            <div class="stat-item online">
+              <div class="stat-icon">
+                <el-icon><Connection /></el-icon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-number">{{ onlineDevicesCount }}</div>
+                <div class="stat-label">在线设备</div>
+              </div>
+            </div>
+            <div class="stat-item agents">
+              <div class="stat-icon">
+                <el-icon><Monitor /></el-icon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-number">{{ agents.length }}</div>
+                <div class="stat-label">智能体</div>
+              </div>
+            </div>
+            <div class="stat-item active">
+              <div class="stat-icon">
+                <el-icon><CircleCheck /></el-icon>
+              </div>
+              <div class="stat-info">
+                <div class="stat-number">{{ activeAgentsCount }}</div>
+                <div class="stat-label">活跃助手</div>
+              </div>
+            </div>
+          </div>
         </div>
-        <p class="page-description">管理您的设备和智能体，实时监控运行状态</p>
       </div>
     </div>
 
-    <!-- 设备状态卡片 -->
-    <div class="devices-section">
-      <h2 class="section-title">
-        <el-icon><Connection /></el-icon>
-        我的设备
-      </h2>
-      
-      <div v-if="devices.length === 0" class="empty-state">
-        <el-empty description="暂无设备">
-          <el-button type="primary" @click="showAddDevice = true">
+    <!-- 主要内容区域 -->
+    <div class="main-content">
+      <!-- 设备管理 -->
+      <div class="content-section">
+        <div class="section-header">
+          <div class="section-title">
+            <el-icon class="title-icon"><Cpu /></el-icon>
+            <span>智能设备</span>
+            <span class="device-count">{{ allDevicesData.length }}</span>
+          </div>
+          <el-button type="primary" @click="addDevice" class="add-btn">
             <el-icon><Plus /></el-icon>
             添加设备
           </el-button>
-        </el-empty>
-      </div>
-      
-      <div v-else class="devices-grid">
-        <el-row :gutter="20">
-          <el-col :span="8" v-for="device in devices" :key="device.id">
-            <el-card class="device-card" shadow="hover">
-              <template #header>
-                <div class="device-header">
-                  <div class="device-info">
-                    <h3 class="device-name">{{ device.name }}</h3>
-                    <el-tag 
-                      :type="device.status === 'online' ? 'success' : 'danger'"
-                      size="small"
-                    >
-                      {{ device.status === 'online' ? '在线' : '离线' }}
-                    </el-tag>
-                  </div>
-                  <div class="device-actions">
-                    <el-button 
-                      type="primary" 
-                      size="small" 
-                      @click="openDeviceControl(device)"
-                    >
-                      控制
-                    </el-button>
-                  </div>
-                </div>
-              </template>
+        </div>
+        
+        <div v-if="devices.length === 0" class="empty-container">
+          <div class="empty-content">
+            <div class="empty-icon">
+              <el-icon><Monitor /></el-icon>
+            </div>
+            <h3>还没有设备</h3>
+            <p>添加您的第一个智能设备，开始AI交互之旅</p>
+            <el-button type="primary" size="large" @click="addDevice">
+              <el-icon><Plus /></el-icon>
+              添加设备
+            </el-button>
+          </div>
+        </div>
+        
+        <div v-else class="devices-grid">
+          <div v-for="device in devices" :key="device.id" class="device-item">
+            <div class="device-card">
+              <div class="device-status">
+                <div class="status-indicator" :class="isDeviceOnline(device.last_active_at) ? 'online' : 'offline'"></div>
+                <span class="status-text">{{ isDeviceOnline(device.last_active_at) ? '在线' : '离线' }}</span>
+              </div>
               
-              <div class="device-content">
-                <div class="device-stats">
-                  <div class="stat-item">
-                    <span class="stat-label">语音识别:</span>
-                    <el-tag :type="device.vad_status ? 'success' : 'info'" size="small">
-                      {{ device.vad_status ? '启用' : '禁用' }}
-                    </el-tag>
-                  </div>
-                  <div class="stat-item">
-                    <span class="stat-label">智能体:</span>
-                    <span class="stat-value">{{ device.agent_name || '未绑定' }}</span>
-                  </div>
-                  <div class="stat-item">
-                    <span class="stat-label">最后活跃:</span>
-                    <span class="stat-value">{{ formatTime(device.last_active) }}</span>
-                  </div>
+              <div class="device-info">
+                <div class="device-icon">
+                  <el-icon><Monitor /></el-icon>
+                </div>
+                <div class="device-details">
+                  <h3 class="device-name">{{ device.device_name || '未命名设备' }}</h3>
+                  <p class="device-desc">{{ device.device_code }}</p>
+                </div>
+              </div>
+              
+              <div class="device-features">
+                <div class="feature-item">
+                  <el-icon class="feature-icon"><Microphone /></el-icon>
+                  <span class="feature-label">语音识别</span>
+                  <el-switch 
+                    v-model="device.vad_status" 
+                    @change="toggleVAD(device)"
+                    :loading="device.loading"
+                    size="small"
+                  />
                 </div>
                 
-                <!-- 语音识别控制 -->
-                <div class="voice-control">
-                  <div class="control-header">
-                    <el-icon><Microphone /></el-icon>
-                    <span>语音识别</span>
-                  </div>
-                  <div class="control-actions">
-                    <el-button 
-                      :type="device.vad_status ? 'danger' : 'success'"
-                      size="small"
-                      @click="toggleVAD(device)"
-                      :loading="device.loading"
-                    >
-                      {{ device.vad_status ? '停止识别' : '开始识别' }}
-                    </el-button>
-                  </div>
+                <div class="feature-item">
+                  <el-icon class="feature-icon"><User /></el-icon>
+                  <span class="feature-label">智能体</span>
+                  <span class="feature-value">{{ device.agent_name || '未绑定' }}</span>
+                </div>
+                
+                <div class="feature-item">
+                  <el-icon class="feature-icon"><CircleCheck /></el-icon>
+                  <span class="feature-label">激活状态</span>
+                  <span class="feature-value">
+                    <el-tag :type="device.activated ? 'success' : 'warning'" size="small">
+                      {{ device.activated ? '已激活' : '未激活' }}
+                    </el-tag>
+                  </span>
+                </div>
+                
+                <div class="feature-item">
+                  <el-icon class="feature-icon"><Clock /></el-icon>
+                  <span class="feature-label">活跃时间</span>
+                  <span class="feature-value">{{ formatTime(device.last_active_at) }}</span>
                 </div>
               </div>
-            </el-card>
-          </el-col>
-        </el-row>
+              
+              <div class="device-actions">
+                <el-button type="primary" size="small" @click="openDeviceControl(device)" class="control-btn">
+                  <el-icon><Setting /></el-icon>
+                  控制面板
+                </el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 查看更多 -->
+        <div v-if="allDevicesData.length > 6" class="load-more">
+          <el-button 
+            type="text" 
+            @click="toggleShowAllDevices"
+            class="load-more-btn"
+          >
+            <span v-if="!showAllDevices">
+              显示全部设备 ({{ allDevicesData.length - 6 }}+)
+              <el-icon><ArrowDown /></el-icon>
+            </span>
+            <span v-else>
+              收起设备列表
+              <el-icon><ArrowUp /></el-icon>
+            </span>
+          </el-button>
+        </div>
       </div>
-      
-      <!-- 查看更多按钮 -->
-      <div v-if="allDevicesData.length > 6 && !showAllDevices" class="show-more-section">
-        <el-button type="text" @click="toggleShowAllDevices">
-          查看更多设备 ({{ allDevicesData.length - 6 }})
-          <el-icon><ArrowDown /></el-icon>
-        </el-button>
-      </div>
-      
-      <div v-if="showAllDevices && allDevicesData.length > 6" class="show-less-section">
-        <el-button type="text" @click="toggleShowAllDevices">
-          收起设备列表
-          <el-icon><ArrowUp /></el-icon>
-        </el-button>
+
+      <!-- 智能体管理 -->
+      <div class="content-section">
+        <div class="section-header">
+          <div class="section-title">
+            <el-icon class="title-icon"><User /></el-icon>
+            <span>AI 智能体</span>
+            <span class="device-count">{{ agents.length }}</span>
+          </div>
+          <el-button type="primary" @click="$router.push('/agents')" class="add-btn">
+            <el-icon><Setting /></el-icon>
+            管理智能体
+          </el-button>
+        </div>
+        
+        <div v-if="agents.length === 0" class="empty-container">
+          <div class="empty-content">
+            <div class="empty-icon">
+              <el-icon><User /></el-icon>
+            </div>
+            <h3>还没有智能体</h3>
+            <p>创建您的专属AI助手，享受个性化服务</p>
+            <el-button type="primary" size="large" @click="$router.push('/agents')">
+              <el-icon><Plus /></el-icon>
+              创建智能体
+            </el-button>
+          </div>
+        </div>
+        
+        <div v-else class="agents-grid">
+          <div v-for="agent in agents.slice(0, 4)" :key="agent.id" class="agent-item">
+            <div class="agent-card" @click="selectAgent(agent)">
+              <div class="agent-status">
+                <div class="status-indicator" :class="agent.status === 'active' ? 'online' : 'offline'"></div>
+                <span class="status-text">{{ agent.status === 'active' ? '活跃' : '待机' }}</span>
+              </div>
+              
+              <div class="agent-avatar">
+                <div class="avatar-bg" :class="getAgentAvatarClass(agent)">
+                  <el-icon><User /></el-icon>
+                </div>
+              </div>
+              
+              <div class="agent-info">
+                <h3 class="agent-name">{{ agent.name }}</h3>
+                <p class="agent-desc">{{ agent.description || '智能AI助手' }}</p>
+              </div>
+              
+              <div class="agent-stats">
+                <div class="stat-row">
+                  <span class="stat-label">对话次数</span>
+                  <span class="stat-value">{{ agent.conversation_count || 0 }}</span>
+                </div>
+                <div class="stat-row">
+                  <span class="stat-label">创建时间</span>
+                  <span class="stat-value">{{ formatDate(agent.created_at) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div v-if="agents.length > 4" class="load-more">
+          <el-button type="text" @click="$router.push('/agents')" class="load-more-btn">
+            查看全部智能体 ({{ agents.length - 4 }}+)
+            <el-icon><ArrowRight /></el-icon>
+          </el-button>
+        </div>
       </div>
     </div>
 
-    <!-- 智能体快速访问 -->
-    <div class="agents-section">
-      <div class="section-header">
-        <h2 class="section-title">
-          <el-icon><Monitor /></el-icon>
-          我的智能体
-        </h2>
-        <el-button type="primary" @click="$router.push('/agents')">
-          <el-icon><Setting /></el-icon>
-          管理智能体
-        </el-button>
-      </div>
-      
-      <div v-if="agents.length === 0" class="empty-state">
-        <el-empty description="暂无智能体">
-          <el-button type="primary" @click="$router.push('/agents')">
-            <el-icon><Plus /></el-icon>
-            创建智能体
-          </el-button>
-        </el-empty>
-      </div>
-      
-      <div v-else class="agents-grid">
-        <el-row :gutter="20">
-          <el-col :span="6" v-for="agent in agents.slice(0, 4)" :key="agent.id">
-            <el-card class="agent-card" shadow="hover" @click="selectAgent(agent)">
-              <div class="agent-content">
-                <div class="agent-icon">
-                  <el-icon size="32"><Monitor /></el-icon>
-                </div>
-                <div class="agent-info">
-                  <h4 class="agent-name">{{ agent.name }}</h4>
-                  <p class="agent-desc">{{ agent.description || '暂无描述' }}</p>
-                  <el-tag 
-                    :type="agent.status === 'active' ? 'success' : 'info'"
-                    size="small"
-                  >
-                    {{ agent.status === 'active' ? '活跃' : '非活跃' }}
-                  </el-tag>
-                </div>
-              </div>
-            </el-card>
-          </el-col>
-        </el-row>
-      </div>
-    </div>
 
-    <!-- 添加设备弹窗 -->
-    <el-dialog
-      v-model="showAddDevice"
-      title="添加设备"
-      width="500px"
-    >
-      <el-form
-        ref="deviceFormRef"
-        :model="deviceForm"
-        :rules="deviceRules"
-        label-width="100px"
-      >
-        <el-form-item label="设备名称" prop="name">
-          <el-input
-            v-model="deviceForm.name"
-            placeholder="请输入设备名称"
-          />
-        </el-form-item>
-        <el-form-item label="设备激活码" prop="device_code">
-          <el-input
-            v-model="deviceForm.device_code"
-            placeholder="请输入设备激活码"
-          />
-        </el-form-item>
-        <el-form-item label="描述" prop="description">
-          <el-input
-            v-model="deviceForm.description"
-            type="textarea"
-            placeholder="请输入设备描述（可选）"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showAddDevice = false">取消</el-button>
-          <el-button type="primary" @click="addDevice" :loading="adding">
-            添加
-          </el-button>
-        </span>
-      </template>
-    </el-dialog>
 
     <!-- 设备控制弹窗 -->
     <el-dialog
@@ -261,30 +290,22 @@ import {
   VideoPause,
   Refresh,
   ArrowDown,
-  ArrowUp
+  ArrowUp,
+  ArrowRight,
+  Avatar,
+  CircleCheck,
+  Cpu,
+  User,
+  Clock
 } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const devices = ref([])
 const agents = ref([])
 const allDevicesData = ref([])
-const showAddDevice = ref(false)
 const showDeviceControl = ref(false)
 const currentDevice = ref(null)
-const adding = ref(false)
-const deviceFormRef = ref(null)
 const showAllDevices = ref(false)
-
-const deviceForm = reactive({
-  name: '',
-  device_code: '',
-  description: ''
-})
-
-const deviceRules = {
-  name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }],
-  device_code: [{ required: true, message: '请输入设备激活码', trigger: 'blur' }]
-}
 
 // 加载设备列表
 const loadDevices = async () => {
@@ -299,6 +320,8 @@ const loadDevices = async () => {
     }))
     // 限制显示最多6个设备
     devices.value = showAllDevices.value ? allDevicesData.value : allDevicesData.value.slice(0, 6)
+    // 更新统计数据
+    updateStats()
   } catch (error) {
     console.error('加载设备失败:', error)
     ElMessage.error('加载设备失败')
@@ -312,6 +335,8 @@ const loadAgents = async () => {
   try {
     const response = await api.get('/user/agents')
     agents.value = response.data.data || []
+    // 更新统计数据
+    updateStats()
   } catch (error) {
     console.error('加载智能体失败:', error)
     ElMessage.error('加载智能体失败')
@@ -359,42 +384,42 @@ const selectAgent = (agent) => {
   // 可以跳转到智能体详情页或执行其他操作
 }
 
-// 添加设备
-const addDevice = async () => {
-  if (!deviceFormRef.value) return
-  
-  try {
-    await deviceFormRef.value.validate()
-  } catch (error) {
-    return
-  }
-  
-  adding.value = true
-  try {
-    // 模拟API调用
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    ElMessage.success('添加设备成功')
-    showAddDevice.value = false
-    // 重置表单
-    Object.assign(deviceForm, {
-      name: '',
-      device_code: '',
-      description: ''
-    })
-    // 重新加载设备列表
-    await loadDevices()
-  } catch (error) {
-    console.error('添加设备失败:', error)
-    ElMessage.error('添加设备失败')
-  } finally {
-    adding.value = false
-  }
+// 跳转到智能体页面添加设备
+const addDevice = () => {
+  ElMessage.info('请先创建智能体，然后在智能体页面添加设备')
+  // 跳转到智能体页面
+  window.location.href = '/agents'
 }
 
 // 切换显示所有设备
 const toggleShowAllDevices = () => {
   showAllDevices.value = !showAllDevices.value
   devices.value = showAllDevices.value ? allDevicesData.value : allDevicesData.value.slice(0, 6)
+}
+
+// 计算属性
+const onlineDevicesCount = ref(0)
+const activeAgentsCount = ref(0)
+
+// 判断设备是否在线（基于最后活跃时间）
+const isDeviceOnline = (lastActiveAt) => {
+  if (!lastActiveAt) return false
+  const now = new Date()
+  const lastActive = new Date(lastActiveAt)
+  // 5分钟内有活动认为在线
+  return (now - lastActive) < 5 * 60 * 1000
+}
+
+// 更新统计数据
+const updateStats = () => {
+  onlineDevicesCount.value = allDevicesData.value.filter(device => isDeviceOnline(device.last_active_at)).length
+  activeAgentsCount.value = agents.value.filter(agent => agent.status === 'active').length
+}
+
+// 获取智能体头像类
+const getAgentAvatarClass = (agent) => {
+  const classes = ['avatar-blue', 'avatar-green', 'avatar-purple', 'avatar-orange']
+  return classes[agent.id % classes.length] || 'avatar-blue'
 }
 
 // 格式化时间
@@ -413,6 +438,12 @@ const formatTime = (date) => {
   return `${Math.floor(days / 30)}个月前`
 }
 
+// 格式化日期
+const formatDate = (dateString) => {
+  if (!dateString) return '--'
+  return new Date(dateString).toLocaleDateString('zh-CN')
+}
+
 onMounted(() => {
   loadDevices()
   loadAgents()
@@ -423,299 +454,554 @@ onMounted(() => {
 .user-console {
   min-height: 100vh;
   background: #f8f9fa;
-  padding: 24px;
+  padding: 0;
 }
 
-/* 页面头部 */
+/* 页面头部样式 */
 .page-header {
-  margin-bottom: 32px;
+  background: #ffffff;
+  padding: 24px 0;
+  margin-bottom: 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.header-bg {
+  display: none;
 }
 
 .header-content {
   max-width: 1200px;
   margin: 0 auto;
+  padding: 0 24px;
+  color: #495057;
 }
 
-.title-section {
+.welcome-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 40px;
+}
+
+.avatar-section {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-bottom: 8px;
 }
 
-.title-icon {
-  font-size: 32px;
-  color: #409eff;
+.user-avatar {
+  width: 48px;
+  height: 48px;
+  background: #e9ecef;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #6c757d;
+  border: 1px solid #dee2e6;
 }
 
-.page-title {
-  font-size: 28px;
+.welcome-title {
+  font-size: 24px;
   font-weight: 600;
-  color: #1f2937;
-  margin: 0;
-  background: linear-gradient(135deg, #409eff 0%, #67c23a 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  margin: 0 0 4px 0;
+  color: #212529;
 }
 
-.page-description {
-  font-size: 16px;
-  color: #6b7280;
+.welcome-subtitle {
+  font-size: 14px;
   margin: 0;
-  margin-left: 48px;
+  color: #6c757d;
 }
 
-/* 区域标题 */
-.section-title {
+.quick-stats {
+  display: flex;
+  gap: 20px;
+}
+
+.quick-stats .stat-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 20px;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 20px;
+  background: #ffffff;
+  padding: 16px 20px;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
 }
 
+.quick-stats .stat-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: #ffffff;
+}
+
+.quick-stats .stat-item.online .stat-icon {
+  background: #28a745;
+}
+
+.quick-stats .stat-item.agents .stat-icon {
+  background: #007bff;
+}
+
+.quick-stats .stat-item.active .stat-icon {
+  background: #17a2b8;
+}
+
+.quick-stats .stat-number {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+  color: #212529;
+}
+
+.quick-stats .stat-label {
+  font-size: 12px;
+  color: #6c757d;
+  margin-top: 2px;
+}
+
+/* 主要内容区域 */
+.main-content {
+  max-width: 1200px;
+  margin: 24px auto 40px;
+  padding: 0 24px;
+}
+
+.content-section {
+  background: white;
+  border-radius: 8px;
+  padding: 24px;
+  margin-bottom: 24px;
+  border: 1px solid #dee2e6;
+}
+
+/* 区域头部 */
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e9ecef;
 }
 
-/* 设备区域 */
-.devices-section {
-  max-width: 1200px;
-  margin: 0 auto 40px;
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #212529;
 }
 
+.title-icon {
+  width: 24px;
+  height: 24px;
+  background: #007bff;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 12px;
+}
+
+.device-count {
+  background: #f8f9fa;
+  color: #6c757d;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.add-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 4px;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+/* 设备网格 */
 .devices-grid {
-  margin-bottom: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.device-item {
+  position: relative;
 }
 
 .device-card {
-  border-radius: 12px;
-  transition: all 0.3s ease;
-  border: 1px solid #e5e7eb;
+  background: white;
+  border-radius: 6px;
+  padding: 16px;
+  border: 1px solid #dee2e6;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .device-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1);
+  border-color: #007bff;
 }
 
-.device-header {
+.device-status {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-indicator.online {
+  background: #28a745;
+}
+
+.status-indicator.offline {
+  background: #dc3545;
+}
+
+.status-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6c757d;
 }
 
 .device-info {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.device-name {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.device-content {
-  padding: 16px 0;
-}
-
-.device-stats {
   margin-bottom: 16px;
 }
 
-.stat-item {
+.device-icon {
+  width: 40px;
+  height: 40px;
+  background: #007bff;
+  border-radius: 6px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  justify-content: center;
+  color: white;
+  font-size: 18px;
 }
 
-.stat-label {
-  font-size: 14px;
-  color: #6b7280;
+.device-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #212529;
+  margin: 0 0 2px 0;
 }
 
-.stat-value {
-  font-size: 14px;
-  color: #1f2937;
-  font-weight: 500;
+.device-desc {
+  font-size: 12px;
+  color: #6c757d;
+  margin: 0;
 }
 
-.voice-control {
-  border-top: 1px solid #e5e7eb;
-  padding-top: 16px;
+.device-features {
+  flex: 1;
+  margin-bottom: 16px;
 }
 
-.control-header {
+.feature-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
-  font-size: 14px;
-  font-weight: 500;
-  color: #374151;
+  padding: 8px 0;
+  border-bottom: 1px solid #f8f9fa;
 }
 
-.control-actions {
-  display: flex;
-  gap: 8px;
+.feature-item:last-child {
+  border-bottom: none;
 }
 
-/* 智能体区域 */
-.agents-section {
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.agents-grid {
-  margin-bottom: 20px;
-}
-
-.agent-card {
-  border-radius: 12px;
-  transition: all 0.3s ease;
-  cursor: pointer;
-  border: 1px solid #e5e7eb;
-}
-
-.agent-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1);
-  border-color: #409eff;
-}
-
-.agent-content {
+.feature-icon {
+  width: 20px;
+  height: 20px;
+  background: #f8f9fa;
+  border-radius: 4px;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px;
+  justify-content: center;
+  color: #007bff;
+  font-size: 12px;
 }
 
-.agent-icon {
-  color: #409eff;
-}
-
-.agent-info {
+.feature-label {
+  font-size: 12px;
+  color: #6c757d;
   flex: 1;
 }
 
+.feature-value {
+  font-size: 12px;
+  color: #212529;
+  font-weight: 500;
+}
+
+.device-actions {
+  margin-top: auto;
+}
+
+.control-btn {
+  width: 100%;
+  height: 32px;
+  border-radius: 4px;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* 智能体网格 */
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.agent-item {
+  position: relative;
+}
+
+.agent-card {
+  background: white;
+  border-radius: 6px;
+  padding: 16px;
+  border: 1px solid #dee2e6;
+  cursor: pointer;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-card:hover {
+  border-color: #007bff;
+}
+
+.agent-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.agent-avatar {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.avatar-bg {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 20px;
+}
+
+.avatar-bg.avatar-blue {
+  background: #007bff;
+}
+
+.avatar-bg.avatar-green {
+  background: #28a745;
+}
+
+.avatar-bg.avatar-purple {
+  background: #6f42c1;
+}
+
+.avatar-bg.avatar-orange {
+  background: #fd7e14;
+}
+
+.agent-info {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
 .agent-name {
-  margin: 0 0 8px 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
-  color: #1f2937;
+  color: #212529;
+  margin: 0 0 4px 0;
 }
 
 .agent-desc {
-  margin: 0 0 8px 0;
-  font-size: 14px;
-  color: #6b7280;
+  font-size: 12px;
+  color: #6c757d;
+  margin: 0;
   line-height: 1.4;
 }
 
-/* 空状态 */
-.empty-state {
-  text-align: center;
-  padding: 40px 20px;
+.agent-stats {
+  flex: 1;
 }
 
-/* 查看更多按钮 */
-.show-more-section,
-.show-less-section {
-  text-align: center;
-  margin-top: 20px;
-  padding: 16px;
-}
-
-.show-more-section .el-button,
-.show-less-section .el-button {
-  font-size: 14px;
-  color: #409eff;
-}
-
-.show-more-section .el-button:hover,
-.show-less-section .el-button:hover {
-  color: #66b1ff;
-}
-
-/* 设备控制面板 */
-.device-control-panel {
-  padding: 20px 0;
-}
-
-.control-section {
-  margin-bottom: 24px;
-}
-
-.control-section h4 {
-  margin: 0 0 16px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.control-buttons {
+.stat-row {
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #f8f9fa;
 }
 
-.voice-settings {
+.stat-row:last-child {
+  border-bottom: none;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #6c757d;
+}
+
+.stat-value {
+  font-size: 12px;
+  color: #212529;
+  font-weight: 500;
+}
+
+/* 空状态 */
+.empty-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+}
+
+.empty-content {
+  text-align: center;
+  max-width: 300px;
+}
+
+.empty-icon {
+  width: 64px;
+  height: 64px;
   background: #f8f9fa;
-  padding: 16px;
   border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: #adb5bd;
+  margin: 0 auto 16px;
+}
+
+.empty-content h3 {
+  font-size: 16px;
+  color: #212529;
+  margin: 0 0 8px 0;
+  font-weight: 600;
+}
+
+.empty-content p {
+  font-size: 14px;
+  color: #6c757d;
+  margin: 0 0 16px 0;
+  line-height: 1.4;
+}
+
+/* 加载更多 */
+.load-more {
+  text-align: center;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e9ecef;
+}
+
+.load-more-btn {
+  font-size: 14px;
+  color: #007bff;
+  font-weight: 500;
+}
+
+.load-more-btn:hover {
+  color: #0056b3;
 }
 
 /* 响应式设计 */
+@media (max-width: 1024px) {
+  .welcome-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  
+  .quick-stats {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  
+  .devices-grid {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+}
+
 @media (max-width: 768px) {
-  .user-console {
+  .page-header {
+    padding: 16px 0;
+  }
+  
+  .header-content {
+    padding: 0 16px;
+  }
+  
+  .welcome-title {
+    font-size: 20px;
+  }
+  
+  .main-content {
+    margin: 16px auto 24px;
+    padding: 0 16px;
+  }
+  
+  .content-section {
     padding: 16px;
-  }
-  
-  .page-title {
-    font-size: 24px;
-  }
-  
-  .devices-grid .el-col,
-  .agents-grid .el-col {
     margin-bottom: 16px;
   }
   
   .section-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 16px;
+    gap: 12px;
+  }
+  
+  .devices-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .agents-grid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   }
 }
 
 @media (max-width: 480px) {
-  .title-section {
+  .quick-stats {
     flex-direction: column;
-    align-items: flex-start;
     gap: 8px;
   }
   
-  .page-description {
-    margin-left: 0;
-  }
-  
-  .device-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-  
-  .control-buttons {
-    flex-direction: column;
+  .agents-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

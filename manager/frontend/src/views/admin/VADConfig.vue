@@ -15,7 +15,15 @@
     <el-table :data="configs" style="width: 100%" v-loading="loading">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="name" label="配置名称" />
+      <el-table-column prop="config_id" label="配置ID" width="150" />
       <el-table-column prop="provider" label="提供商" />
+      <el-table-column prop="enabled" label="启用状态" width="100">
+        <template #default="scope">
+          <el-tag :type="scope.row.enabled ? 'success' : 'danger'">
+            {{ scope.row.enabled ? '已启用' : '已禁用' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="is_default" label="默认配置" width="100">
         <template #default="scope">
           <el-tag :type="scope.row.is_default ? 'success' : 'info'">
@@ -28,9 +36,16 @@
           {{ formatDate(scope.row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200">
+      <el-table-column label="操作" width="280">
         <template #default="scope">
           <el-button size="small" @click="editConfig(scope.row)">编辑</el-button>
+          <el-button
+            size="small"
+            :type="scope.row.enabled ? 'warning' : 'success'"
+            @click="toggleEnable(scope.row)"
+          >
+            {{ scope.row.enabled ? '禁用' : '启用' }}
+          </el-button>
           <el-button
             size="small"
             type="danger"
@@ -47,6 +62,7 @@
       v-model="showDialog"
       :title="editingConfig ? '编辑VAD配置' : '添加VAD配置'"
       width="600px"
+      @close="handleDialogClose"
     >
       <el-form
         ref="formRef"
@@ -56,6 +72,10 @@
       >
         <el-form-item label="配置名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入配置名称" />
+        </el-form-item>
+        
+        <el-form-item label="配置ID" prop="config_id">
+          <el-input v-model="form.config_id" placeholder="请输入唯一的配置ID" />
         </el-form-item>
         
         <el-form-item label="提供商" prop="provider">
@@ -135,7 +155,7 @@
       </el-form>
       
       <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
+        <el-button @click="handleDialogClose">取消</el-button>
         <el-button type="primary" @click="handleSave" :loading="saving">
           保存
         </el-button>
@@ -159,6 +179,7 @@ const formRef = ref()
 
 const form = reactive({
   name: '',
+  config_id: '',
   provider: '',
   is_default: false,
   webrtc_vad: {
@@ -191,6 +212,7 @@ const generateConfig = () => {
 
 const rules = {
   name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
+  config_id: [{ required: true, message: '请输入配置ID', trigger: 'blur' }],
   provider: [{ required: true, message: '请选择提供商', trigger: 'change' }],
   'webrtc_vad.pool_min_size': [{ required: true, message: '请输入最小连接池大小', trigger: 'blur' }],
   'webrtc_vad.pool_max_size': [{ required: true, message: '请输入最大连接池大小', trigger: 'blur' }],
@@ -221,12 +243,13 @@ const loadConfigs = async () => {
 const editConfig = (config) => {
   editingConfig.value = config
   form.name = config.name
+  form.config_id = config.config_id
   form.provider = config.provider
   form.is_default = config.is_default
   
   // 解析配置JSON并填充到对应字段
   try {
-    const configObj = JSON.parse(config.config || '{}')
+    const configObj = JSON.parse(config.json_data || '{}')
     if (configObj.webrtc_vad) {
       form.webrtc_vad = { ...form.webrtc_vad, ...configObj.webrtc_vad }
     }
@@ -249,9 +272,10 @@ const handleSave = async () => {
       try {
         const configData = {
           name: form.name,
+          config_id: form.config_id,
           provider: form.provider,
           is_default: form.is_default,
-          config: generateConfig()
+          json_data: generateConfig()
         }
 
         if (editingConfig.value) {
@@ -263,7 +287,6 @@ const handleSave = async () => {
         }
         
         showDialog.value = false
-        resetForm()
         loadConfigs()
       } catch (error) {
         ElMessage.error('保存失败: ' + (error.response?.data?.message || error.message))
@@ -272,6 +295,25 @@ const handleSave = async () => {
       }
     }
   })
+}
+
+const toggleEnable = async (config) => {
+  try {
+    const action = config.enabled ? '禁用' : '启用'
+    await ElMessageBox.confirm(`确定要${action}这个配置吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    await api.post(`/admin/configs/${config.id}/toggle`)
+    ElMessage.success(`${action}成功`)
+    loadConfigs()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('操作失败')
+    }
+  }
 }
 
 const deleteConfig = async (id) => {
@@ -296,6 +338,7 @@ const resetForm = () => {
   editingConfig.value = null
   Object.assign(form, {
     name: '',
+    config_id: '',
     provider: '',
     is_default: false,
     webrtc_vad: {
@@ -315,6 +358,14 @@ const resetForm = () => {
       acquire_timeout_ms: 3000
     }
   })
+}
+
+const handleDialogClose = () => {
+  showDialog.value = false
+  resetForm()
+  if (formRef.value) {
+    formRef.value.resetFields()
+  }
 }
 
 const formatDate = (dateString) => {

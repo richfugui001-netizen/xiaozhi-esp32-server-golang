@@ -21,10 +21,18 @@
       <el-table-column prop="device_code" label="设备代码" width="150" />
       <el-table-column prop="device_name" label="设备名称" width="150" />
       <el-table-column prop="user_id" label="用户ID" width="100" />
-      <el-table-column prop="status" label="状态" width="100">
+      <el-table-column label="关联智能体" width="150">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'online' ? 'success' : 'danger'">
-            {{ row.status === 'online' ? '在线' : '离线' }}
+          <span v-if="row.agent_id > 0">
+            智能体 {{ row.agent_id }}
+          </span>
+          <el-tag v-else type="info" size="small">未分配</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="在线状态" width="100">
+        <template #default="{ row }">
+          <el-tag :type="isDeviceOnline(row.last_active_at) ? 'success' : 'danger'">
+            {{ isDeviceOnline(row.last_active_at) ? '在线' : '离线' }}
           </el-tag>
         </template>
       </el-table-column>
@@ -66,12 +74,6 @@
         <el-form-item label="设备名称" prop="device_name">
           <el-input v-model="deviceForm.device_name" placeholder="请输入设备名称" />
         </el-form-item>
-        <el-form-item label="状态" prop="status">
-          <el-select v-model="deviceForm.status" style="width: 100%">
-            <el-option label="在线" value="online" />
-            <el-option label="离线" value="offline" />
-          </el-select>
-        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showAddDialog = false">取消</el-button>
@@ -99,15 +101,13 @@ const deviceFormRef = ref()
 const deviceForm = ref({
   user_id: null,
   device_code: '',
-  device_name: '',
-  status: 'offline'
+  device_name: ''
 })
 
 const deviceRules = {
   user_id: [{ required: true, message: '请输入用户ID', trigger: 'blur' }],
   device_code: [{ required: true, message: '请输入设备代码', trigger: 'blur' }],
-  device_name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }],
-  status: [{ required: true, message: '请选择状态', trigger: 'change' }]
+  device_name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }]
 }
 
 const loadDevices = async () => {
@@ -128,8 +128,7 @@ const editDevice = (device) => {
   deviceForm.value = {
     user_id: device.user_id,
     device_code: device.device_code,
-    device_name: device.device_name,
-    status: device.status
+    device_name: device.device_name
   }
   showAddDialog.value = true
 }
@@ -188,12 +187,20 @@ const resetForm = () => {
   deviceForm.value = {
     user_id: null,
     device_code: '',
-    device_name: '',
-    status: 'offline'
+    device_name: ''
   }
   if (deviceFormRef.value) {
     deviceFormRef.value.resetFields()
   }
+}
+
+// 判断设备是否在线（基于最后活跃时间）
+const isDeviceOnline = (lastActiveAt) => {
+  if (!lastActiveAt) return false
+  const now = new Date()
+  const lastActive = new Date(lastActiveAt)
+  // 5分钟内有活动认为在线
+  return (now - lastActive) < 5 * 60 * 1000
 }
 
 onMounted(() => {

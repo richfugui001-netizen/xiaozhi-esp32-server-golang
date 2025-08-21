@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
-	"xiaozhi/manager/backend/models"
 )
 
 // GormBaseStorage 通用GORM存储基类
@@ -19,17 +18,6 @@ func NewGormBaseStorage(db *gorm.DB) *GormBaseStorage {
 	return &GormBaseStorage{
 		DB: db,
 	}
-}
-
-// AutoMigrate 自动迁移数据库表结构
-func (s *GormBaseStorage) AutoMigrate() error {
-	return s.DB.AutoMigrate(
-		&models.User{},
-		&models.Device{},
-		&models.Agent{},
-		&models.Config{},
-		&models.GlobalRole{},
-	)
 }
 
 // Ping 检查数据库连接

@@ -49,7 +49,7 @@
             
             <div class="agent-meta">
               <div class="meta-row">
-                <span class="meta-label">角色音色</span>
+                <span class="meta-label">TTS配置</span>
                 <span class="meta-value">{{ getVoiceType(agent) }}</span>
               </div>
               <div class="meta-row">
@@ -232,6 +232,13 @@ const loadAgents = async () => {
   try {
     const response = await api.get('/user/agents')
     agents.value = response.data.data || []
+    console.log('智能体列表数据:', agents.value)
+    // 检查第一个智能体的数据结构
+    if (agents.value.length > 0) {
+      console.log('第一个智能体数据:', agents.value[0])
+      console.log('LLM配置:', agents.value[0].llm_config)
+      console.log('TTS配置:', agents.value[0].tts_config)
+    }
   } catch (error) {
     ElMessage.error('加载智能体列表失败')
   }
@@ -244,9 +251,32 @@ const handleAddAgent = async () => {
     await agentFormRef.value.validate()
     adding.value = true
     
-    const response = await api.post('/user/agents', {
+    // 获取默认配置
+    const [llmResponse, ttsResponse] = await Promise.all([
+      api.get('/user/llm-configs'),
+      api.get('/user/tts-configs')
+    ])
+    
+    const llmConfigs = llmResponse.data.data || []
+    const ttsConfigs = ttsResponse.data.data || []
+    
+    // 寻找默认配置
+    const defaultLlmConfig = llmConfigs.find(config => config.is_default)
+    const defaultTtsConfig = ttsConfigs.find(config => config.is_default)
+    
+    const agentData = {
       name: agentForm.name
-    })
+    }
+    
+    // 如果有默认配置，自动应用
+    if (defaultLlmConfig) {
+      agentData.llm_config_id = defaultLlmConfig.config_id
+    }
+    if (defaultTtsConfig) {
+      agentData.tts_config_id = defaultTtsConfig.config_id
+    }
+    
+    const response = await api.post('/user/agents', agentData)
     
     if (response.data.success) {
       ElMessage.success('智能体添加成功')
@@ -319,21 +349,19 @@ const handleManageDevices = (id) => {
 }
 
 const getVoiceType = (agent) => {
-  try {
-    const config = JSON.parse(agent.config || '{}')
-    return config.tts_provider || '未设置'
-  } catch {
-    return '未设置'
+  console.log('getVoiceType - tts_config:', agent.tts_config)
+  if (agent.tts_config && agent.tts_config.name) {
+    return agent.tts_config.name
   }
+  return '未设置'
 }
 
 const getLLMProvider = (agent) => {
-  try {
-    const config = JSON.parse(agent.config || '{}')
-    return config.llm_provider || '未设置'
-  } catch {
-    return '未设置'
+  console.log('getLLMProvider - llm_config:', agent.llm_config)
+  if (agent.llm_config && agent.llm_config.name) {
+    return agent.llm_config.name
   }
+  return '未设置'
 }
 
 const formatDate = (dateString) => {

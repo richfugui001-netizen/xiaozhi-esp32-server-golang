@@ -15,7 +15,15 @@
     <el-table :data="configs" style="width: 100%" v-loading="loading">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="name" label="配置名称" />
+      <el-table-column prop="config_id" label="配置ID" width="150" />
       <el-table-column prop="provider" label="提供商" />
+      <el-table-column prop="enabled" label="启用状态" width="100">
+        <template #default="scope">
+          <el-tag :type="scope.row.enabled ? 'success' : 'danger'">
+            {{ scope.row.enabled ? '已启用' : '已禁用' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="is_default" label="默认配置" width="100">
         <template #default="scope">
           <el-tag :type="scope.row.is_default ? 'success' : 'info'">
@@ -28,9 +36,16 @@
           {{ formatDate(scope.row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200">
+      <el-table-column label="操作" width="280">
         <template #default="scope">
           <el-button size="small" @click="editConfig(scope.row)">编辑</el-button>
+          <el-button
+            size="small"
+            :type="scope.row.enabled ? 'warning' : 'success'"
+            @click="toggleEnable(scope.row)"
+          >
+            {{ scope.row.enabled ? '禁用' : '启用' }}
+          </el-button>
           <el-button
             size="small"
             type="danger"
@@ -47,6 +62,7 @@
       v-model="showDialog"
       :title="editingConfig ? '编辑TTS配置' : '添加TTS配置'"
       width="600px"
+      @close="handleDialogClose"
     >
       <el-form
         ref="formRef"
@@ -56,6 +72,10 @@
       >
         <el-form-item label="配置名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入配置名称" />
+        </el-form-item>
+        
+        <el-form-item label="配置ID" prop="config_id">
+          <el-input v-model="form.config_id" placeholder="请输入唯一的配置ID" />
         </el-form-item>
         
         <el-form-item label="提供商" prop="provider">
@@ -202,7 +222,7 @@
       </el-form>
       
       <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
+        <el-button @click="handleDialogClose">取消</el-button>
         <el-button type="primary" @click="handleSave" :loading="saving">
           保存
         </el-button>
@@ -226,6 +246,7 @@ const formRef = ref()
 
 const form = reactive({
   name: '',
+  config_id: '',
   provider: 'xiaozhi',
   is_default: false,
   cosyvoice: {
@@ -331,6 +352,7 @@ const generateConfig = () => {
 
 const rules = {
   name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
+  config_id: [{ required: true, message: '请输入配置ID', trigger: 'blur' }],
   provider: [{ required: true, message: '请选择提供商', trigger: 'change' }],
   // CosyVoice 验证规则
   'cosyvoice.api_url': [{ required: true, message: '请输入API URL', trigger: 'blur' }],
@@ -375,12 +397,13 @@ const loadConfigs = async () => {
 const editConfig = (config) => {
   editingConfig.value = config
   form.name = config.name
+  form.config_id = config.config_id
   form.provider = config.provider
   form.is_default = config.is_default
   
   // 解析配置JSON并填充到对应的表单字段
   try {
-    const configData = JSON.parse(config.config)
+    const configData = JSON.parse(config.json_data || '{}')
     
     switch (config.provider) {
       case 'cosyvoice':
@@ -445,9 +468,10 @@ const handleSave = async () => {
       try {
         const configData = {
           name: form.name,
+          config_id: form.config_id,
           provider: form.provider,
           is_default: form.is_default,
-          config: generateConfig()
+          json_data: generateConfig()
         }
         
         if (editingConfig.value) {
@@ -459,7 +483,6 @@ const handleSave = async () => {
         }
         
         showDialog.value = false
-        resetForm()
         loadConfigs()
       } catch (error) {
         ElMessage.error('保存失败: ' + (error.response?.data?.message || error.message))
@@ -468,6 +491,25 @@ const handleSave = async () => {
       }
     }
   })
+}
+
+const toggleEnable = async (config) => {
+  try {
+    const action = config.enabled ? '禁用' : '启用'
+    await ElMessageBox.confirm(`确定要${action}这个配置吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    await api.post(`/admin/configs/${config.id}/toggle`)
+    ElMessage.success(`${action}成功`)
+    loadConfigs()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('操作失败')
+    }
+  }
 }
 
 const deleteConfig = async (id) => {
@@ -490,39 +532,64 @@ const deleteConfig = async (id) => {
 
 const resetForm = () => {
   editingConfig.value = null
-  form.name = ''
-  form.provider = ''
-  form.is_default = false
-  form.cosyvoice = {
-    model_path: '',
-    voice: '',
-    speed: 1.0
-  }
-  form.doubao = {
-    api_key: '',
-    voice: '',
-    speed: 1.0
-  }
-  form.doubao_ws = {
-    api_key: '',
-    voice: '',
-    speed: 1.0,
-    ws_url: ''
-  }
-  form.edge = {
-    voice: '',
-    rate: '+0%',
-    volume: '+0%'
-  }
-  form.edge_offline = {
-    model_path: '',
-    voice: '',
-    speed: 1.0
-  }
-  form.xiaozhi = {
-    server_url: '',
-    voice: '',
-    speed: 1.0
+  Object.assign(form, {
+    name: '',
+    config_id: '',
+    provider: 'xiaozhi',
+    is_default: false,
+    cosyvoice: {
+      api_url: 'https://tts.linkerai.top/tts',
+      spk_id: 'spk_id',
+      frame_duration: 60,
+      target_sr: 24000,
+      audio_format: 'mp3',
+      instruct_text: '你好'
+    },
+    doubao: {
+      appid: '6886011847',
+      access_token: 'access_token',
+      cluster: 'volcano_tts',
+      voice: 'BV001_streaming',
+      api_url: 'https://openspeech.bytedance.com/api/v1/tts',
+      authorization: 'Bearer;'
+    },
+    doubao_ws: {
+      appid: '6886011847',
+      access_token: 'access_token',
+      cluster: 'volcano_tts',
+      voice: 'zh_female_wanwanxiaohe_moon_bigtts',
+      ws_host: 'openspeech.bytedance.com',
+      use_stream: true
+    },
+    edge: {
+      voice: 'zh-CN-XiaoxiaoNeural',
+      rate: '+0%',
+      volume: '+0%',
+      pitch: '+0Hz',
+      connect_timeout: 10,
+      receive_timeout: 60
+    },
+    edge_offline: {
+      server_url: 'ws://localhost:8080/tts',
+      timeout: 30,
+      sample_rate: 16000,
+      channels: 1,
+      frame_duration: 20
+    },
+    xiaozhi: {
+      server_addr: 'wss://api.tenclass.net/xiaozhi/v1/',
+      device_id: 'ba:8f:17:de:94:94',
+      client_id: 'e4b0c442-98fc-4e1b-8c3d-6a5b6a5b6a6d',
+      token: 'test-token'
+    }
+  })
+}
+
+const handleDialogClose = () => {
+  showDialog.value = false
+  resetForm()
+  if (formRef.value) {
+    formRef.value.resetFields()
   }
 }
 

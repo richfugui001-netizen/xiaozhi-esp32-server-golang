@@ -2,9 +2,11 @@ package controllers
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"xiaozhi/manager/backend/models"
@@ -19,25 +21,85 @@ type AdminController struct {
 }
 
 // 通用配置管理
-// GetConfigs 获取所有配置
+// GetConfigs 根据设备ID获取设备关联的配置信息
 func (ac *AdminController) GetConfigs(c *gin.Context) {
-	var configs []models.Config
-	if err := ac.DB.Find(&configs).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get configs"})
+	deviceID := c.Query("device_id")
+	if deviceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "device_id parameter is required"})
 		return
 	}
-	c.JSON(http.StatusOK, configs)
-}
 
-// GetConfigsByType 根据类型获取配置
-func (ac *AdminController) GetConfigsByType(c *gin.Context) {
-	configType := c.Param("type")
-	var configs []models.Config
-	if err := ac.DB.Where("type = ?", configType).Find(&configs).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get configs by type"})
+	// 查找设备
+	var device models.Device
+	if err := ac.DB.Where("device_name = ?", deviceID).First(&device).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Device not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query device"})
+		}
 		return
 	}
-	c.JSON(http.StatusOK, configs)
+
+	// 查找智能体
+	var agent models.Agent
+	if err := ac.DB.First(&agent, device.AgentID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Agent not found"})
+		return
+	}
+
+	// 构建配置响应
+	type ConfigResponse struct {
+		VAD    models.Config `json:"vad"`
+		ASR    models.Config `json:"asr"`
+		LLM    models.Config `json:"llm"`
+		TTS    models.Config `json:"tts"`
+		Prompt string        `json:"prompt"`
+	}
+
+	var response ConfigResponse
+	response.Prompt = agent.CustomPrompt
+
+	// 获取VAD默认配置
+	if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "vad", true, true).First(&response.VAD).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default VAD config"})
+		return
+	}
+
+	// 获取ASR默认配置
+	if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "asr", true, true).First(&response.ASR).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default ASR config"})
+		return
+	}
+
+	// 获取LLM配置（从智能体配置）
+	if agent.LLMConfigID != nil && *agent.LLMConfigID != "" {
+		if err := ac.DB.Where("config_id = ? AND type = ? AND enabled = ?", *agent.LLMConfigID, "llm", true).First(&response.LLM).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agent LLM config"})
+			return
+		}
+	} else {
+		// 如果智能体没有指定LLM配置，使用默认配置
+		if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "llm", true, true).First(&response.LLM).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default LLM config"})
+			return
+		}
+	}
+
+	// 获取TTS配置（从智能体配置）
+	if agent.TTSConfigID != nil && *agent.TTSConfigID != "" {
+		if err := ac.DB.Where("config_id = ? AND type = ? AND enabled = ?", *agent.TTSConfigID, "tts", true).First(&response.TTS).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agent TTS config"})
+			return
+		}
+	} else {
+		// 如果智能体没有指定TTS配置，使用默认配置
+		if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "tts", true, true).First(&response.TTS).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default TTS config"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
 // GetConfig 获取单个配置
@@ -58,7 +120,7 @@ func (ac *AdminController) GetConfig(c *gin.Context) {
 func (ac *AdminController) GetConfigByID(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	var config models.Config
-	
+
 	if err := ac.DB.First(&config, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "配置不存在"})
 		return
@@ -236,7 +298,7 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 	// 添加明显的调试标记
 	log.Println("=== [CreateUser] 方法开始执行 ===")
 	log.Println("=== [CreateUser] 这是CreateUser方法的开始 ===")
-	
+
 	// 由于User模型的Password字段使用了json:"-"标签，需要手动解析
 	var requestData struct {
 		Username string `json:"username"`
@@ -244,7 +306,7 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 		Password string `json:"password"`
 		Role     string `json:"role"`
 	}
-	
+
 	// 直接尝试绑定到map以查看原始数据
 	var rawMap map[string]interface{}
 	if err := c.ShouldBindJSON(&rawMap); err != nil {
@@ -253,22 +315,22 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 		return
 	}
 	log.Printf("[CreateUser] 原始JSON数据: %+v", rawMap)
-	
+
 	// 手动提取字段
 	username, _ := rawMap["username"].(string)
 	email, _ := rawMap["email"].(string)
 	password, _ := rawMap["password"].(string)
 	role, _ := rawMap["role"].(string)
-	
+
 	// 更新requestData
 	requestData.Username = username
 	requestData.Email = email
 	requestData.Password = password
 	requestData.Role = role
-	
+
 	// 验证必要字段
 	if requestData.Username == "" || requestData.Email == "" || requestData.Password == "" {
-		log.Printf("[CreateUser] 缺少必要字段: username=%s, email=%s, password长度=%d", 
+		log.Printf("[CreateUser] 缺少必要字段: username=%s, email=%s, password长度=%d",
 			requestData.Username, requestData.Email, len(requestData.Password))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "用户名、邮箱和密码为必填项"})
 		return
@@ -286,7 +348,7 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 		if existingUser.DeletedAt.Valid {
 			// 用户已被软删除，恢复该用户
 			log.Printf("[CreateUser] 发现已删除的用户 %s，正在恢复", requestData.Username)
-			
+
 			// 加密新密码
 			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.Password), bcrypt.DefaultCost)
 			if err != nil {
@@ -294,7 +356,7 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
 				return
 			}
-			
+
 			// 更新用户信息并恢复
 			updates := map[string]interface{}{
 				"password":   string(hashedPassword),
@@ -303,15 +365,15 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 				"deleted_at": nil,
 				"updated_at": time.Now(),
 			}
-			
+
 			if err := ac.DB.Unscoped().Model(&existingUser).Updates(updates).Error; err != nil {
 				log.Printf("[CreateUser] 恢复用户失败: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建用户失败"})
 				return
 			}
-			
+
 			log.Printf("[CreateUser] 用户恢复成功 - ID: %d, 用户名: %s", existingUser.ID, existingUser.Username)
-			
+
 			// 返回恢复的用户信息（不包含密码）
 			existingUser.Password = ""
 			c.JSON(http.StatusCreated, gin.H{"data": existingUser})
@@ -404,6 +466,55 @@ func (ac *AdminController) DeleteUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
 
+// 重置用户密码
+func (ac *AdminController) ResetUserPassword(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+
+	var requestData struct {
+		NewPassword string `json:"new_password" binding:"required,min=6"`
+	}
+
+	if err := c.ShouldBindJSON(&requestData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请输入有效的新密码（至少6位）"})
+		return
+	}
+
+	// 查找用户
+	var user models.User
+	if err := ac.DB.First(&user, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "查找用户失败"})
+		}
+		return
+	}
+
+	// 加密新密码
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("[ResetUserPassword] 密码加密失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
+		return
+	}
+
+	// 更新用户密码
+	if err := ac.DB.Model(&user).Update("password", string(hashedPassword)).Error; err != nil {
+		log.Printf("[ResetUserPassword] 更新密码失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "重置密码失败"})
+		return
+	}
+
+	log.Printf("[ResetUserPassword] 管理员重置用户密码成功 - 用户ID: %d, 用户名: %s", user.ID, user.Username)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "密码重置成功",
+		"data": gin.H{
+			"user_id":  user.ID,
+			"username": user.Username,
+		},
+	})
+}
+
 // 设备管理
 func (ac *AdminController) GetDevices(c *gin.Context) {
 	var devices []models.Device
@@ -415,10 +526,38 @@ func (ac *AdminController) GetDevices(c *gin.Context) {
 }
 
 func (ac *AdminController) CreateDevice(c *gin.Context) {
-	var device models.Device
-	if err := c.ShouldBindJSON(&device); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	var req struct {
+		UserID     uint   `json:"user_id" binding:"required"`
+		DeviceCode string `json:"device_code" binding:"required"`
+		DeviceName string `json:"device_name" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
 		return
+	}
+
+	// 检查用户是否存在
+	var user models.User
+	if err := ac.DB.First(&user, req.UserID).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "指定的用户不存在"})
+		return
+	}
+
+	// 检查设备代码是否已存在
+	var existingDevice models.Device
+	if err := ac.DB.Where("device_code = ?", req.DeviceCode).First(&existingDevice).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "设备代码已存在"})
+		return
+	}
+
+	// 创建设备
+	device := models.Device{
+		UserID:     req.UserID,
+		DeviceCode: req.DeviceCode,
+		DeviceName: req.DeviceName,
+		AgentID:    0,     // 新创建的设备暂不绑定智能体
+		Activated:  false, // 新创建的设备默认未激活
 	}
 
 	if err := ac.DB.Create(&device).Error; err != nil {
@@ -467,7 +606,38 @@ func (ac *AdminController) GetAgents(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取智能体列表失败"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": agents})
+
+	// 手动加载关联的配置信息
+	type AgentWithConfigs struct {
+		models.Agent
+		LLMConfig *models.Config `json:"llm_config,omitempty"`
+		TTSConfig *models.Config `json:"tts_config,omitempty"`
+	}
+
+	var result []AgentWithConfigs
+	for _, agent := range agents {
+		agentWithConfig := AgentWithConfigs{Agent: agent}
+
+		// 加载LLM配置
+		if agent.LLMConfigID != nil && *agent.LLMConfigID != "" {
+			var llmConfig models.Config
+			if err := ac.DB.Where("config_id = ? AND type = ?", *agent.LLMConfigID, "llm").First(&llmConfig).Error; err == nil {
+				agentWithConfig.LLMConfig = &llmConfig
+			}
+		}
+
+		// 加载TTS配置
+		if agent.TTSConfigID != nil && *agent.TTSConfigID != "" {
+			var ttsConfig models.Config
+			if err := ac.DB.Where("config_id = ? AND type = ?", *agent.TTSConfigID, "tts").First(&ttsConfig).Error; err == nil {
+				agentWithConfig.TTSConfig = &ttsConfig
+			}
+		}
+
+		result = append(result, agentWithConfig)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
 func (ac *AdminController) CreateAgent(c *gin.Context) {
@@ -768,8 +938,52 @@ func (ac *AdminController) DeleteUDPConfig(c *gin.Context) {
 	ac.deleteConfigWithType(c, "udp")
 }
 
+// ToggleConfigEnable 切换配置的启用状态
+func (ac *AdminController) ToggleConfigEnable(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid config ID"})
+		return
+	}
+
+	var config models.Config
+	if err := ac.DB.First(&config, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "配置不存在"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询配置失败"})
+		}
+		return
+	}
+
+	// 切换启用状态
+	config.Enabled = !config.Enabled
+	if err := ac.DB.Save(&config).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新配置状态失败"})
+		return
+	}
+
+	status := "禁用"
+	if config.Enabled {
+		status = "启用"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("配置已%s", status),
+		"data":    config,
+	})
+}
+
 // 辅助方法
 func (ac *AdminController) createConfigWithType(c *gin.Context, config *models.Config) {
+	// 如果没有提供config_id，自动生成一个
+	if config.ConfigID == "" {
+		// 使用类型_名称_时间戳的格式生成唯一ID
+		timestamp := time.Now().Unix()
+		safeName := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(config.Name, " ", "_"), "-", "_"))
+		config.ConfigID = fmt.Sprintf("%s_%s_%d", config.Type, safeName, timestamp)
+	}
+
 	// 如果设置为默认配置，先取消其他同类型的默认配置
 	if config.IsDefault {
 		ac.DB.Model(&models.Config{}).Where("type = ? AND is_default = ?", config.Type, true).Update("is_default", false)
@@ -809,6 +1023,11 @@ func (ac *AdminController) updateConfigWithType(c *gin.Context, configType strin
 	config.JsonData = updateData.JsonData
 	config.Enabled = updateData.Enabled
 	config.IsDefault = updateData.IsDefault
+
+	// 如果提供了新的config_id，则更新它
+	if updateData.ConfigID != "" {
+		config.ConfigID = updateData.ConfigID
+	}
 
 	if err := ac.DB.Save(&config).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新配置失败"})

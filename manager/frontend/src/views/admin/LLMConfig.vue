@@ -15,7 +15,15 @@
     <el-table :data="configs" style="width: 100%" v-loading="loading">
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="name" label="配置名称" />
-      <el-table-column prop="provider" label="提供商" />
+      <el-table-column prop="config_id" label="配置ID" width="150" />
+      <el-table-column prop="provider" label="类型" />
+      <el-table-column prop="enabled" label="启用状态" width="100">
+        <template #default="scope">
+          <el-tag :type="scope.row.enabled ? 'success' : 'danger'">
+            {{ scope.row.enabled ? '已启用' : '已禁用' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="is_default" label="默认配置" width="100">
         <template #default="scope">
           <el-tag :type="scope.row.is_default ? 'success' : 'info'">
@@ -28,9 +36,16 @@
           {{ formatDate(scope.row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200">
+      <el-table-column label="操作" width="280">
         <template #default="scope">
           <el-button size="small" @click="editConfig(scope.row)">编辑</el-button>
+          <el-button
+            size="small"
+            :type="scope.row.enabled ? 'warning' : 'success'"
+            @click="toggleEnable(scope.row)"
+          >
+            {{ scope.row.enabled ? '禁用' : '启用' }}
+          </el-button>
           <el-button
             size="small"
             type="danger"
@@ -47,6 +62,7 @@
       v-model="showDialog"
       :title="editingConfig ? '编辑LLM配置' : '添加LLM配置'"
       width="600px"
+      @close="handleDialogClose"
     >
       <el-form
         ref="formRef"
@@ -58,12 +74,16 @@
           <el-input v-model="form.name" placeholder="请输入配置名称" />
         </el-form-item>
         
-        <el-form-item label="提供商" prop="provider">
-          <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%" @change="onProviderChange">
-            <el-option label="SiliconFlow" value="siliconflow" />
-            <el-option label="智谱AI" value="zhipu" />
-            <el-option label="阿里云" value="aliyun" />
-            <el-option label="豆包" value="doubao" />
+        <el-form-item label="配置ID" prop="config_id">
+          <el-input v-model="form.config_id" placeholder="请输入唯一的配置ID" />
+        </el-form-item>
+        
+        <el-form-item label="类型" prop="provider">
+          <el-select v-model="form.provider" placeholder="请选择类型" style="width: 100%">
+            <el-option label="OpenAI" value="openai" />
+            <el-option label="Ollama" value="ollama" />
+            <el-option label="Eino LLM" value="eino_llm" />
+            <el-option label="Eino" value="eino" />
           </el-select>
         </el-form-item>
         
@@ -88,7 +108,27 @@
         </el-form-item>
         
         <el-form-item label="基础URL" prop="base_url">
-          <el-input v-model="form.base_url" placeholder="请输入基础URL" />
+          <el-input v-model="form.base_url" placeholder="请输入基础URL" style="width: 100%;" />
+        </el-form-item>
+        
+        <el-form-item label="">
+          <el-dropdown @command="fillQuickUrl" trigger="click" style="width: 100%;">
+            <el-button type="primary" plain style="width: 100%;">
+              快捷URL填写 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="openai">OpenAI</el-dropdown-item>
+                <el-dropdown-item command="azure">Azure OpenAI</el-dropdown-item>
+                <el-dropdown-item command="anthropic">Anthropic</el-dropdown-item>
+                <el-dropdown-item command="zhipu">智谱AI</el-dropdown-item>
+                <el-dropdown-item command="aliyun">阿里云</el-dropdown-item>
+                <el-dropdown-item command="doubao">豆包</el-dropdown-item>
+                <el-dropdown-item command="siliconflow">SiliconFlow</el-dropdown-item>
+                <el-dropdown-item command="deepseek">DeepSeek</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </el-form-item>
         
         <el-form-item label="max_tokens" prop="max_tokens">
@@ -106,7 +146,7 @@
       </el-form>
       
       <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
+        <el-button @click="handleDialogClose">取消</el-button>
         <el-button type="primary" @click="handleSave" :loading="saving">
           保存
         </el-button>
@@ -118,7 +158,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, ArrowDown } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const configs = ref([])
@@ -130,6 +170,7 @@ const formRef = ref()
 
 const form = reactive({
   name: '',
+  config_id: '',
   provider: '',
   is_default: false,
   type: 'openai',
@@ -141,17 +182,21 @@ const form = reactive({
   top_p: 0.9
 })
 
-const providerBaseUrls = {
-  siliconflow: 'https://api.siliconflow.cn/v1',
+// 快捷URL填写功能
+const quickUrls = {
+  openai: 'https://api.openai.com/v1',
+  azure: 'https://your-resource-name.openai.azure.com',
+  anthropic: 'https://api.anthropic.com',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   aliyun: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  doubao: 'https://ark.cn-beijing.volces.com/api/v3'
+  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
+  siliconflow: 'https://api.siliconflow.cn/v1',
+  deepseek: 'https://api.deepseek.com/v1'
 }
 
-// 提供商选择变化时自动回填base_url
-const onProviderChange = (provider) => {
-  if (provider && providerBaseUrls[provider]) {
-    form.base_url = providerBaseUrls[provider]
+const fillQuickUrl = (command) => {
+  if (quickUrls[command]) {
+    form.base_url = quickUrls[command]
   }
 }
 
@@ -178,7 +223,8 @@ const generateConfig = () => {
 
 const rules = {
   name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
-  provider: [{ required: false, message: '请选择提供商', trigger: 'change' }],
+  config_id: [{ required: true, message: '请输入配置ID', trigger: 'blur' }],
+  provider: [{ required: false, message: '请选择类型', trigger: 'change' }],
   type: [{ required: true, message: '请选择模型类型', trigger: 'change' }],
   model_name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
   api_key: [{ required: true, message: '请输入API密钥', trigger: 'blur' }],
@@ -203,12 +249,13 @@ const loadConfigs = async () => {
 const editConfig = (config) => {
   editingConfig.value = config
   form.name = config.name
+  form.config_id = config.config_id
   form.provider = config.provider
   form.is_default = config.is_default
   
   // 解析配置JSON并填充到对应字段
   try {
-    const configObj = JSON.parse(config.config || '{}')
+    const configObj = JSON.parse(config.json_data || '{}')
     form.type = configObj.type || 'openai'
     form.model_name = configObj.model_name || ''
     form.api_key = configObj.api_key || ''
@@ -232,9 +279,10 @@ const handleSave = async () => {
       try {
         const configData = {
           name: form.name,
+          config_id: form.config_id,
           provider: form.provider,
           is_default: form.is_default,
-          config: generateConfig()
+          json_data: generateConfig()
         }
         
         if (editingConfig.value) {
@@ -246,7 +294,6 @@ const handleSave = async () => {
         }
         
         showDialog.value = false
-        resetForm()
         loadConfigs()
       } catch (error) {
         ElMessage.error('保存失败: ' + (error.response?.data?.message || error.message))
@@ -255,6 +302,25 @@ const handleSave = async () => {
       }
     }
   })
+}
+
+const toggleEnable = async (config) => {
+  try {
+    const action = config.enabled ? '禁用' : '启用'
+    await ElMessageBox.confirm(`确定要${action}这个配置吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    await api.post(`/admin/configs/${config.id}/toggle`)
+    ElMessage.success(`${action}成功`)
+    loadConfigs()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('操作失败')
+    }
+  }
 }
 
 const deleteConfig = async (id) => {
@@ -278,6 +344,7 @@ const deleteConfig = async (id) => {
 const resetForm = () => {
   editingConfig.value = null
   form.name = ''
+  form.config_id = ''
   form.provider = ''
   form.is_default = false
   form.type = 'openai'
@@ -287,6 +354,14 @@ const resetForm = () => {
   form.max_tokens = 4000
   form.temperature = 0.7
   form.top_p = 0.9
+}
+
+const handleDialogClose = () => {
+  showDialog.value = false
+  resetForm()
+  if (formRef.value) {
+    formRef.value.resetFields()
+  }
 }
 
 const formatDate = (dateString) => {

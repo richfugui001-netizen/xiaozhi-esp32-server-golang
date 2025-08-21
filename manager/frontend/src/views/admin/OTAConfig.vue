@@ -260,7 +260,7 @@ const loadConfig = async () => {
       configId.value = config.id
       
       try {
-        const configData = JSON.parse(config.config)
+        const configData = JSON.parse(config.json_data || '{}')
         form.signature_key = configData.signature_key || 'xiaozhi_ota_signature_key'
         
         // Test环境配置
@@ -296,7 +296,7 @@ const saveConfig = async () => {
       saving.value = true
       try {
         const configData = {
-          config: generateConfig()
+          json_data: generateConfig()
         }
         
         if (configId.value) {

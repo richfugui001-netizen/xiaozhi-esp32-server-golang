@@ -44,12 +44,12 @@
                 <el-icon size="28"><Monitor /></el-icon>
               </div>
               <div class="device-info">
-                <h3 class="device-name">{{ device.name }}</h3>
-                <p class="device-code">{{ device.code }}</p>
+                <h3 class="device-name">{{ device.device_name || '未命名设备' }}</h3>
+                <p class="device-code">{{ device.device_code }}</p>
               </div>
               <div class="device-status">
-                <span :class="['status-dot', device.online ? 'online' : 'offline']"></span>
-                <span class="status-text">{{ device.online ? '在线' : '离线' }}</span>
+                <span :class="['status-dot', isDeviceOnline(device.last_active_at) ? 'online' : 'offline']"></span>
+                <span class="status-text">{{ isDeviceOnline(device.last_active_at) ? '在线' : '离线' }}</span>
               </div>
             </div>
             
@@ -59,8 +59,20 @@
                 <span class="meta-value">ESP32设备</span>
               </div>
               <div class="meta-row">
+                <span class="meta-label">激活状态</span>
+                <span class="meta-value">
+                  <el-tag :type="device.activated ? 'success' : 'warning'" size="small">
+                    {{ device.activated ? '已激活' : '未激活' }}
+                  </el-tag>
+                </span>
+              </div>
+              <div class="meta-row">
                 <span class="meta-label">最后活跃</span>
-                <span class="meta-value">{{ formatDate(device.last_seen) }}</span>
+                <span class="meta-value">{{ formatDate(device.last_active_at) }}</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">创建时间</span>
+                <span class="meta-value">{{ formatDate(device.created_at) }}</span>
               </div>
             </div>
             
@@ -223,6 +235,15 @@ const goBack = () => {
 const formatDate = (dateString) => {
   if (!dateString) return '从未'
   return new Date(dateString).toLocaleString('zh-CN')
+}
+
+// 判断设备是否在线（基于最后活跃时间）
+const isDeviceOnline = (lastActiveAt) => {
+  if (!lastActiveAt) return false
+  const now = new Date()
+  const lastActive = new Date(lastActiveAt)
+  // 5分钟内有活动认为在线
+  return (now - lastActive) < 5 * 60 * 1000
 }
 
 onMounted(() => {

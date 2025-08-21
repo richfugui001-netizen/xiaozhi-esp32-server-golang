@@ -3,6 +3,7 @@ package user_config
 import (
 	"fmt"
 
+	"xiaozhi-esp32-server-golang/internal/domain/config/manager"
 	userconfig_redis "xiaozhi-esp32-server-golang/internal/domain/config/redis"
 )
 
@@ -13,7 +14,10 @@ type Config struct {
 }
 
 func GetProvider() (UserConfigProvider, error) {
-	provider, err := GetUserConfigProvider("redis", map[string]interface{}{})
+	config := map[string]interface{}{
+		"backend_url": "http://localhost:8080",
+	}
+	provider, err := GetUserConfigProvider("manager", config)
 	if err != nil {
 		return nil, err
 	}
@@ -38,9 +42,13 @@ func GetUserConfigProvider(providerType string, config map[string]interface{}) (
 			return nil, fmt.Errorf("创建Redis用户配置提供者失败: %v", err)
 		}
 		return provider, nil
-	case "file":
-		// TODO: 创建文件用户配置提供者
-		return nil, fmt.Errorf("文件用户配置提供者暂未实现")
+	case "manager":
+		// 创建后端管理系统用户配置提供者
+		provider, err := manager.NewManagerUserConfigProvider(config)
+		if err != nil {
+			return nil, fmt.Errorf("创建后端管理系统用户配置提供者失败: %v", err)
+		}
+		return provider, nil
 	default:
 		return nil, fmt.Errorf("不支持的用户配置提供者: %s", providerType)
 	}

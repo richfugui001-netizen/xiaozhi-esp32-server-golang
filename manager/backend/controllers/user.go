@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"time"
 	"xiaozhi/manager/backend/models"
 
 	"github.com/gin-gonic/gin"
@@ -13,9 +14,20 @@ type UserController struct {
 	DB *gorm.DB
 }
 
-// 设备管理
-func (uc *UserController) GetDevices(c *gin.Context) {
+// 获取用户所有设备概览（只读）
+func (uc *UserController) GetMyDevices(c *gin.Context) {
 	userID, _ := c.Get("user_id")
+
+	type DeviceOverview struct {
+		ID           uint       `json:"id"`
+		DeviceName   string     `json:"device_name"`
+		DeviceCode   string     `json:"device_code"`
+		AgentID      uint       `json:"agent_id"`
+		AgentName    string     `json:"agent_name,omitempty"`
+		Activated    bool       `json:"activated"`
+		LastActiveAt *time.Time `json:"last_active_at"`
+		CreatedAt    time.Time  `json:"created_at"`
+	}
 
 	var devices []models.Device
 	if err := uc.DB.Where("user_id = ?", userID).Find(&devices).Error; err != nil {
@@ -23,71 +35,31 @@ func (uc *UserController) GetDevices(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": devices})
-}
+	// 构建设备概览信息
+	var result []DeviceOverview
+	for _, device := range devices {
+		overview := DeviceOverview{
+			ID:           device.ID,
+			DeviceName:   device.DeviceName,
+			DeviceCode:   device.DeviceCode,
+			AgentID:      device.AgentID,
+			Activated:    device.Activated,
+			LastActiveAt: device.LastActiveAt,
+			CreatedAt:    device.CreatedAt,
+		}
 
-func (uc *UserController) CreateDevice(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+		// 如果设备绑定了智能体，获取智能体名称
+		if device.AgentID > 0 {
+			var agent models.Agent
+			if err := uc.DB.Where("id = ? AND user_id = ?", device.AgentID, userID).First(&agent).Error; err == nil {
+				overview.AgentName = agent.Name
+			}
+		}
 
-	var req struct {
-		Code string `json:"code" binding:"required,len=6"`
+		result = append(result, overview)
 	}
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码格式错误"})
-		return
-	}
-
-	// 验证设备验证码
-	var existingDevice models.Device
-	if err := uc.DB.Where("device_code = ? AND user_id IS NULL", req.Code).First(&existingDevice).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码无效或设备已被绑定"})
-		return
-	}
-
-	// 绑定设备到用户
-	existingDevice.UserID = userID.(uint)
-	if err := uc.DB.Save(&existingDevice).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "设备绑定失败"})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{"success": true, "data": existingDevice})
-}
-
-func (uc *UserController) UpdateDevice(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	id, _ := strconv.Atoi(c.Param("id"))
-
-	var device models.Device
-	if err := uc.DB.Where("id = ? AND user_id = ?", id, userID).First(&device).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "设备不存在"})
-		return
-	}
-
-	if err := c.ShouldBindJSON(&device); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := uc.DB.Save(&device).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新设备失败"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"data": device})
-}
-
-func (uc *UserController) DeleteDevice(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	id, _ := strconv.Atoi(c.Param("id"))
-
-	if err := uc.DB.Where("id = ? AND user_id = ?", id, userID).Delete(&models.Device{}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除设备失败"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
 // 智能体管理
@@ -100,25 +72,68 @@ func (uc *UserController) GetAgents(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": agents})
+	// 手动加载关联的配置信息
+	type AgentWithConfigs struct {
+		models.Agent
+		LLMConfig *models.Config `json:"llm_config,omitempty"`
+		TTSConfig *models.Config `json:"tts_config,omitempty"`
+	}
+
+	var result []AgentWithConfigs
+	for _, agent := range agents {
+		agentWithConfig := AgentWithConfigs{Agent: agent}
+
+		// 加载LLM配置
+		if agent.LLMConfigID != nil && *agent.LLMConfigID != "" {
+			var llmConfig models.Config
+			if err := uc.DB.Where("config_id = ? AND type = ?", *agent.LLMConfigID, "llm").First(&llmConfig).Error; err == nil {
+				agentWithConfig.LLMConfig = &llmConfig
+			}
+		}
+
+		// 加载TTS配置
+		if agent.TTSConfigID != nil && *agent.TTSConfigID != "" {
+			var ttsConfig models.Config
+			if err := uc.DB.Where("config_id = ? AND type = ?", *agent.TTSConfigID, "tts").First(&ttsConfig).Error; err == nil {
+				agentWithConfig.TTSConfig = &ttsConfig
+			}
+		}
+
+		result = append(result, agentWithConfig)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
 func (uc *UserController) CreateAgent(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 
 	var req struct {
-		Name string `json:"name" binding:"required,min=2,max=50"`
+		Name         string  `json:"name" binding:"required,min=2,max=50"`
+		CustomPrompt string  `json:"custom_prompt"`
+		LLMConfigID  *string `json:"llm_config_id"`
+		TTSConfigID  *string `json:"tts_config_id"`
+		ASRSpeed     string  `json:"asr_speed"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "智能体名称格式错误"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
 		return
 	}
 
+	// 设置默认值
+	if req.ASRSpeed == "" {
+		req.ASRSpeed = "normal"
+	}
+
 	agent := models.Agent{
-		UserID: userID.(uint),
-		Name:   req.Name,
-		Status: "active",
+		UserID:       userID.(uint),
+		Name:         req.Name,
+		CustomPrompt: req.CustomPrompt,
+		LLMConfigID:  req.LLMConfigID,
+		TTSConfigID:  req.TTSConfigID,
+		ASRSpeed:     req.ASRSpeed,
+		Status:       "active",
 	}
 
 	if err := uc.DB.Create(&agent).Error; err != nil {
@@ -134,12 +149,37 @@ func (uc *UserController) GetAgent(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 
 	var agent models.Agent
-	if err := uc.DB.Preload("LLMConfig").Preload("TTSConfig").Where("id = ? AND user_id = ?", id, userID).First(&agent).Error; err != nil {
+	if err := uc.DB.Where("id = ? AND user_id = ?", id, userID).First(&agent).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "智能体不存在"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": agent})
+	// 手动加载关联的配置信息
+	type AgentWithConfigs struct {
+		models.Agent
+		LLMConfig *models.Config `json:"llm_config,omitempty"`
+		TTSConfig *models.Config `json:"tts_config,omitempty"`
+	}
+
+	result := AgentWithConfigs{Agent: agent}
+
+	// 加载LLM配置
+	if agent.LLMConfigID != nil && *agent.LLMConfigID != "" {
+		var llmConfig models.Config
+		if err := uc.DB.Where("config_id = ? AND type = ?", *agent.LLMConfigID, "llm").First(&llmConfig).Error; err == nil {
+			result.LLMConfig = &llmConfig
+		}
+	}
+
+	// 加载TTS配置
+	if agent.TTSConfigID != nil && *agent.TTSConfigID != "" {
+		var ttsConfig models.Config
+		if err := uc.DB.Where("config_id = ? AND type = ?", *agent.TTSConfigID, "tts").First(&ttsConfig).Error; err == nil {
+			result.TTSConfig = &ttsConfig
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
 func (uc *UserController) UpdateAgent(c *gin.Context) {
@@ -153,11 +193,11 @@ func (uc *UserController) UpdateAgent(c *gin.Context) {
 	}
 
 	var req struct {
-		Name        string `json:"name" binding:"required,min=2,max=50"`
-		Description string `json:"description"`
-		Config      string `json:"config"`
-		LLMConfigID *uint  `json:"llm_config_id"`
-		TTSConfigID *uint  `json:"tts_config_id"`
+		Name         string  `json:"name" binding:"required,min=2,max=50"`
+		CustomPrompt string  `json:"custom_prompt"`
+		LLMConfigID  *string `json:"llm_config_id"`
+		TTSConfigID  *string `json:"tts_config_id"`
+		ASRSpeed     string  `json:"asr_speed"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -165,11 +205,17 @@ func (uc *UserController) UpdateAgent(c *gin.Context) {
 		return
 	}
 
+	// 更新字段
 	agent.Name = req.Name
-	agent.Description = req.Description
-	agent.Config = req.Config
+	agent.CustomPrompt = req.CustomPrompt
 	agent.LLMConfigID = req.LLMConfigID
 	agent.TTSConfigID = req.TTSConfigID
+
+	if req.ASRSpeed != "" {
+		agent.ASRSpeed = req.ASRSpeed
+	} else {
+		agent.ASRSpeed = "normal"
+	}
 
 	if err := uc.DB.Save(&agent).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新智能体失败"})
@@ -209,14 +255,90 @@ func (uc *UserController) GetAgentDevices(c *gin.Context) {
 		return
 	}
 
-	// 获取用户的所有设备（因为当前模型中智能体和设备都属于用户）
+	// 获取属于该智能体的设备
 	var devices []models.Device
-	if err := uc.DB.Where("user_id = ?", userID).Find(&devices).Error; err != nil {
+	if err := uc.DB.Where("user_id = ? AND agent_id = ?", userID, agentID).Find(&devices).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取设备列表失败"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": devices})
+}
+
+// 将设备添加到智能体
+func (uc *UserController) AddDeviceToAgent(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	agentID := c.Param("id")
+
+	var req struct {
+		Code string `json:"code" binding:"required,len=6"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码格式错误"})
+		return
+	}
+
+	// 首先验证智能体是否存在且属于当前用户
+	var agent models.Agent
+	if err := uc.DB.Where("id = ? AND user_id = ?", agentID, userID).First(&agent).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "智能体不存在"})
+		return
+	}
+
+	// 验证设备验证码（user_id为0表示设备未绑定用户）
+	var device models.Device
+	if err := uc.DB.Where("device_code = ? AND user_id = 0", req.Code).First(&device).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码无效或设备已被绑定"})
+		return
+	}
+
+	// 绑定设备到用户和智能体
+	device.UserID = userID.(uint)
+
+	// 转换agentID字符串为uint
+	agentIDInt, err := strconv.Atoi(agentID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的智能体ID"})
+		return
+	}
+	device.AgentID = uint(agentIDInt)
+	if err := uc.DB.Save(&device).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "设备绑定失败"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": device})
+}
+
+// 从智能体移除设备
+func (uc *UserController) RemoveDeviceFromAgent(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	agentID := c.Param("id")
+	deviceID := c.Param("device_id")
+
+	// 首先验证智能体是否存在且属于当前用户
+	var agent models.Agent
+	if err := uc.DB.Where("id = ? AND user_id = ?", agentID, userID).First(&agent).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "智能体不存在"})
+		return
+	}
+
+	// 查找设备并验证所有权
+	var device models.Device
+	if err := uc.DB.Where("id = ? AND user_id = ? AND agent_id = ?", deviceID, userID, agentID).First(&device).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "设备不存在或不属于此智能体"})
+		return
+	}
+
+	// 将设备从智能体中移除（设置agent_id为0，但保持用户绑定）
+	device.AgentID = 0
+	if err := uc.DB.Save(&device).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "移除设备失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "设备移除成功"})
 }
 
 // 获取角色模板
@@ -244,7 +366,8 @@ func (uc *UserController) GetVoiceOptions(c *gin.Context) {
 // 获取LLM配置列表
 func (uc *UserController) GetLLMConfigs(c *gin.Context) {
 	var configs []models.Config
-	if err := uc.DB.Where("type = ? AND enabled = ?", "llm", true).Find(&configs).Error; err != nil {
+	// 从全局配置中获取所有启用的LLM配置，默认配置排在前面
+	if err := uc.DB.Where("type = ? AND enabled = ?", "llm", true).Order("is_default DESC, name ASC").Find(&configs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取LLM配置失败"})
 		return
 	}
@@ -255,7 +378,8 @@ func (uc *UserController) GetLLMConfigs(c *gin.Context) {
 // 获取TTS配置列表
 func (uc *UserController) GetTTSConfigs(c *gin.Context) {
 	var configs []models.Config
-	if err := uc.DB.Where("type = ? AND enabled = ?", "tts", true).Find(&configs).Error; err != nil {
+	// 从全局配置中获取所有启用的TTS配置，默认配置排在前面
+	if err := uc.DB.Where("type = ? AND enabled = ?", "tts", true).Order("is_default DESC, name ASC").Find(&configs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取TTS配置失败"})
 		return
 	}

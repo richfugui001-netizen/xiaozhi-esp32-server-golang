@@ -247,7 +247,7 @@ const handleSave = async () => {
     const payload = {
       name: 'MQTT Server配置',
       is_default: true,
-      config: JSON.stringify(configData)
+      json_data: JSON.stringify(configData)
     }
     
     if (configId.value) {

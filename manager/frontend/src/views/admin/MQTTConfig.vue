@@ -175,7 +175,7 @@ const loadConfig = async () => {
       form.is_default = config.is_default
       
       try {
-        const configData = JSON.parse(config.config)
+        const configData = JSON.parse(config.json_data || '{}')
         form.enable = configData.enable || true
         form.broker = configData.broker || ''
         form.type = configData.type || 'tcp'
@@ -205,7 +205,7 @@ const handleSave = async () => {
         const configData = {
           name: form.name,
           is_default: form.is_default,
-          config: generateConfig()
+          json_data: generateConfig()
         }
         
         if (configId.value) {

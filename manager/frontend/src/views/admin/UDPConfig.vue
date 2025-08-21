@@ -144,7 +144,7 @@ const loadConfig = async () => {
       // 解析JSON配置
       let configData = {}
       try {
-        configData = JSON.parse(config.config || '{}')
+        configData = JSON.parse(config.json_data || '{}')
       } catch (e) {
         console.warn('解析配置JSON失败:', e)
       }
@@ -190,7 +190,7 @@ const handleSave = async () => {
     const payload = {
       name: form.value.name,
       is_default: form.value.is_default,
-      config: JSON.stringify(configData)
+      json_data: JSON.stringify(configData)
     }
     
     if (configId.value) {

@@ -8,6 +8,11 @@ const routes = [
     component: () => import('../views/Test.vue')
   },
   {
+    path: '/test-route',
+    name: 'TestRoute',
+    component: () => import('../views/TestRoute.vue')
+  },
+  {
     path: '/simple-login',
     name: 'SimpleLogin',
     component: () => import('../views/SimpleLogin.vue')
@@ -130,6 +135,12 @@ const routes = [
         meta: { title: '我的智能体' }
       },
       {
+        path: '/user/agents',
+        name: 'UserAgents',
+        component: () => import('../views/user/Agents.vue'),
+        meta: { title: '我的智能体' }
+      },
+      {
         path: '/agents/:id/edit',
         name: 'AgentEdit',
         component: () => import('../views/user/AgentEdit.vue'),
@@ -159,13 +170,7 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
   
-  // 如果需要认证但未登录，跳转到登录页
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next('/login')
-    return
-  }
-  
-  // 如果已登录访问登录页，根据角色跳转
+  // 如果访问登录页且已登录，根据角色跳转
   if (to.path === '/login' && authStore.isAuthenticated) {
     if (authStore.user?.role === 'admin') {
       next('/dashboard')
@@ -173,6 +178,26 @@ router.beforeEach(async (to, from, next) => {
       next('/console')
     }
     return
+  }
+  
+  // 如果需要认证
+  if (to.meta.requiresAuth) {
+    if (!authStore.isAuthenticated) {
+      // 没有token，跳转到登录页
+      next('/login')
+      return
+    }
+    
+    // 有token但没有用户信息，验证token有效性
+    if (!authStore.user && !authStore.isValidating) {
+      try {
+        await authStore.getProfile()
+      } catch (error) {
+        // token无效，跳转到登录页
+        next('/login')
+        return
+      }
+    }
   }
   
   // 如果访问根路径，根据角色跳转

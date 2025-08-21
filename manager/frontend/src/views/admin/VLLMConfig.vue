@@ -16,6 +16,13 @@
       <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="name" label="配置名称" />
       <el-table-column prop="provider" label="提供商" />
+      <el-table-column prop="enabled" label="启用状态" width="100">
+        <template #default="scope">
+          <el-tag :type="scope.row.enabled ? 'success' : 'danger'">
+            {{ scope.row.enabled ? '已启用' : '已禁用' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="is_default" label="默认配置" width="100">
         <template #default="scope">
           <el-tag :type="scope.row.is_default ? 'success' : 'info'">
@@ -28,9 +35,16 @@
           {{ formatDate(scope.row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200">
+      <el-table-column label="操作" width="280">
         <template #default="scope">
           <el-button size="small" @click="editConfig(scope.row)">编辑</el-button>
+          <el-button
+            size="small"
+            :type="scope.row.enabled ? 'warning' : 'success'"
+            @click="toggleEnable(scope.row)"
+          >
+            {{ scope.row.enabled ? '禁用' : '启用' }}
+          </el-button>
           <el-button
             size="small"
             type="danger"
@@ -47,6 +61,7 @@
       v-model="showDialog"
       :title="editingConfig ? '编辑VLLM配置' : '添加VLLM配置'"
       width="700px"
+      @close="handleDialogClose"
     >
       <el-form
         ref="formRef"
@@ -103,7 +118,7 @@
       </el-form>
       
       <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
+        <el-button @click="handleDialogClose">取消</el-button>
         <el-button type="primary" @click="handleSave" :loading="saving">
           保存
         </el-button>
@@ -185,7 +200,7 @@ const editConfig = (config) => {
   form.is_default = config.is_default
   
   try {
-    const configData = JSON.parse(config.config)
+    const configData = JSON.parse(config.json_data || '{}')
     form.type = configData.type || ''
     form.model_name = configData.model_name || ''
     form.api_key = configData.api_key || ''
@@ -213,7 +228,7 @@ const handleSave = async () => {
           name: form.name,
           provider: form.provider,
           is_default: form.is_default,
-          config: generateConfig()
+          json_data: generateConfig()
         }
         
         if (editingConfig.value) {
@@ -225,7 +240,6 @@ const handleSave = async () => {
         }
         
         showDialog.value = false
-        resetForm()
         loadConfigs()
       } catch (error) {
         ElMessage.error('保存失败，请检查网络连接和输入内容')
@@ -234,6 +248,25 @@ const handleSave = async () => {
       }
     }
   })
+}
+
+const toggleEnable = async (config) => {
+  try {
+    const action = config.enabled ? '禁用' : '启用'
+    await ElMessageBox.confirm(`确定要${action}这个配置吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    await api.post(`/admin/configs/${config.id}/toggle`)
+    ElMessage.success(`${action}成功`)
+    loadConfigs()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('操作失败')
+    }
+  }
 }
 
 const deleteConfig = async (id) => {
@@ -270,6 +303,14 @@ const resetForm = () => {
     timeout: 30
   })
   formRef.value?.clearValidate()
+}
+
+const handleDialogClose = () => {
+  showDialog.value = false
+  resetForm()
+  if (formRef.value) {
+    formRef.value.resetFields()
+  }
 }
 
 const formatDate = (dateString) => {

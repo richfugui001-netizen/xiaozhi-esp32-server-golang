@@ -18,24 +18,35 @@
 
     <el-table :data="agents" v-loading="loading" stripe>
       <el-table-column prop="id" label="ID" width="80" />
-      <el-table-column prop="name" label="名称" width="150" />
+      <el-table-column prop="name" label="昵称" width="150" />
       <el-table-column prop="user_id" label="用户ID" width="100" />
-      <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
+      <el-table-column label="角色介绍" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ row.custom_prompt || '未设置' }}
+        </template>
+      </el-table-column>
+      <el-table-column label="语言模型" width="150">
+        <template #default="{ row }">
+          {{ row.llm_config?.name || '未设置' }}
+        </template>
+      </el-table-column>
+      <el-table-column label="音色" width="150">
+        <template #default="{ row }">
+          {{ row.tts_config?.name || '未设置' }}
+        </template>
+      </el-table-column>
+      <el-table-column label="语音识别速度" width="120">
+        <template #default="{ row }">
+          <el-tag :type="getASRSpeedType(row.asr_speed)">
+            {{ getASRSpeedText(row.asr_speed) }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="status" label="状态" width="100">
         <template #default="{ row }">
           <el-tag :type="row.status === 'active' ? 'success' : 'info'">
             {{ row.status === 'active' ? '活跃' : '非活跃' }}
           </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="180">
-        <template #default="{ row }">
-          {{ new Date(row.created_at).toLocaleString() }}
-        </template>
-      </el-table-column>
-      <el-table-column prop="updated_at" label="更新时间" width="180">
-        <template #default="{ row }">
-          {{ new Date(row.updated_at).toLocaleString() }}
         </template>
       </el-table-column>
       <el-table-column label="操作" width="200">
@@ -56,42 +67,53 @@
       :title="editingAgent ? '编辑智能体' : '添加智能体'"
       width="600px"
     >
-      <el-form :model="agentForm" :rules="agentRules" ref="agentFormRef" label-width="100px">
+      <el-form :model="agentForm" :rules="agentRules" ref="agentFormRef" label-width="120px">
         <el-form-item label="用户ID" prop="user_id">
           <el-input-number v-model="agentForm.user_id" :min="1" style="width: 100%" />
         </el-form-item>
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="agentForm.name" placeholder="请输入智能体名称" />
+        <el-form-item label="昵称" prop="name">
+          <el-input v-model="agentForm.name" placeholder="请输入智能体昵称" />
         </el-form-item>
-        <el-form-item label="描述" prop="description">
+        <el-form-item label="角色介绍" prop="custom_prompt">
           <el-input
-            v-model="agentForm.description"
+            v-model="agentForm.custom_prompt"
             type="textarea"
-            :rows="3"
-            placeholder="请输入智能体描述"
+            :rows="4"
+            placeholder="请输入角色介绍/系统提示词"
           />
+        </el-form-item>
+        <el-form-item label="语言模型" prop="llm_config_id">
+          <el-select v-model="agentForm.llm_config_id" placeholder="请选择语言模型" style="width: 100%">
+            <el-option 
+              v-for="config in llmConfigs" 
+              :key="config.config_id" 
+              :label="config.name" 
+              :value="config.config_id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="音色" prop="tts_config_id">
+          <el-select v-model="agentForm.tts_config_id" placeholder="请选择音色" style="width: 100%">
+            <el-option 
+              v-for="config in ttsConfigs" 
+              :key="config.config_id" 
+              :label="config.name" 
+              :value="config.config_id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="语音识别速度" prop="asr_speed">
+          <el-select v-model="agentForm.asr_speed" style="width: 100%">
+            <el-option label="正常" value="normal" />
+            <el-option label="耐心" value="patient" />
+            <el-option label="快速" value="fast" />
+          </el-select>
         </el-form-item>
         <el-form-item label="状态" prop="status">
           <el-select v-model="agentForm.status" style="width: 100%">
             <el-option label="活跃" value="active" />
             <el-option label="非活跃" value="inactive" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="系统提示" prop="system_prompt">
-          <el-input
-            v-model="agentForm.system_prompt"
-            type="textarea"
-            :rows="4"
-            placeholder="请输入系统提示词"
-          />
-        </el-form-item>
-        <el-form-item label="配置" prop="config">
-          <el-input
-            v-model="agentForm.config"
-            type="textarea"
-            :rows="3"
-            placeholder="请输入JSON格式的配置"
-          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -111,6 +133,8 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const agents = ref([])
+const llmConfigs = ref([])
+const ttsConfigs = ref([])
 const loading = ref(false)
 const showAddDialog = ref(false)
 const editingAgent = ref(null)
@@ -120,16 +144,17 @@ const agentFormRef = ref()
 const agentForm = ref({
   user_id: null,
   name: '',
-  description: '',
-  status: 'active',
-  system_prompt: '',
-  config: '{}'
+  custom_prompt: '',
+  llm_config_id: null,
+  tts_config_id: null,
+  asr_speed: 'normal',
+  status: 'active'
 })
 
 const agentRules = {
   user_id: [{ required: true, message: '请输入用户ID', trigger: 'blur' }],
-  name: [{ required: true, message: '请输入智能体名称', trigger: 'blur' }],
-  description: [{ required: true, message: '请输入描述', trigger: 'blur' }],
+  name: [{ required: true, message: '请输入智能体昵称', trigger: 'blur' }],
+  asr_speed: [{ required: true, message: '请选择语音识别速度', trigger: 'change' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }]
 }
 
@@ -146,15 +171,42 @@ const loadAgents = async () => {
   }
 }
 
+const loadConfigs = async () => {
+  try {
+    const [llmResponse, ttsResponse] = await Promise.all([
+      api.get('/admin/llm-configs'),
+      api.get('/admin/tts-configs')
+    ])
+    llmConfigs.value = llmResponse.data.data || []
+    ttsConfigs.value = ttsResponse.data.data || []
+    
+    // 对配置进行排序，默认配置排在前面
+    llmConfigs.value.sort((a, b) => {
+      if (a.is_default && !b.is_default) return -1
+      if (!a.is_default && b.is_default) return 1
+      return a.name.localeCompare(b.name)
+    })
+    
+    ttsConfigs.value.sort((a, b) => {
+      if (a.is_default && !b.is_default) return -1
+      if (!a.is_default && b.is_default) return 1
+      return a.name.localeCompare(b.name)
+    })
+  } catch (error) {
+    console.error('Error loading configs:', error)
+  }
+}
+
 const editAgent = (agent) => {
   editingAgent.value = agent
   agentForm.value = {
     user_id: agent.user_id,
     name: agent.name,
-    description: agent.description,
-    status: agent.status,
-    system_prompt: agent.system_prompt || '',
-    config: agent.config || '{}'
+    custom_prompt: agent.custom_prompt || '',
+    llm_config_id: agent.llm_config_id,
+    tts_config_id: agent.tts_config_id,
+    asr_speed: agent.asr_speed || 'normal',
+    status: agent.status
   }
   showAddDialog.value = true
 }
@@ -164,14 +216,6 @@ const saveAgent = async () => {
   
   const valid = await agentFormRef.value.validate().catch(() => false)
   if (!valid) return
-
-  // 验证JSON格式
-  try {
-    JSON.parse(agentForm.value.config)
-  } catch (error) {
-    ElMessage.error('配置必须是有效的JSON格式')
-    return
-  }
 
   saving.value = true
   try {
@@ -221,18 +265,52 @@ const resetForm = () => {
   agentForm.value = {
     user_id: null,
     name: '',
-    description: '',
-    status: 'active',
-    system_prompt: '',
-    config: '{}'
+    custom_prompt: '',
+    llm_config_id: null,
+    tts_config_id: null,
+    asr_speed: 'normal',
+    status: 'active'
   }
+  
+  // 为新建智能体自动选择默认配置
+  if (!editingAgent.value) {
+    const defaultLlmConfig = llmConfigs.value.find(config => config.is_default)
+    const defaultTtsConfig = ttsConfigs.value.find(config => config.is_default)
+    
+    if (defaultLlmConfig) {
+      agentForm.value.llm_config_id = defaultLlmConfig.config_id
+    }
+    if (defaultTtsConfig) {
+      agentForm.value.tts_config_id = defaultTtsConfig.config_id
+    }
+  }
+  
   if (agentFormRef.value) {
     agentFormRef.value.resetFields()
   }
 }
 
+const getASRSpeedText = (speed) => {
+  const speedMap = {
+    'normal': '正常',
+    'patient': '耐心',
+    'fast': '快速'
+  }
+  return speedMap[speed] || '正常'
+}
+
+const getASRSpeedType = (speed) => {
+  const typeMap = {
+    'normal': '',
+    'patient': 'warning',
+    'fast': 'success'
+  }
+  return typeMap[speed] || ''
+}
+
 onMounted(() => {
   loadAgents()
+  loadConfigs()
 })
 </script>
 

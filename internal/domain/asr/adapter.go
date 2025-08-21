@@ -2,9 +2,11 @@ package asr
 
 import (
 	"context"
+	"strconv"
 	"xiaozhi-esp32-server-golang/internal/data/audio"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/funasr"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
+	log "xiaozhi-esp32-server-golang/logger"
 )
 
 // FunasrAdapter 适配 funasr 包到 asr 接口
@@ -26,13 +28,20 @@ func NewFunasrAdapter(config map[string]interface{}) (AsrProvider, error) {
 		AutoEnd:        false,
 	}
 
+	log.Log().Infof("funasr config: %+v", config)
+
 	// 从 map 中获取配置项
 	if host, ok := config["host"].(string); ok && host != "" {
 		funasrConfig.Host = host
 	}
 	if port, ok := config["port"].(string); ok && port != "" {
 		funasrConfig.Port = port
+	} else if portInt, ok := config["port"].(int); ok && portInt > 0 {
+		funasrConfig.Port = strconv.Itoa(portInt)
+	} else if portFloat, ok := config["port"].(float64); ok && portFloat > 0 {
+		funasrConfig.Port = strconv.Itoa(int(portFloat))
 	}
+
 	if mode, ok := config["mode"].(string); ok && mode != "" {
 		funasrConfig.Mode = mode
 	}

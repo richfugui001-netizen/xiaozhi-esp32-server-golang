@@ -47,6 +47,7 @@
       v-model="showDialog"
       :title="editingRole ? '编辑全局角色' : '添加全局角色'"
       width="600px"
+      @close="handleDialogClose"
     >
       <el-form
         ref="formRef"
@@ -82,7 +83,7 @@
       </el-form>
       
       <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
+        <el-button @click="handleDialogClose">取消</el-button>
         <el-button type="primary" @click="handleSave" :loading="saving">
           保存
         </el-button>
@@ -155,7 +156,6 @@ const handleSave = async () => {
         }
         
         showDialog.value = false
-        resetForm()
         loadRoles()
       } catch (error) {
         ElMessage.error('保存失败')
@@ -192,6 +192,14 @@ const resetForm = () => {
     is_default: false,
     prompt: ''
   })
+}
+
+const handleDialogClose = () => {
+  showDialog.value = false
+  resetForm()
+  if (formRef.value) {
+    formRef.value.resetFields()
+  }
 }
 
 const formatDate = (dateString) => {
