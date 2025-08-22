@@ -26,9 +26,6 @@ func NewDoubaoV2Adapter(config map[string]interface{}) (*DoubaoV2Adapter, error)
 	if accessToken, ok := config["access_token"].(string); ok && accessToken != "" {
 		doubaoConfig.AccessToken = accessToken
 	}
-	if host, ok := config["host"].(string); ok && host != "" {
-		doubaoConfig.Host = host
-	}
 	if wsURL, ok := config["ws_url"].(string); ok && wsURL != "" {
 		doubaoConfig.WsURL = wsURL
 	}

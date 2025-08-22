@@ -54,7 +54,7 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 	authEnable := viper.GetBool("auth.enable")
 	log.Debugf("authEnable: %v", authEnable)
 	if authEnable {
-		configProvider, err := user_config.GetProvider()
+		configProvider, err := user_config.GetProvider(viper.GetString("config_provider.type"))
 		//检查此deviceId是否已认证
 		isActivited, err := configProvider.IsDeviceActivated(r.Context(), deviceId, clientId)
 		if err != nil {
@@ -157,7 +157,7 @@ func (s *WebSocketServer) handleOtaActivate(w http.ResponseWriter, r *http.Reque
 	}
 
 	// 调用配置Provider进行绑定校验
-	configProvider, err := user_config.GetProvider()
+	configProvider, err := user_config.GetProvider(viper.GetString("config_provider.type"))
 	if err != nil {
 		log.Errorf("获取配置Provider失败: %v", err)
 		http.Error(w, "内部服务器错误", http.StatusInternalServerError)

@@ -132,7 +132,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Monitor, Setting, Platform, User, Lock, InfoFilled } from '@element-plus/icons-vue'
 import api from '../../utils/api'
@@ -166,6 +166,9 @@ const rules = {
     { required: true, message: '请输入监听端口号', trigger: 'blur' },
     { type: 'number', min: 1, max: 65535, message: '端口号必须在1-65535之间', trigger: 'blur' }
   ],
+  username: [{ required: true, message: '请输入管理员用户名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入管理员密码', trigger: 'blur' }],
+  signature_key: [{ required: true, message: '请输入签名密钥', trigger: 'blur' }],
   'tls.port': [
     {
       validator: (rule, value, callback) => {
@@ -211,7 +214,28 @@ const loadConfig = async () => {
     if (response.data && response.data.length > 0) {
       const config = response.data[0]
       configId.value = config.id
-      Object.assign(form, config)
+      
+      // 解析JSON配置数据
+      try {
+        const configData = JSON.parse(config.json_data || '{}')
+        form.enable = configData.enable !== undefined ? configData.enable : true
+        form.listen_host = configData.listen_host || '0.0.0.0'
+        form.listen_port = Number(configData.listen_port) || 1883 // 确保端口是数字类型
+        form.username = configData.username || ''
+        form.password = configData.password || ''
+        form.signature_key = configData.signature_key || ''
+        form.enable_auth = configData.enable_auth !== undefined ? configData.enable_auth : false
+        
+        if (configData.tls) {
+          form.tls.enable = configData.tls.enable !== undefined ? configData.tls.enable : false
+          form.tls.port = Number(configData.tls.port) || 8883 // 确保TLS端口是数字类型
+          form.tls.pem = configData.tls.pem || ''
+          form.tls.key = configData.tls.key || ''
+        }
+      } catch (error) {
+        console.error('解析配置JSON失败:', error)
+        ElMessage.warning('配置格式错误，已重置为默认值')
+      }
     }
   } catch (error) {
     ElMessage.error('加载配置失败：' + error.message)
@@ -227,38 +251,55 @@ const handleSave = async () => {
     await formRef.value.validate()
     saving.value = true
     
+    // 如果TLS被禁用，清空相关字段
+    if (!form.tls.enable) {
+      form.tls.pem = ''
+      form.tls.key = ''
+    }
+    
+    // 移除认证禁用时清空用户名密码的逻辑，因为管理员用户名密码与启用认证无关
+    
     const configData = {
       enable: form.enable,
       listen_host: form.listen_host,
-      listen_port: form.listen_port,
-      client_id: form.client_id,
+      listen_port: Number(form.listen_port), // 确保端口是数字类型
       username: form.username,
       password: form.password,
       signature_key: form.signature_key,
       enable_auth: form.enable_auth,
       tls: {
         enable: form.tls.enable,
-        port: form.tls.port,
+        port: Number(form.tls.port), // 确保TLS端口是数字类型
         pem: form.tls.pem,
         key: form.tls.key
       }
     }
     
+    console.log('保存的配置数据:', configData) // 调试信息
+    console.log('监听端口值:', form.listen_port, '类型:', typeof form.listen_port) // 调试端口信息
+    
     const payload = {
       name: 'MQTT Server配置',
-      is_default: true,
-      json_data: JSON.stringify(configData)
+      provider: 'mqtt_server',
+      json_data: JSON.stringify(configData),
+      enabled: true,
+      is_default: true
     }
     
+    console.log('发送的payload:', payload) // 调试信息
+    
     if (configId.value) {
-      await api.put(`/admin/mqtt-server-configs/${configId.value}`, payload)
+      const response = await api.put(`/admin/mqtt-server-configs/${configId.value}`, payload)
+      console.log('更新响应:', response) // 调试信息
       ElMessage.success('更新配置成功')
     } else {
       const response = await api.post('/admin/mqtt-server-configs', payload)
-      configId.value = response.data.id
+      console.log('创建响应:', response) // 调试信息
+      configId.value = response.data.data.id
       ElMessage.success('创建配置成功')
     }
   } catch (error) {
+    console.error('保存错误:', error) // 调试信息
     if (error.message) {
       ElMessage.error('保存失败：' + error.message)
     }
@@ -268,6 +309,23 @@ const handleSave = async () => {
 }
 
 
+
+// 监听TLS开关状态变化，清空相关字段
+watch(() => form.tls.enable, (enabled) => {
+  if (!enabled) {
+    // 当TLS禁用时，清空证书和密钥字段并重置验证
+    form.tls.pem = ''
+    form.tls.key = ''
+    formRef.value?.clearValidate(['tls.pem', 'tls.key'])
+  }
+})
+
+// 监听监听端口变化，用于调试
+watch(() => form.listen_port, (newValue) => {
+  console.log('监听端口变化:', newValue, '类型:', typeof newValue)
+})
+
+// 移除认证开关状态监听，因为管理员用户名密码与启用认证无关
 
 onMounted(() => {
   loadConfig()

@@ -274,6 +274,63 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 添加设备弹窗 -->
+    <el-dialog
+      v-model="showAddDeviceDialog"
+      title="添加设备"
+      width="500px"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        ref="deviceFormRef"
+        :model="deviceForm"
+        :rules="deviceRules"
+        label-width="100px"
+      >
+        <el-form-item label="设备名称" prop="device_name">
+          <el-input
+            v-model="deviceForm.device_name"
+            placeholder="请输入设备名称"
+            maxlength="50"
+            show-word-limit
+          />
+        </el-form-item>
+        
+        <el-form-item label="关联智能体" prop="agent_id">
+          <el-select
+            v-model="deviceForm.agent_id"
+            placeholder="请选择关联智能体"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="agent in agents"
+              :key="agent.id"
+              :label="agent.name"
+              :value="agent.id"
+            >
+              <div class="agent-option">
+                <span class="agent-name">{{ agent.name }}</span>
+                <span class="agent-desc">{{ agent.description || '智能AI助手' }}</span>
+              </div>
+            </el-option>
+          </el-select>
+        </el-form-item>
+      </el-form>
+      
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="handleCloseAddDevice">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="addingDevice"
+            @click="handleAddDevice"
+          >
+            {{ addingDevice ? '添加中...' : '添加设备' }}
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -384,11 +441,68 @@ const selectAgent = (agent) => {
   // 可以跳转到智能体详情页或执行其他操作
 }
 
-// 跳转到智能体页面添加设备
+// 添加设备相关状态
+const showAddDeviceDialog = ref(false)
+const addingDevice = ref(false)
+const deviceFormRef = ref()
+
+const deviceForm = reactive({
+  device_name: '',
+  agent_id: ''
+})
+
+const deviceRules = {
+  device_name: [
+    { required: true, message: '请输入设备名称', trigger: 'blur' },
+    { min: 2, max: 50, message: '设备名称长度在2-50个字符之间', trigger: 'blur' }
+  ],
+  agent_id: [
+    { required: true, message: '请选择关联智能体', trigger: 'change' }
+  ]
+}
+
+// 打开添加设备弹窗
 const addDevice = () => {
-  ElMessage.info('请先创建智能体，然后在智能体页面添加设备')
-  // 跳转到智能体页面
-  window.location.href = '/agents'
+  if (agents.value.length === 0) {
+    ElMessage.warning('请先创建智能体，然后再添加设备')
+    return
+  }
+  showAddDeviceDialog.value = true
+}
+
+// 处理添加设备
+const handleAddDevice = async () => {
+  if (!deviceFormRef.value) return
+  
+  try {
+    await deviceFormRef.value.validate()
+    addingDevice.value = true
+    
+    const response = await api.post('/user/devices', {
+      device_name: deviceForm.device_name,
+      agent_id: parseInt(deviceForm.agent_id)
+    })
+    
+    if (response.data.success) {
+      ElMessage.success('设备添加成功')
+      handleCloseAddDevice()
+      await loadDevices()
+    }
+  } catch (error) {
+    console.error('添加设备失败:', error)
+    ElMessage.error(error.response?.data?.error || '添加设备失败')
+  } finally {
+    addingDevice.value = false
+  }
+}
+
+// 关闭添加设备弹窗
+const handleCloseAddDevice = () => {
+  showAddDeviceDialog.value = false
+  if (deviceFormRef.value) {
+    deviceFormRef.value.resetFields()
+  }
+  Object.assign(deviceForm, { device_name: '', agent_id: '' })
 }
 
 // 切换显示所有设备
@@ -983,21 +1097,39 @@ onMounted(() => {
     align-items: flex-start;
     gap: 12px;
   }
-  
-  .devices-grid {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-  
-  .agents-grid {
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  }
+}
+
+/* 智能体选项样式 */
+.agent-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-option .agent-name {
+  font-weight: 500;
+  color: #212529;
+}
+
+.agent-option .agent-desc {
+  font-size: 12px;
+  color: #6c757d;
+}
+
+/* 弹窗样式 */
+.dialog-footer {
+  text-align: right;
 }
 
 @media (max-width: 480px) {
   .quick-stats {
     flex-direction: column;
     gap: 8px;
+  }
+  
+  .devices-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
   
   .agents-grid {

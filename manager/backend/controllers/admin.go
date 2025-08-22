@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -21,8 +22,8 @@ type AdminController struct {
 }
 
 // 通用配置管理
-// GetConfigs 根据设备ID获取设备关联的配置信息
-func (ac *AdminController) GetConfigs(c *gin.Context) {
+// GetDeviceConfigs 根据设备ID获取设备关联的配置信息
+func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 	deviceID := c.Query("device_id")
 	if deviceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "device_id parameter is required"})
@@ -100,6 +101,106 @@ func (ac *AdminController) GetConfigs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+// GetSystemConfigs 获取系统配置信息，包括mqtt, mqtt_server, udp, ota
+func (ac *AdminController) GetSystemConfigs(c *gin.Context) {
+	// 一次性获取所有相关配置（包括启用和未启用的）
+	var allConfigs []models.Config
+	if err := ac.DB.Where("type IN (?)", []string{"mqtt", "mqtt_server", "udp", "ota"}).Find(&allConfigs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get system configs"})
+		return
+	}
+
+	// 按类型分组配置
+	configsByType := make(map[string][]models.Config)
+	for _, config := range allConfigs {
+		configsByType[config.Type] = append(configsByType[config.Type], config)
+	}
+
+	// 为每种类型选择最佳配置并解析json_data
+	selectAndParseConfig := func(configs []models.Config) interface{} {
+		var selectedConfig models.Config
+		// 优先选择默认配置
+		for _, config := range configs {
+			if config.IsDefault {
+				selectedConfig = config
+				break
+			}
+		}
+
+		// 如果没有默认配置，选择第一个配置
+		if selectedConfig.ID == 0 {
+			selectedConfig = configs[0]
+		}
+
+		// 解析json_data
+		if selectedConfig.JsonData != "" {
+			var parsedData interface{}
+			if err := json.Unmarshal([]byte(selectedConfig.JsonData), &parsedData); err != nil {
+				// 如果解析失败，返回原始json_data字符串
+				result := gin.H{
+					"name": selectedConfig.Name,
+					"type": selectedConfig.Type,
+					"data": selectedConfig.JsonData,
+				}
+				return result
+			}
+
+			// 将解析后的数据包装在正确的格式中
+			result := gin.H{
+				"name": selectedConfig.Name,
+				"type": selectedConfig.Type,
+			}
+			if parsedData != nil {
+				// 如果解析的数据是map类型，直接合并
+				if dataMap, ok := parsedData.(map[string]interface{}); ok {
+					for k, v := range dataMap {
+						result[k] = v
+					}
+				} else {
+					// 否则作为data字段
+					result["data"] = parsedData
+				}
+			}
+			return result
+		}
+
+		// 如果没有json_data，返回基本配置信息
+		return gin.H{
+			"name": selectedConfig.Name,
+			"type": selectedConfig.Type,
+		}
+	}
+
+	// 构建响应数据
+	response := gin.H{}
+
+	// 只有当配置存在时才添加到响应中
+	if configs, exists := configsByType["mqtt"]; exists && len(configs) > 0 {
+		response["mqtt"] = selectAndParseConfig(configs)
+	}
+	if configs, exists := configsByType["mqtt_server"]; exists && len(configs) > 0 {
+		response["mqtt_server"] = selectAndParseConfig(configs)
+	}
+	if configs, exists := configsByType["udp"]; exists && len(configs) > 0 {
+		response["udp"] = selectAndParseConfig(configs)
+	}
+	if configs, exists := configsByType["ota"]; exists && len(configs) > 0 {
+		response["ota"] = selectAndParseConfig(configs)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+// GetConfigs 获取所有配置列表
+func (ac *AdminController) GetConfigs(c *gin.Context) {
+	var configs []models.Config
+	if err := ac.DB.Find(&configs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取配置列表失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": configs})
 }
 
 // GetConfig 获取单个配置

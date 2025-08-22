@@ -17,18 +17,21 @@
       <el-table-column prop="name" label="配置名称" />
       <el-table-column prop="config_id" label="配置ID" width="150" />
       <el-table-column prop="provider" label="提供商" />
-      <el-table-column prop="enabled" label="启用状态" width="100">
+      <el-table-column prop="enabled" label="启用状态" width="80" align="center">
         <template #default="scope">
-          <el-tag :type="scope.row.enabled ? 'success' : 'danger'">
-            {{ scope.row.enabled ? '已启用' : '已禁用' }}
-          </el-tag>
+          <el-switch 
+            v-model="scope.row.enabled" 
+            @change="toggleEnable(scope.row)"
+          />
         </template>
       </el-table-column>
-      <el-table-column prop="is_default" label="默认配置" width="100">
+      <el-table-column prop="is_default" label="默认配置" width="80" align="center">
         <template #default="scope">
-          <el-tag :type="scope.row.is_default ? 'success' : 'info'">
-            {{ scope.row.is_default ? '是' : '否' }}
-          </el-tag>
+          <el-switch 
+            v-model="scope.row.is_default" 
+            @change="toggleDefault(scope.row)"
+            :disabled="scope.row.is_default && getEnabledConfigs().length === 1"
+          />
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="180">
@@ -36,16 +39,9 @@
           {{ formatDate(scope.row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="280">
+      <el-table-column label="操作" width="180">
         <template #default="scope">
           <el-button size="small" @click="editConfig(scope.row)">编辑</el-button>
-          <el-button
-            size="small"
-            :type="scope.row.enabled ? 'warning' : 'success'"
-            @click="toggleEnable(scope.row)"
-          >
-            {{ scope.row.enabled ? '禁用' : '启用' }}
-          </el-button>
           <el-button
             size="small"
             type="danger"
@@ -85,9 +81,7 @@
           </el-select>
         </el-form-item>
         
-        <el-form-item label="是否默认" prop="is_default">
-          <el-switch v-model="form.is_default" />
-        </el-form-item>
+        <!-- 移除是否默认开关，现在在列表页操作 -->
         
         <!-- WebRTC VAD 配置 -->
         <template v-if="form.provider === 'webrtc_vad'">
@@ -182,6 +176,7 @@ const form = reactive({
   config_id: '',
   provider: '',
   is_default: false,
+  enabled: true,
   webrtc_vad: {
     pool_min_size: 5,
     pool_max_size: 1000,
@@ -246,6 +241,7 @@ const editConfig = (config) => {
   form.config_id = config.config_id
   form.provider = config.provider
   form.is_default = config.is_default
+  form.enabled = config.enabled
   
   // 解析配置JSON并填充到对应字段
   try {
@@ -274,7 +270,8 @@ const handleSave = async () => {
           name: form.name,
           config_id: form.config_id,
           provider: form.provider,
-          is_default: form.is_default,
+          is_default: false, // 新配置默认不是默认配置，可在列表页设置
+          enabled: form.enabled !== undefined ? form.enabled : true,
           json_data: generateConfig()
         }
 
@@ -299,21 +296,46 @@ const handleSave = async () => {
 
 const toggleEnable = async (config) => {
   try {
-    const action = config.enabled ? '禁用' : '启用'
-    await ElMessageBox.confirm(`确定要${action}这个配置吗？`, '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    
     await api.post(`/admin/configs/${config.id}/toggle`)
-    ElMessage.success(`${action}成功`)
+    ElMessage.success(`${config.enabled ? '启用' : '禁用'}成功`)
+  } catch (error) {
+    // 恢复开关状态
+    config.enabled = !config.enabled
+    ElMessage.error('操作失败')
+  }
+}
+
+const toggleDefault = async (config) => {
+  try {
+    if (!config.enabled) {
+      ElMessage.warning('请先启用该配置才能设为默认')
+      config.is_default = false
+      return
+    }
+    
+    const configData = {
+      name: config.name,
+      config_id: config.config_id,
+      provider: config.provider,
+      is_default: config.is_default,
+      enabled: config.enabled,
+      json_data: config.json_data
+    }
+    
+    await api.put(`/admin/vad-configs/${config.id}`, configData)
+    ElMessage.success(config.is_default ? '设为默认成功' : '取消默认成功')
+    
+    // 刷新列表以更新其他配置的默认状态
     loadConfigs()
   } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('操作失败')
-    }
+    // 恢复开关状态
+    config.is_default = !config.is_default
+    ElMessage.error('操作失败')
   }
+}
+
+const getEnabledConfigs = () => {
+  return configs.value.filter(config => config.enabled)
 }
 
 const deleteConfig = async (id) => {
@@ -341,6 +363,7 @@ const resetForm = () => {
     config_id: '',
     provider: '',
     is_default: false,
+    enabled: true,
     webrtc_vad: {
       pool_min_size: 5,
       pool_max_size: 1000,

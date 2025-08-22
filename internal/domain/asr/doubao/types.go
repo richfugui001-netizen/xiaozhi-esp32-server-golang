@@ -4,7 +4,6 @@ package doubao
 type DoubaoV2Config struct {
 	AppID         string // 应用ID
 	AccessToken   string // 访问令牌
-	Host          string // 服务主机地址
 	WsURL         string // WebSocket URL
 	ModelName     string // 模型名称
 	EndWindowSize int    // 结束窗口大小
@@ -17,7 +16,6 @@ type DoubaoV2Config struct {
 
 // DefaultConfig 默认配置
 var DefaultConfig = DoubaoV2Config{
-	Host:          "openspeech.bytedance.com",
 	WsURL:         "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream",
 	ModelName:     "bigmodel",
 	EndWindowSize: 800,

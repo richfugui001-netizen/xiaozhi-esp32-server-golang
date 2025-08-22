@@ -3,6 +3,11 @@ import { useAuthStore } from '../stores/auth'
 
 const routes = [
   {
+    path: '/setup',
+    name: 'Setup',
+    component: () => import('../views/Setup.vue')
+  },
+  {
     path: '/test',
     name: 'Test',
     component: () => import('../views/Test.vue')
@@ -169,6 +174,12 @@ const router = createRouter({
 
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
+  
+  // 如果访问引导页面，直接通过
+  if (to.path === '/setup') {
+    next()
+    return
+  }
   
   // 如果访问登录页且已登录，根据角色跳转
   if (to.path === '/login' && authStore.isAuthenticated) {

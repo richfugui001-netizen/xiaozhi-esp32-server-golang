@@ -39,9 +39,6 @@ func NewDoubaoV2ASR(config DoubaoV2Config) (*DoubaoV2ASR, error) {
 	}
 
 	// 使用默认配置填充缺失的字段
-	if config.Host == "" {
-		config.Host = DefaultConfig.Host
-	}
 	if config.WsURL == "" {
 		config.WsURL = DefaultConfig.WsURL
 	}

@@ -85,10 +85,11 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '../stores/auth'
+import api from '@/utils/api'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -188,6 +189,22 @@ const handleRegister = async () => {
     }
   })
 }
+
+// 检查系统状态，如果未初始化则跳转到引导页面
+const checkSystemStatus = async () => {
+  try {
+    const response = await api.get('/setup/status')
+    if (response.data.needs_setup) {
+      router.push('/setup')
+    }
+  } catch (error) {
+    console.error('检查系统状态失败:', error)
+  }
+}
+
+onMounted(() => {
+  checkSystemStatus()
+})
 </script>
 
 <style scoped>

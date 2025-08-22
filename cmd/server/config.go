@@ -1,14 +1,16 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	redisdb "xiaozhi-esp32-server-golang/internal/db/redis"
+	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	logrus "github.com/sirupsen/logrus"
@@ -26,6 +28,11 @@ func Init(configFile string) error {
 
 	//init log
 	initLog()
+
+	// 从接口获取配置并更新
+	if err := updateConfigFromAPI(); err != nil {
+		fmt.Printf("从接口获取配置失败，使用本地配置: %v\n", err)
+	}
 
 	//init vad
 	//initVad()
@@ -45,31 +52,54 @@ func Init(configFile string) error {
 }
 
 func initConfig(configFile string) error {
-	basePath, file := filepath.Split(configFile)
+	viper.SetConfigFile(configFile)
 
-	// 获取文件名和扩展名
-	fileName, fileExt := func(file string) (string, string) {
-		if pos := strings.LastIndex(file, "."); pos != -1 {
-			return file[:pos], strings.ToLower(file[pos+1:])
-		}
-		return file, ""
-	}(file)
-
-	// 设置配置文件名(不带扩展名)
-	viper.SetConfigName(fileName)
-	viper.AddConfigPath(basePath)
-
-	// 根据文件扩展名设置配置类型
-	switch fileExt {
-	case "json":
-		viper.SetConfigType("json")
-	case "yaml", "yml":
-		viper.SetConfigType("yaml")
-	default:
-		return fmt.Errorf("unsupported config file type: %s", fileExt)
+	// 读取配置文件
+	if err := viper.ReadInConfig(); err != nil {
+		return err
 	}
 
-	return viper.ReadInConfig()
+	return nil
+}
+
+// updateConfigFromAPI 从接口获取配置并更新viper配置
+func updateConfigFromAPI() error {
+	configProviderType := viper.GetString("config_provider.type")
+
+	fmt.Printf("获取系统配置, config_provider.type: %s\n", configProviderType)
+
+	// 从配置文件获取后端管理系统地址
+	configProvider, err := user_config.GetProvider(configProviderType)
+	if err != nil {
+		return fmt.Errorf("获取配置提供者失败: %v", err)
+	}
+
+	// 创建上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 获取系统配置JSON字符串
+	configJSON, err := configProvider.GetSystemConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("获取系统配置失败: %v", err)
+	}
+
+	if configJSON == "" {
+		return nil
+	}
+
+	// 解析JSON为map
+	var configMap map[string]interface{}
+	if err := json.Unmarshal([]byte(configJSON), &configMap); err != nil {
+		return fmt.Errorf("解析配置JSON失败: %v", err)
+	}
+
+	// 使用viper.MergeConfigMap设置到viper
+	if err := viper.MergeConfigMap(configMap); err != nil {
+		return fmt.Errorf("合并配置到viper失败: %v", err)
+	}
+
+	return nil
 }
 
 func initLog() error {

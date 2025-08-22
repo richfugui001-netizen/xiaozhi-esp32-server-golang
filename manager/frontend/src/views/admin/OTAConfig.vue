@@ -85,7 +85,7 @@
                 />
               </el-form-item>
                
-              <el-form-item label="MQTT端点" prop="test.mqtt.endpoint" class="form-item">
+              <el-form-item label="MQTT端点" prop="test.mqtt.endpoint" class="form-item" v-if="form.test.mqtt.enable">
                 <el-input 
                   v-model="form.test.mqtt.endpoint" 
                   placeholder="请输入Test环境MQTT端点"
@@ -141,7 +141,7 @@
                 />
               </el-form-item>
                
-              <el-form-item label="MQTT端点" prop="external.mqtt.endpoint" class="form-item">
+              <el-form-item label="MQTT端点" prop="external.mqtt.endpoint" class="form-item" v-if="form.external.mqtt.enable">
                 <el-input 
                   v-model="form.external.mqtt.endpoint" 
                   placeholder="请输入External环境MQTT端点"
@@ -158,7 +158,7 @@
           <el-button 
             type="primary" 
             @click="saveConfig" 
-             :loading="loading"
+             :loading="saving"
             size="large"
             class="save-button"
           >
@@ -239,13 +239,31 @@ const rules = {
     { required: true, message: '请输入Test环境WebSocket URL', trigger: 'blur' }
   ],
   'test.mqtt.endpoint': [
-    { required: true, message: '请输入Test环境MQTT端点', trigger: 'blur' }
+    {
+      validator: (rule, value, callback) => {
+        if (form.test.mqtt.enable && !value) {
+          callback(new Error('启用MQTT时端点不能为空'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
   ],
   'external.websocket.url': [
     { required: true, message: '请输入External环境WebSocket URL', trigger: 'blur' }
   ],
   'external.mqtt.endpoint': [
-    { required: true, message: '请输入External环境MQTT端点', trigger: 'blur' }
+    {
+      validator: (rule, value, callback) => {
+        if (form.external.mqtt.enable && !value) {
+          callback(new Error('启用MQTT时端点不能为空'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
   ]
 }
 
@@ -291,29 +309,41 @@ const loadConfig = async () => {
 const saveConfig = async () => {
   if (!formRef.value) return
   
-  await formRef.value.validate(async (valid) => {
-    if (valid) {
-      saving.value = true
-      try {
-        const configData = {
-          json_data: generateConfig()
-        }
-        
-        if (configId.value) {
-          await api.put(`/admin/ota-configs/${configId.value}`, configData)
-          ElMessage.success('配置更新成功')
-        } else {
-          const response = await api.post('/admin/ota-configs', configData)
-          configId.value = response.data.data.id
-          ElMessage.success('配置创建成功')
-        }
-      } catch (error) {
-        ElMessage.error('保存失败: ' + (error.response?.data?.message || error.message))
-      } finally {
-        saving.value = false
-      }
+  try {
+    await formRef.value.validate()
+    saving.value = true
+    
+    // 如果MQTT被禁用，清空端点值
+    if (!form.test.mqtt.enable) {
+      form.test.mqtt.endpoint = ''
     }
-  })
+    if (!form.external.mqtt.enable) {
+      form.external.mqtt.endpoint = ''
+    }
+    
+    const configData = {
+      name: 'OTA配置',
+      provider: form.provider || 'default',
+      json_data: generateConfig(),
+      enabled: true,
+      is_default: true
+    }
+    
+    if (configId.value) {
+      await api.put(`/admin/ota-configs/${configId.value}`, configData)
+      ElMessage.success('配置更新成功')
+    } else {
+      const response = await api.post('/admin/ota-configs', configData)
+      configId.value = response.data.data.id
+      ElMessage.success('配置创建成功')
+    }
+  } catch (error) {
+    if (error.message) {
+      ElMessage.error('保存失败: ' + error.message)
+    }
+  } finally {
+    saving.value = false
+  }
 }
 
 
@@ -341,6 +371,23 @@ watch(() => form.provider, (newProvider) => {
         endpoint: 'mqtts://mqtt.example.com:8883/ota'
       }
     }
+  }
+})
+
+// 监听MQTT开关状态变化，重置相关验证
+watch(() => form.test.mqtt.enable, (enabled) => {
+  if (!enabled) {
+    // 当MQTT禁用时，清空端点并重置验证
+    form.test.mqtt.endpoint = ''
+    formRef.value?.clearValidate('test.mqtt.endpoint')
+  }
+})
+
+watch(() => form.external.mqtt.enable, (enabled) => {
+  if (!enabled) {
+    // 当MQTT禁用时，清空端点并重置验证
+    form.external.mqtt.endpoint = ''
+    formRef.value?.clearValidate('external.mqtt.endpoint')
   }
 })
 

@@ -122,7 +122,7 @@ func (c *AsrWsClient) StartAudioStream(ctx context.Context, audioStream <-chan [
 	go func() {
 		err := c.SendMessages(ctx, audioStream, stopChan)
 		if err != nil {
-			log.Fatalf("failed to send audio stream: %s", err)
+			log.Errorf("failed to send audio stream: %s", err)
 			return
 		}
 	}()

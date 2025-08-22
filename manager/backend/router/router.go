@@ -23,6 +23,7 @@ func Setup(db *gorm.DB) *gin.Engine {
 	adminController := &controllers.AdminController{DB: db}
 	userController := &controllers.UserController{DB: db}
 	deviceActivationController := &controllers.DeviceActivationController{DB: db}
+	setupController := &controllers.SetupController{DB: db}
 
 	// API路由组
 	api := r.Group("/api")
@@ -31,13 +32,18 @@ func Setup(db *gorm.DB) *gin.Engine {
 		api.POST("/login", authController.Login)
 		api.POST("/register", authController.Register)
 
+		// 数据库初始化相关路由（无需认证）
+		api.GET("/setup/status", setupController.CheckSetupStatus)
+		api.POST("/setup/initialize", setupController.InitializeDatabase)
+
 		// 设备激活相关公开接口（无需认证）
 		api.GET("/public/device/check-activation", deviceActivationController.CheckDeviceActivation)
 		api.GET("/public/device/activation-info", deviceActivationController.GetActivationInfo)
 		api.POST("/public/device/activate", deviceActivationController.ActivateDevice)
 
 		// 内部服务接口（无需认证）
-		api.GET("/configs", adminController.GetConfigs)
+		api.GET("/configs", adminController.GetDeviceConfigs)
+		api.GET("/system/configs", adminController.GetSystemConfigs)
 
 		// 需要认证的路由
 		auth := api.Group("")
@@ -48,8 +54,9 @@ func Setup(db *gorm.DB) *gin.Engine {
 			// 用户路由
 			user := auth.Group("/user")
 			{
-				// 设备概览（只读）
+				// 设备管理
 				user.GET("/devices", userController.GetMyDevices)
+				user.POST("/devices", userController.CreateDevice)
 
 				// 智能体管理
 				user.GET("/agents", userController.GetAgents)

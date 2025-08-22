@@ -47,6 +47,7 @@ func NewChatManager(deviceID string, transport types_conn.IConn, options ...Chat
 	clientState, err := GenClientState(cm.ctx, cm.DeviceID)
 	if err != nil {
 		log.Errorf("初始化客户端状态失败: %v", err)
+		cm.transport.Close()
 		return nil, err
 	}
 	cm.clientState = clientState
@@ -62,7 +63,7 @@ func NewChatManager(deviceID string, transport types_conn.IConn, options ...Chat
 }
 
 func GenClientState(pctx context.Context, deviceID string) (*ClientState, error) {
-	configProvider, err := userconfig.GetProvider()
+	configProvider, err := userconfig.GetProvider(viper.GetString("config_provider.type"))
 	if err != nil {
 		log.Errorf("获取 用户配置提供者失败: %+v", err)
 		return nil, err
@@ -137,8 +138,9 @@ func (c *ChatManager) Start() error {
 
 // 主动关闭断开连接
 func (c *ChatManager) Close() error {
-	log.Infof("主动关闭断开连接, 设备 %s", c.clientState.DeviceID)
-
+	if c.clientState != nil {
+		log.Infof("主动关闭断开连接, 设备 %s", c.clientState.DeviceID)
+	}
 	// 先关闭会话级别的资源
 	if c.session != nil {
 		c.session.Close()

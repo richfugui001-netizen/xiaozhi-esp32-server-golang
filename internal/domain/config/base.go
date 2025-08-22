@@ -5,6 +5,8 @@ import (
 
 	"xiaozhi-esp32-server-golang/internal/domain/config/manager"
 	userconfig_redis "xiaozhi-esp32-server-golang/internal/domain/config/redis"
+
+	"github.com/spf13/viper"
 )
 
 // Config 用户配置提供者配置结构
@@ -13,11 +15,16 @@ type Config struct {
 	Parameters map[string]interface{} `json:"parameters"` // 存储相关配置参数
 }
 
-func GetProvider() (UserConfigProvider, error) {
-	config := map[string]interface{}{
-		"backend_url": "http://localhost:8080",
+func GetProvider(sType string) (UserConfigProvider, error) {
+	config := make(map[string]interface{})
+	if sType == "manager" {
+		backendUrl := viper.GetString("manager.backend_url")
+		config = map[string]interface{}{
+			"backend_url": backendUrl,
+		}
 	}
-	provider, err := GetUserConfigProvider("manager", config)
+
+	provider, err := GetUserConfigProvider(sType, config)
 	if err != nil {
 		return nil, err
 	}

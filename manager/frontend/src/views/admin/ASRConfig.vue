@@ -17,18 +17,21 @@
       <el-table-column prop="name" label="配置名称" />
       <el-table-column prop="config_id" label="配置ID" width="150" />
       <el-table-column prop="provider" label="提供商" />
-      <el-table-column prop="enabled" label="启用状态" width="100">
+      <el-table-column prop="enabled" label="启用状态" width="80" align="center">
         <template #default="scope">
-          <el-tag :type="scope.row.enabled ? 'success' : 'danger'">
-            {{ scope.row.enabled ? '已启用' : '已禁用' }}
-          </el-tag>
+          <el-switch 
+            v-model="scope.row.enabled" 
+            @change="toggleEnable(scope.row)"
+          />
         </template>
       </el-table-column>
-      <el-table-column prop="is_default" label="默认配置" width="100">
+      <el-table-column prop="is_default" label="默认配置" width="80" align="center">
         <template #default="scope">
-          <el-tag :type="scope.row.is_default ? 'success' : 'info'">
-            {{ scope.row.is_default ? '是' : '否' }}
-          </el-tag>
+          <el-switch 
+            v-model="scope.row.is_default" 
+            @change="toggleDefault(scope.row)"
+            :disabled="scope.row.is_default && getEnabledConfigs().length === 1"
+          />
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="180">
@@ -36,16 +39,9 @@
           {{ formatDate(scope.row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="280">
+      <el-table-column label="操作" width="180">
         <template #default="scope">
           <el-button size="small" @click="editConfig(scope.row)">编辑</el-button>
-          <el-button
-            size="small"
-            :type="scope.row.enabled ? 'warning' : 'success'"
-            @click="toggleEnable(scope.row)"
-          >
-            {{ scope.row.enabled ? '禁用' : '启用' }}
-          </el-button>
           <el-button
             size="small"
             type="danger"
@@ -85,9 +81,7 @@
           </el-select>
         </el-form-item>
         
-        <el-form-item label="是否默认" prop="is_default">
-          <el-switch v-model="form.is_default" />
-        </el-form-item>
+        <!-- 移除是否默认开关，现在在列表页操作 -->
         
         <!-- FunASR配置字段 -->
         <div v-if="form.provider === 'funasr'">
@@ -143,41 +137,40 @@
             <el-input v-model="form.doubao.appid" placeholder="请输入应用ID" />
           </el-form-item>
           
-          <el-form-item label="API密钥" prop="doubao.api_key">
-            <el-input v-model="form.doubao.api_key" type="password" placeholder="请输入API密钥" show-password />
+          <el-form-item label="访问令牌" prop="doubao.access_token">
+            <el-input v-model="form.doubao.access_token" type="password" placeholder="请输入访问令牌" show-password />
           </el-form-item>
           
-          <el-form-item label="集群" prop="doubao.cluster">
-            <el-input v-model="form.doubao.cluster" placeholder="请输入集群名称" />
+          <el-form-item label="WebSocket URL" prop="doubao.ws_url">
+            <el-input v-model="form.doubao.ws_url" placeholder="请输入WebSocket URL" />
           </el-form-item>
           
-          <el-form-item label="基础URL" prop="doubao.base_url">
-            <el-input v-model="form.doubao.base_url" placeholder="请输入基础URL" />
+          <el-form-item label="模型名称" prop="doubao.model_name">
+            <el-input v-model="form.doubao.model_name" placeholder="请输入模型名称" />
           </el-form-item>
           
-          <el-form-item label="采样率" prop="doubao.sample_rate">
-            <el-select v-model="form.doubao.sample_rate" placeholder="请选择采样率" style="width: 100%">
-              <el-option label="8000" :value="8000" />
-              <el-option label="16000" :value="16000" />
-              <el-option label="24000" :value="24000" />
-              <el-option label="48000" :value="48000" />
-            </el-select>
+          <el-form-item label="结束窗口大小" prop="doubao.end_window_size">
+            <el-input-number v-model="form.doubao.end_window_size" :min="1" style="width: 100%" />
           </el-form-item>
           
-          <el-form-item label="语言" prop="doubao.language">
-            <el-select v-model="form.doubao.language" placeholder="请选择语言" style="width: 100%">
-              <el-option label="中文" value="zh-CN" />
-              <el-option label="英文" value="en-US" />
-              <el-option label="自动检测" value="auto" />
-            </el-select>
+          <el-form-item label="启用标点符号" prop="doubao.enable_punc">
+            <el-switch v-model="form.doubao.enable_punc" />
           </el-form-item>
           
-          <el-form-item label="格式" prop="doubao.format">
-            <el-select v-model="form.doubao.format" placeholder="请选择格式" style="width: 100%">
-              <el-option label="PCM" value="pcm" />
-              <el-option label="WAV" value="wav" />
-              <el-option label="MP3" value="mp3" />
-            </el-select>
+          <el-form-item label="启用反向文本标准化" prop="doubao.enable_itn">
+            <el-switch v-model="form.doubao.enable_itn" />
+          </el-form-item>
+          
+          <el-form-item label="启用数字检测修正" prop="doubao.enable_ddc">
+            <el-switch v-model="form.doubao.enable_ddc" />
+          </el-form-item>
+          
+          <el-form-item label="分块时长(毫秒)" prop="doubao.chunk_duration">
+            <el-input-number v-model="form.doubao.chunk_duration" :min="1" style="width: 100%" />
+          </el-form-item>
+          
+          <el-form-item label="超时时间(秒)" prop="doubao.timeout">
+            <el-input-number v-model="form.doubao.timeout" :min="1" style="width: 100%" />
           </el-form-item>
         </div>
       </el-form>
@@ -210,6 +203,7 @@ const form = reactive({
   config_id: '',
   provider: '',
   is_default: false,
+  enabled: true,
   funasr: {
     host: 'localhost',
     port: 10095,
@@ -223,12 +217,15 @@ const form = reactive({
   },
   doubao: {
     appid: '',
-    api_key: '',
-    cluster: '',
-    base_url: 'https://openspeech.bytedance.com/api/v1/asr',
-    sample_rate: 16000,
-    language: 'zh-CN',
-    format: 'pcm'
+    access_token: '',
+    ws_url: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream',
+    model_name: 'bigmodel',
+    end_window_size: 800,
+    enable_punc: true,
+    enable_itn: true,
+    enable_ddc: false,
+    chunk_duration: 200,
+    timeout: 30
   }
 })
 
@@ -255,12 +252,11 @@ const rules = {
   'funasr.max_connections': [{ required: true, message: '请输入最大连接数', trigger: 'blur' }],
   'funasr.timeout': [{ required: true, message: '请输入超时时间', trigger: 'blur' }],
   'doubao.appid': [{ required: true, message: '请输入应用ID', trigger: 'blur' }],
-  'doubao.api_key': [{ required: true, message: '请输入API密钥', trigger: 'blur' }],
-  'doubao.cluster': [{ required: true, message: '请输入集群名称', trigger: 'blur' }],
-  'doubao.base_url': [{ required: true, message: '请输入基础URL', trigger: 'blur' }],
-  'doubao.sample_rate': [{ required: true, message: '请选择采样率', trigger: 'change' }],
-  'doubao.language': [{ required: true, message: '请选择语言', trigger: 'change' }],
-  'doubao.format': [{ required: true, message: '请选择格式', trigger: 'change' }]
+  'doubao.access_token': [{ required: true, message: '请输入访问令牌', trigger: 'blur' }],
+  'doubao.ws_url': [{ required: true, message: '请输入WebSocket URL', trigger: 'blur' }],
+  'doubao.model_name': [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
+  'doubao.end_window_size': [{ required: true, message: '请输入结束窗口大小', trigger: 'blur' }],
+  'doubao.timeout': [{ required: true, message: '请输入超时时间', trigger: 'blur' }]
 }
 
 const loadConfigs = async () => {
@@ -281,6 +277,7 @@ const editConfig = (config) => {
   form.config_id = config.config_id
   form.provider = config.provider
   form.is_default = config.is_default
+  form.enabled = config.enabled
   
   // 解析配置JSON并填充到对应字段
   try {
@@ -296,7 +293,7 @@ const editConfig = (config) => {
     } else if (config.provider === 'funasr' && configObj.host) {
       // 新格式：直接包含配置内容
       form.funasr = { ...form.funasr, ...configObj }
-    } else if (config.provider === 'doubao' && configObj.appid) {
+    } else if (config.provider === 'doubao' && (configObj.appid || configObj.access_token)) {
       // 新格式：直接包含配置内容
       form.doubao = { ...form.doubao, ...configObj }
     }
@@ -318,7 +315,8 @@ const handleSave = async () => {
           name: form.name,
           config_id: form.config_id,
           provider: form.provider,
-          is_default: form.is_default,
+          is_default: false, // 新配置默认不是默认配置，可在列表页设置
+          enabled: form.enabled !== undefined ? form.enabled : true, // 确保enabled字段存在
           json_data: generateConfig()
         }
         
@@ -343,21 +341,46 @@ const handleSave = async () => {
 
 const toggleEnable = async (config) => {
   try {
-    const action = config.enabled ? '禁用' : '启用'
-    await ElMessageBox.confirm(`确定要${action}这个配置吗？`, '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    
     await api.post(`/admin/configs/${config.id}/toggle`)
-    ElMessage.success(`${action}成功`)
+    ElMessage.success(`${config.enabled ? '启用' : '禁用'}成功`)
+  } catch (error) {
+    // 恢复开关状态
+    config.enabled = !config.enabled
+    ElMessage.error('操作失败')
+  }
+}
+
+const toggleDefault = async (config) => {
+  try {
+    if (!config.enabled) {
+      ElMessage.warning('请先启用该配置才能设为默认')
+      config.is_default = false
+      return
+    }
+    
+    const configData = {
+      name: config.name,
+      config_id: config.config_id,
+      provider: config.provider,
+      is_default: config.is_default,
+      enabled: config.enabled,
+      json_data: config.json_data
+    }
+    
+    await api.put(`/admin/asr-configs/${config.id}`, configData)
+    ElMessage.success(config.is_default ? '设为默认成功' : '取消默认成功')
+    
+    // 刷新列表以更新其他配置的默认状态
     loadConfigs()
   } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('操作失败')
-    }
+    // 恢复开关状态
+    config.is_default = !config.is_default
+    ElMessage.error('操作失败')
   }
+}
+
+const getEnabledConfigs = () => {
+  return configs.value.filter(config => config.enabled)
 }
 
 const deleteConfig = async (id) => {
@@ -384,6 +407,7 @@ const resetForm = () => {
   form.config_id = ''
   form.provider = ''
   form.is_default = false
+  form.enabled = true
   form.funasr = {
     host: 'localhost',
     port: 10095,
@@ -397,12 +421,15 @@ const resetForm = () => {
   }
   form.doubao = {
     appid: '',
-    api_key: '',
-    cluster: '',
-    base_url: 'https://openspeech.bytedance.com/api/v1/asr',
-    sample_rate: 16000,
-    language: 'zh-CN',
-    format: 'pcm'
+    access_token: '',
+    ws_url: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream',
+    model_name: 'bigmodel',
+    end_window_size: 800,
+    enable_punc: true,
+    enable_itn: true,
+    enable_ddc: false,
+    chunk_duration: 200,
+    timeout: 30
   }
 }
 

@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"fmt"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,6 +14,76 @@ import (
 
 type UserController struct {
 	DB *gorm.DB
+}
+
+// 用户直接创建设备（无需验证码）
+func (uc *UserController) CreateDevice(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+
+	var req struct {
+		DeviceName string `json:"device_name" binding:"required,min=2,max=50"`
+		AgentID    uint   `json:"agent_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	// 验证智能体是否存在且属于当前用户
+	var agent models.Agent
+	if err := uc.DB.Where("id = ? AND user_id = ?", req.AgentID, userID).First(&agent).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "智能体不存在或不属于当前用户"})
+		return
+	}
+
+	// 生成6位随机设备代码，确保不重复
+	var deviceCode string
+	for i := 0; i < 10; i++ { // 最多尝试10次
+		code := generateRandomCode()
+
+		// 检查代码是否已存在
+		var count int64
+		if err := uc.DB.Model(&models.Device{}).Where("device_code = ?", code).Count(&count).Error; err == nil && count == 0 {
+			deviceCode = code
+			break
+		}
+	}
+
+	// 如果10次都重复，使用时间戳生成
+	if deviceCode == "" {
+		deviceCode = fmt.Sprintf("%06d", time.Now().Unix()%1000000)
+	}
+
+	// 创建设备
+	device := models.Device{
+		UserID:     userID.(uint),
+		AgentID:    req.AgentID,
+		DeviceCode: deviceCode,
+		DeviceName: req.DeviceName,
+		Activated:  false, // 新创建的设备默认未激活
+	}
+
+	if err := uc.DB.Create(&device).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建设备失败"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"message": "设备创建成功",
+		"data": gin.H{
+			"device_code": deviceCode,
+			"device":      device,
+		},
+	})
+}
+
+// 生成6位随机数字代码
+func generateRandomCode() string {
+	// 生成6位随机数字
+	code := fmt.Sprintf("%06d", rand.Intn(1000000))
+	return code
 }
 
 // 获取用户所有设备概览（只读）

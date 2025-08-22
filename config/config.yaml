@@ -111,7 +111,6 @@ asr:
   doubao:
     appid: "xxx"                    # 应用ID
     access_token: "xxx-Cu"          # 访问令牌
-    host: "openspeech.bytedance.com"  # 服务器地址
     ws_url: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"  # WebSocket URL
     model_name: "bigmodel"          # 模型名称
     end_window_size: 800            # 结束窗口大小

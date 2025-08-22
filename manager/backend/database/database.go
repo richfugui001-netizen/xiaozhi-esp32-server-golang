@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"xiaozhi/manager/backend/config"
-	"xiaozhi/manager/backend/models"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -23,7 +22,6 @@ func Init(cfg config.DatabaseConfig) *gorm.DB {
 		// MySQL 数据库连接
 		dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 			cfg.Username, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
-
 		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	}
 
@@ -35,8 +33,9 @@ func Init(cfg config.DatabaseConfig) *gorm.DB {
 
 	log.Println("数据库连接成功")
 
-	// 创建默认管理员用户
-	createDefaultAdmin(db)
+	// 注意：不再自动创建表结构和默认管理员用户
+	// 这些操作现在由引导页面通过API接口来处理
+	log.Println("数据库连接成功，等待引导页面初始化...")
 
 	return db
 }
@@ -48,20 +47,4 @@ func Close(db *gorm.DB) {
 		return
 	}
 	sqlDB.Close()
-}
-
-func createDefaultAdmin(db *gorm.DB) {
-	var count int64
-	db.Model(&models.User{}).Where("role = ?", "admin").Count(&count)
-
-	if count == 0 {
-		admin := models.User{
-			Username: "admin",
-			Password: "$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi", // password
-			Role:     "admin",
-			Email:    "admin@xiaozhi.com",
-		}
-		db.Create(&admin)
-		log.Println("默认管理员用户已创建: admin/password")
-	}
 }
