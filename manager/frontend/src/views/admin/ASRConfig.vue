@@ -128,6 +128,10 @@
           
           <el-form-item label="自动结束" prop="funasr.auto_end">
             <el-switch v-model="form.funasr.auto_end" />
+            <div class="form-tip">
+              <el-icon><InfoFilled /></el-icon>
+              确保FunASR已进行相应配置
+            </div>
           </el-form-item>
         </div>
 
@@ -188,7 +192,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, InfoFilled } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const configs = ref([])
@@ -213,7 +217,7 @@ const form = reactive({
     chunk_interval: 10,
     max_connections: 100,
     timeout: 30,
-    auto_end: true
+    auto_end: false
   },
   doubao: {
     appid: '',
@@ -417,7 +421,7 @@ const resetForm = () => {
     chunk_interval: 10,
     max_connections: 100,
     timeout: 30,
-    auto_end: true
+    auto_end: false
   }
   form.doubao = {
     appid: '',
@@ -468,5 +472,19 @@ onMounted(() => {
 .header-left h2 {
   margin: 0;
   color: #333;
+}
+
+.form-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.form-tip .el-icon {
+  font-size: 14px;
+  color: #409eff;
 }
 </style>
