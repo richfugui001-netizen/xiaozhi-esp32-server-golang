@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	redisdb "xiaozhi-esp32-server-golang/internal/db/redis"
@@ -45,29 +44,8 @@ func Init(configFile string) error {
 }
 
 func initConfig(configFile string) error {
-	basePath, file := filepath.Split(configFile)
-
-	// 获取文件名和扩展名
-	fileName, fileExt := func(file string) (string, string) {
-		if pos := strings.LastIndex(file, "."); pos != -1 {
-			return file[:pos], strings.ToLower(file[pos+1:])
-		}
-		return file, ""
-	}(file)
-
-	// 设置配置文件名(不带扩展名)
-	viper.SetConfigName(fileName)
-	viper.AddConfigPath(basePath)
-
-	// 根据文件扩展名设置配置类型
-	switch fileExt {
-	case "json":
-		viper.SetConfigType("json")
-	case "yaml", "yml":
-		viper.SetConfigType("yaml")
-	default:
-		return fmt.Errorf("unsupported config file type: %s", fileExt)
-	}
+	// 直接设置配置文件路径，避免同名文件冲突
+	viper.SetConfigFile(configFile)
 
 	return viper.ReadInConfig()
 }
