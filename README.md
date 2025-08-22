@@ -139,11 +139,13 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 ## 📬 联系方式 | Contact
 交流群二维码
 
-![微信图片_20250805192712(1)](https://github.com/user-attachments/assets/2748f125-c012-4084-a584-be2904858184)
+![群二维码(1)](https://github.com/user-attachments/assets/c1c1c4ab-2567-4a6b-92a2-c8fcde7a5dcb)
 
 
 
 
+
+群二维码过期时，请加我微信拉你入群
 
 个人微信：hackers365
 
