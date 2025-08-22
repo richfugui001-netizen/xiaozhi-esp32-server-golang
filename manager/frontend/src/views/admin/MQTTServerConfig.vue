@@ -211,8 +211,9 @@ const loadConfig = async () => {
   try {
     loading.value = true
     const response = await api.get('/admin/mqtt-server-configs')
-    if (response.data && response.data.length > 0) {
-      const config = response.data[0]
+    const configs = response.data.data || []
+    if (configs.length > 0) {
+      const config = configs[0]
       configId.value = config.id
       
       // 解析JSON配置数据
@@ -280,6 +281,7 @@ const handleSave = async () => {
     
     const payload = {
       name: 'MQTT Server配置',
+      config_id: 'mqtt_server_mqtt_server_config',
       provider: 'mqtt_server',
       json_data: JSON.stringify(configData),
       enabled: true,

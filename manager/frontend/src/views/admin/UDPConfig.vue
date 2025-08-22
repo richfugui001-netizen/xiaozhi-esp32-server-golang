@@ -189,6 +189,7 @@ const handleSave = async () => {
     
     const payload = {
       name: form.value.name,
+      config_id: `udp_${form.value.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`,
       is_default: form.value.is_default,
       json_data: JSON.stringify(configData)
     }

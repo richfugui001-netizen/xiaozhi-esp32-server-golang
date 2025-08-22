@@ -223,7 +223,7 @@ const handleSave = async () => {
         const configData = {
           name: form.name,
           provider: form.provider,
-          is_default: false, // 新配置默认不是默认配置，可在列表页设置
+          is_default: form.is_default, // 保持原有的默认状态
           enabled: form.enabled !== undefined ? form.enabled : true,
           json_data: generateConfig()
         }

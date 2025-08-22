@@ -323,6 +323,7 @@ const saveConfig = async () => {
     
     const configData = {
       name: 'OTA配置',
+      config_id: 'ota_ota_config',
       provider: form.provider || 'default',
       json_data: generateConfig(),
       enabled: true,

@@ -315,7 +315,7 @@ const handleSave = async () => {
           name: form.name,
           config_id: form.config_id,
           provider: form.provider,
-          is_default: false, // 新配置默认不是默认配置，可在列表页设置
+          is_default: form.is_default, // 保持原有的默认状态
           enabled: form.enabled !== undefined ? form.enabled : true, // 确保enabled字段存在
           json_data: generateConfig()
         }

@@ -164,18 +164,23 @@ const rules = {
 const loadConfig = async () => {
   loading.value = true
   try {
+    console.log('开始加载MQTT配置...')
     const response = await api.get('/admin/mqtt-configs')
+    console.log('MQTT配置API响应:', response)
     const configs = response.data.data || []
+    console.log('解析的配置列表:', configs)
     
     // 如果有配置，加载第一个配置
     if (configs.length > 0) {
       const config = configs[0]
+      console.log('加载配置:', config)
       configId.value = config.id
       form.name = config.name
       form.is_default = config.is_default
       
       try {
         const configData = JSON.parse(config.json_data || '{}')
+        console.log('解析的配置数据:', configData)
         form.enable = configData.enable || true
         form.broker = configData.broker || ''
         form.type = configData.type || 'tcp'
@@ -187,8 +192,11 @@ const loadConfig = async () => {
         console.error('解析配置失败:', error)
         ElMessage.warning('配置格式错误，已重置为默认值')
       }
+    } else {
+      console.log('没有找到配置，使用默认值')
     }
   } catch (error) {
+    console.error('加载配置失败:', error)
     ElMessage.error('加载配置失败')
   } finally {
     loading.value = false
@@ -202,8 +210,12 @@ const handleSave = async () => {
     if (valid) {
       saving.value = true
       try {
+        // 生成config_id，格式为"类型_名称"
+        const generatedConfigId = `mqtt_${form.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`
+        
         const configData = {
           name: form.name,
+          config_id: generatedConfigId,
           is_default: form.is_default,
           json_data: generateConfig()
         }
