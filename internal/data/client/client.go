@@ -40,6 +40,7 @@ type SendAudioData func(audioData []byte) error
 
 // ClientState 表示客户端状态
 type ClientState struct {
+	IsActivated bool
 	// 对话历史
 	Dialogue *Dialogue
 	// 打断状态

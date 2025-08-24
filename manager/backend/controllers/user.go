@@ -61,7 +61,7 @@ func (uc *UserController) CreateDevice(c *gin.Context) {
 		AgentID:    req.AgentID,
 		DeviceCode: deviceCode,
 		DeviceName: req.DeviceName,
-		Activated:  false, // 新创建的设备默认未激活
+		Activated:  true, // 新创建的设备默认未激活
 	}
 
 	if err := uc.DB.Create(&device).Error; err != nil {
@@ -375,6 +375,10 @@ func (uc *UserController) AddDeviceToAgent(c *gin.Context) {
 		return
 	}
 	device.AgentID = uint(agentIDInt)
+
+	// 自动激活设备
+	device.Activated = true
+
 	if err := uc.DB.Save(&device).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "设备绑定失败"})
 		return

@@ -66,19 +66,19 @@
         :rules="rules"
         label-width="120px"
       >
+        <el-form-item label="提供商" prop="provider">
+          <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%">
+            <el-option label="WebRTC VAD" value="webrtc_vad" />
+            <el-option label="Silero VAD" value="silero_vad" />
+          </el-select>
+        </el-form-item>
+        
         <el-form-item label="配置名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入配置名称" />
         </el-form-item>
         
         <el-form-item label="配置ID" prop="config_id">
           <el-input v-model="form.config_id" placeholder="请输入唯一的配置ID" />
-        </el-form-item>
-        
-        <el-form-item label="提供商" prop="provider">
-          <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%">
-            <el-option label="WebRTC VAD" value="webrtc_vad" />
-            <el-option label="Silero VAD" value="silero_vad" />
-          </el-select>
         </el-form-item>
         
         <!-- 移除是否默认开关，现在在列表页操作 -->
@@ -266,11 +266,14 @@ const handleSave = async () => {
     if (valid) {
       saving.value = true
       try {
+        // 如果是新增配置且当前没有任何配置，则自动设为默认配置
+        const isFirstConfig = !editingConfig.value && configs.value.length === 0
+        
         const configData = {
           name: form.name,
           config_id: form.config_id,
           provider: form.provider,
-          is_default: form.is_default, // 保持原有的默认状态
+          is_default: isFirstConfig || form.is_default, // 首次添加时自动设为默认
           enabled: form.enabled !== undefined ? form.enabled : true,
           json_data: generateConfig()
         }

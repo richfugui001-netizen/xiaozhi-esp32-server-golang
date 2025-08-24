@@ -23,28 +23,11 @@ type AdminController struct {
 
 // 通用配置管理
 // GetDeviceConfigs 根据设备ID获取设备关联的配置信息
+// 如果设备不存在，则返回全局默认配置
 func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 	deviceID := c.Query("device_id")
 	if deviceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "device_id parameter is required"})
-		return
-	}
-
-	// 查找设备
-	var device models.Device
-	if err := ac.DB.Where("device_name = ?", deviceID).First(&device).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Device not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query device"})
-		}
-		return
-	}
-
-	// 查找智能体
-	var agent models.Agent
-	if err := ac.DB.First(&agent, device.AgentID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Agent not found"})
 		return
 	}
 
@@ -58,7 +41,51 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 	}
 
 	var response ConfigResponse
-	response.Prompt = agent.CustomPrompt
+
+	// 查找设备
+	var device models.Device
+	var agent models.Agent
+	var deviceFound bool
+
+	if err := ac.DB.Where("device_name = ?", deviceID).First(&device).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// 设备不存在，使用全局默认配置
+			deviceFound = false
+			log.Printf("设备 %s 不存在，使用全局默认配置", deviceID)
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query device"})
+			return
+		}
+	} else {
+		// 设备存在，查找智能体
+		deviceFound = true
+		log.Printf("设备 %s 存在，AgentID: %d", deviceID, device.AgentID)
+		if err := ac.DB.First(&agent, device.AgentID).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				// 智能体不存在，使用默认配置
+				deviceFound = false
+				log.Printf("智能体 %d 不存在，使用全局默认配置", device.AgentID)
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query agent"})
+				return
+			}
+		} else {
+			response.Prompt = agent.CustomPrompt
+			log.Printf("智能体 %d 存在，使用自定义提示词", device.AgentID)
+		}
+	}
+
+	// 如果设备不存在，使用默认提示词
+	if !deviceFound {
+		// 查找默认全局角色作为提示词
+		var defaultRole models.GlobalRole
+		if err := ac.DB.Where("is_default = ?", true).First(&defaultRole).Error; err == nil {
+			response.Prompt = defaultRole.Prompt
+		} else {
+			// 如果没有默认角色，使用空提示词
+			response.Prompt = ""
+		}
+	}
 
 	// 获取VAD默认配置
 	if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "vad", true, true).First(&response.VAD).Error; err != nil {
@@ -72,28 +99,36 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 		return
 	}
 
-	// 获取LLM配置（从智能体配置）
-	if agent.LLMConfigID != nil && *agent.LLMConfigID != "" {
+	// 获取LLM配置
+	if deviceFound && agent.ID != 0 && agent.LLMConfigID != nil && *agent.LLMConfigID != "" {
+		// 如果智能体指定了LLM配置，尝试使用它
 		if err := ac.DB.Where("config_id = ? AND type = ? AND enabled = ?", *agent.LLMConfigID, "llm", true).First(&response.LLM).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agent LLM config"})
-			return
+			// 如果指定的配置获取失败，回退到默认配置
+			if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "llm", true, true).First(&response.LLM).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default LLM config"})
+				return
+			}
 		}
 	} else {
-		// 如果智能体没有指定LLM配置，使用默认配置
+		// 使用默认LLM配置
 		if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "llm", true, true).First(&response.LLM).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default LLM config"})
 			return
 		}
 	}
 
-	// 获取TTS配置（从智能体配置）
-	if agent.TTSConfigID != nil && *agent.TTSConfigID != "" {
+	// 获取TTS配置
+	if deviceFound && agent.ID != 0 && agent.TTSConfigID != nil && *agent.TTSConfigID != "" {
+		// 如果智能体指定了TTS配置，尝试使用它
 		if err := ac.DB.Where("config_id = ? AND type = ? AND enabled = ?", *agent.TTSConfigID, "tts", true).First(&response.TTS).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agent TTS config"})
-			return
+			// 如果指定的配置获取失败，回退到默认配置
+			if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "tts", true, true).First(&response.TTS).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default TTS config"})
+				return
+			}
 		}
 	} else {
-		// 如果智能体没有指定TTS配置，使用默认配置
+		// 使用默认TTS配置
 		if err := ac.DB.Where("type = ? AND is_default = ? AND enabled = ?", "tts", true, true).First(&response.TTS).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get default TTS config"})
 			return
@@ -441,53 +476,17 @@ func (ac *AdminController) CreateUser(c *gin.Context) {
 	log.Printf("[CreateUser] 原始密码长度: %d", len(requestData.Password))
 	log.Printf("[CreateUser] 原始密码内容: %s", requestData.Password)
 
-	// 检查是否存在已删除的同名用户
+	// 检查用户名是否已存在
 	var existingUser models.User
-	err := ac.DB.Unscoped().Where("username = ?", requestData.Username).First(&existingUser).Error
+	err := ac.DB.Where("username = ?", requestData.Username).First(&existingUser).Error
 	if err == nil {
-		// 用户存在，检查是否已删除
-		if existingUser.DeletedAt.Valid {
-			// 用户已被软删除，恢复该用户
-			log.Printf("[CreateUser] 发现已删除的用户 %s，正在恢复", requestData.Username)
-
-			// 加密新密码
-			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.Password), bcrypt.DefaultCost)
-			if err != nil {
-				log.Printf("[CreateUser] 密码加密失败: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
-				return
-			}
-
-			// 更新用户信息并恢复
-			updates := map[string]interface{}{
-				"password":   string(hashedPassword),
-				"email":      requestData.Email,
-				"role":       requestData.Role,
-				"deleted_at": nil,
-				"updated_at": time.Now(),
-			}
-
-			if err := ac.DB.Unscoped().Model(&existingUser).Updates(updates).Error; err != nil {
-				log.Printf("[CreateUser] 恢复用户失败: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建用户失败"})
-				return
-			}
-
-			log.Printf("[CreateUser] 用户恢复成功 - ID: %d, 用户名: %s", existingUser.ID, existingUser.Username)
-
-			// 返回恢复的用户信息（不包含密码）
-			existingUser.Password = ""
-			c.JSON(http.StatusCreated, gin.H{"data": existingUser})
-			return
-		} else {
-			// 用户存在且未删除
-			log.Printf("[CreateUser] 用户名 %s 已存在", requestData.Username)
-			c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
-			return
-		}
+		// 用户名已存在
+		log.Printf("[CreateUser] 用户名 %s 已存在", requestData.Username)
+		c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
+		return
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		// 数据库查询出错
-		log.Printf("[CreateUser] 查询用户失败: %v", err)
+		log.Printf("[CreateUser] 数据库查询失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建用户失败"})
 		return
 	}

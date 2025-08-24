@@ -86,7 +86,13 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		maxSilenceDuration = 200
 	}
 
+	isDeviceActivated, err := configProvider.IsDeviceActivated(ctx, deviceID, "")
+	if err != nil {
+		log.Errorf("检查设备激活状态失败: %v", err)
+	}
+
 	clientState := &ClientState{
+		IsActivated:  isDeviceActivated,
 		Dialogue:     &Dialogue{},
 		Abort:        false,
 		ListenMode:   "auto",

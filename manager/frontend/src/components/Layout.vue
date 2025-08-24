@@ -32,6 +32,13 @@
             <el-icon><Setting /></el-icon>
             <span>系统管理</span>
           </template>
+          <el-sub-menu index="/admin/service-config">
+            <template #title>服务配置</template>
+            <el-menu-item index="/admin/ota-config">OTA配置</el-menu-item>
+            <el-menu-item index="/admin/mqtt-config">MQTT配置</el-menu-item>
+            <el-menu-item index="/admin/mqtt-server-config">MQTT Server配置</el-menu-item>
+            <el-menu-item index="/admin/udp-config">UDP配置</el-menu-item>
+          </el-sub-menu>
           <el-sub-menu index="/admin/ai-config">
             <template #title>AI配置</template>
             <el-menu-item index="/admin/vad-config">VAD配置</el-menu-item>
@@ -40,13 +47,6 @@
             <el-menu-item index="/admin/tts-config">TTS配置</el-menu-item>
             <el-menu-item index="/admin/vllm-config">VLLM配置</el-menu-item>
           </el-sub-menu>
-          <el-sub-menu index="/admin/network-config">
-            <template #title>网络配置</template>
-            <el-menu-item index="/admin/mqtt-config">MQTT配置</el-menu-item>
-            <el-menu-item index="/admin/mqtt-server-config">MQTT Server配置</el-menu-item>
-            <el-menu-item index="/admin/udp-config">UDP配置</el-menu-item>
-          </el-sub-menu>
-          <el-menu-item index="/admin/ota-config">OTA配置</el-menu-item>
           <el-menu-item index="/admin/global-roles">全局角色</el-menu-item>
           <el-menu-item index="/admin/users">用户管理</el-menu-item>
           <el-menu-item index="/admin/devices">设备管理</el-menu-item>

@@ -117,7 +117,7 @@
     <el-dialog
       v-model="showAddAgentDialog"
       title="添加智能体"
-      width="400px"
+      width="500px"
       :before-close="handleCloseAddAgent"
     >
       <el-form
@@ -125,13 +125,24 @@
         :model="agentForm"
         :rules="agentRules"
         size="large"
+        label-width="100px"
       >
-        <el-form-item prop="name">
+        <el-form-item label="智能体名称" prop="name">
           <el-input
             v-model="agentForm.name"
             placeholder="请输入智能体名称"
             size="large"
             :maxlength="50"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="角色介绍" prop="custom_prompt">
+          <el-input
+            v-model="agentForm.custom_prompt"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入角色介绍/系统提示词，这将影响AI的回答风格和个性"
+            :maxlength="1000"
             show-word-limit
           />
         </el-form-item>
@@ -211,7 +222,8 @@ const deviceForm = reactive({
 })
 
 const agentForm = reactive({
-  name: ''
+  name: '',
+  custom_prompt: '我是一个叫{{assistant_name}}的台湾女孩，说话机车，声音好听，习惯简短表达，爱用网络梗。\n我的男朋友是一个程序员，梦想是开发出一个机器人，能够帮助人们解决生活中的各种问题。\n我是一个喜欢哈哈大笑的女孩，爱东说西说吹牛，不合逻辑的也照吹，就要逗别人开心。'
 })
 
 const deviceRules = {
@@ -265,7 +277,8 @@ const handleAddAgent = async () => {
     const defaultTtsConfig = ttsConfigs.find(config => config.is_default)
     
     const agentData = {
-      name: agentForm.name
+      name: agentForm.name,
+      custom_prompt: agentForm.custom_prompt
     }
     
     // 如果有默认配置，自动应用
@@ -321,7 +334,10 @@ const handleCloseAddAgent = () => {
   if (agentFormRef.value) {
     agentFormRef.value.resetFields()
   }
-  Object.assign(agentForm, { name: '' })
+  Object.assign(agentForm, { 
+    name: '',
+    custom_prompt: '我是一个叫{{assistant_name}}的台湾女孩，说话机车，声音好听，习惯简短表达，爱用网络梗。\n我的男朋友是一个程序员，梦想是开发出一个机器人，能够帮助人们解决生活中的各种问题。\n我是一个喜欢哈哈大笑的女孩，爱东说西说吹牛，不合逻辑的也照吹，就要逗别人开心。'
+  })
 }
 
 const handleCloseAddDevice = () => {
