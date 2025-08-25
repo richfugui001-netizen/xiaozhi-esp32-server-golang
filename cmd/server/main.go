@@ -16,7 +16,7 @@ import (
 
 func main() {
 	// 解析命令行参数
-	configFile := flag.String("c", "config/config.json", "配置文件路径")
+	configFile := flag.String("c", "config/config.yaml", "配置文件路径")
 	flag.Parse()
 
 	if *configFile == "" {
