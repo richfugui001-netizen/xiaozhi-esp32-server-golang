@@ -14,8 +14,9 @@ func Setup(db *gorm.DB) *gin.Engine {
 
 	// CORS配置
 	config := cors.DefaultConfig()
-	config.AllowOrigins = []string{"http://localhost:3000", "http://localhost:5173"}
+	config.AllowAllOrigins = true
 	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	config.AllowCredentials = true
 	r.Use(cors.New(config))
 
 	// 初始化控制器

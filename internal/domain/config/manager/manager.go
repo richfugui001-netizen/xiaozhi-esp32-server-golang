@@ -22,7 +22,7 @@ type ConfigManager struct {
 
 // NewConfigManager 创建新的配置管理器
 func NewManagerUserConfigProvider(config map[string]interface{}) (*ConfigManager, error) {
-	// 从配置文件获取后端管理系统的基础URL
+	// 从配置中获取后端管理系统的基础URL
 	var baseURL string
 	if backendUrl := config["backend_url"]; backendUrl != nil {
 		baseURL = backendUrl.(string)
@@ -40,7 +40,7 @@ func NewManagerUserConfigProvider(config map[string]interface{}) (*ConfigManager
 		baseURL:    baseURL,
 	}
 
-	log.Log().Info("配置管理器初始化成功")
+	log.Log().Info("配置管理器初始化成功", "backend_url", baseURL)
 	return manager, nil
 }
 

@@ -2,6 +2,7 @@ package user_config
 
 import (
 	"fmt"
+	"os"
 
 	"xiaozhi-esp32-server-golang/internal/domain/config/manager"
 	userconfig_redis "xiaozhi-esp32-server-golang/internal/domain/config/redis"
@@ -18,7 +19,11 @@ type Config struct {
 func GetProvider(sType string) (UserConfigProvider, error) {
 	config := make(map[string]interface{})
 	if sType == "manager" {
-		backendUrl := viper.GetString("manager.backend_url")
+		// 优先从环境变量获取backend地址
+		backendUrl := os.Getenv("BACKEND_URL")
+		if backendUrl == "" {
+			backendUrl = viper.GetString("manager.backend_url")
+		}
 		config = map[string]interface{}{
 			"backend_url": backendUrl,
 		}

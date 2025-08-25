@@ -13,12 +13,12 @@ import (
 func main() {
 	// 定义命令行参数
 	var configFile string
-	flag.StringVar(&configFile, "config", "manager/backend/config/config.json", "配置文件路径")
-	flag.StringVar(&configFile, "c", "manager/backend/config/config.json", "配置文件路径 (简写)")
+	flag.StringVar(&configFile, "config", "config/config.json", "配置文件路径")
+	flag.StringVar(&configFile, "c", "config/config.json", "配置文件路径 (简写)")
 	flag.Parse()
 
 	// 加载配置
-	cfg := config.LoadFromFile(configFile)
+	cfg := config.LoadWithPath(configFile)
 
 	// 初始化数据库
 	db := database.Init(cfg.Database)

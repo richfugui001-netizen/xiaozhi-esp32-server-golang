@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 )
@@ -31,7 +32,32 @@ type JWTConfig struct {
 }
 
 func Load() *Config {
-	return LoadFromFile("manager/backend/config/config.json")
+	return LoadWithPath("config/config.json")
+}
+
+func LoadWithPath(configPath string) *Config {
+	config := LoadFromFile(configPath)
+
+	// 优先使用环境变量覆盖数据库配置
+	if host := os.Getenv("DB_HOST"); host != "" {
+		config.Database.Host = host
+	}
+	if port := os.Getenv("DB_PORT"); port != "" {
+		config.Database.Port = port
+	}
+	if username := os.Getenv("DB_USER"); username != "" {
+		config.Database.Username = username
+	}
+	if password := os.Getenv("DB_PASSWORD"); password != "" {
+		config.Database.Password = password
+	}
+	if database := os.Getenv("DB_NAME"); database != "" {
+		config.Database.Database = database
+	}
+
+	fmt.Println("config", config)
+
+	return config
 }
 
 func LoadFromFile(configPath string) *Config {
