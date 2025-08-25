@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/spf13/viper"
 
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
@@ -141,7 +140,7 @@ func (s *WebSocketServer) internalHandleChat(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	isAuth := viper.GetBool("auth.enable")
+	/*isAuth := viper.GetBool("auth.enable")
 	if isAuth {
 		token := r.Header.Get("Authorization")
 		if token == "" {
@@ -156,7 +155,7 @@ func (s *WebSocketServer) internalHandleChat(w http.ResponseWriter, r *http.Requ
 			http.Error(w, "无效的令牌", http.StatusUnauthorized)
 			return
 		}
-	}
+	}*/
 
 	// 升级 HTTP 连接为 WebSocket
 	conn, err := s.upgrader.Upgrade(w, r, nil)
