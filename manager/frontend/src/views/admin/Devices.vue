@@ -6,7 +6,7 @@
     </div>
 
     <div class="toolbar">
-      <el-button type="primary" @click="showAddDialog = true">
+      <el-button type="primary" @click="openAddDialog">
         <el-icon><Plus /></el-icon>
         添加设备
       </el-button>
@@ -18,7 +18,7 @@
 
     <el-table :data="devices" v-loading="loading" stripe>
       <el-table-column prop="id" label="ID" width="80" />
-      <el-table-column prop="device_code" label="设备代码" width="150" />
+      <el-table-column prop="device_code" label="激活码" width="150" />
       <el-table-column prop="device_name" label="设备名称" width="150" />
       <el-table-column prop="user_id" label="用户ID" width="100" />
       <el-table-column label="关联智能体" width="150">
@@ -27,6 +27,13 @@
             智能体 {{ row.agent_id }}
           </span>
           <el-tag v-else type="info" size="small">未分配</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="激活状态" width="100">
+        <template #default="{ row }">
+          <el-tag :type="row.activated ? 'success' : 'warning'">
+            {{ row.activated ? '已激活' : '未激活' }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="在线状态" width="100">
@@ -68,11 +75,20 @@
         <el-form-item label="用户ID" prop="user_id">
           <el-input-number v-model="deviceForm.user_id" :min="1" style="width: 100%" />
         </el-form-item>
-        <el-form-item label="设备代码" prop="device_code">
-          <el-input v-model="deviceForm.device_code" placeholder="请输入设备代码" />
+        <el-form-item label="激活码" prop="device_code">
+          <el-input 
+            v-model="deviceForm.device_code" 
+            :placeholder="editingDevice ? '请输入激活码' : '请输入激活码（与设备名称二选一）'" 
+          />
         </el-form-item>
         <el-form-item label="设备名称" prop="device_name">
-          <el-input v-model="deviceForm.device_name" placeholder="请输入设备名称" />
+          <el-input 
+            v-model="deviceForm.device_name" 
+            :placeholder="editingDevice ? '请输入设备名称' : '请输入设备名称（与设备代码二选一）'" 
+          />
+        </el-form-item>
+        <el-form-item label="激活状态" prop="activated">
+          <el-switch v-model="deviceForm.activated" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -90,6 +106,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import api from '../../utils/api'
+import { useAuthStore } from '../../stores/auth'
 
 const devices = ref([])
 const loading = ref(false)
@@ -97,17 +114,63 @@ const showAddDialog = ref(false)
 const editingDevice = ref(null)
 const saving = ref(false)
 const deviceFormRef = ref()
+const authStore = useAuthStore()
 
 const deviceForm = ref({
-  user_id: null,
+  user_id: authStore.user?.id || null,
   device_code: '',
-  device_name: ''
+  device_name: '',
+  activated: true
 })
 
 const deviceRules = {
   user_id: [{ required: true, message: '请输入用户ID', trigger: 'blur' }],
-  device_code: [{ required: true, message: '请输入设备代码', trigger: 'blur' }],
-  device_name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }]
+  device_code: [
+    {
+      validator: (rule, value, callback) => {
+        // 如果是编辑模式，激活码必填
+        if (editingDevice.value) {
+          if (!value) {
+            callback(new Error('请输入激活码'))
+          } else {
+            callback()
+          }
+          return
+        }
+        
+        // 如果是新增模式，激活码和设备名称至少填一个
+        if (!value && !deviceForm.value.device_name) {
+          callback(new Error('激活码和设备名称至少填写一个'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
+  ],
+  device_name: [
+    {
+      validator: (rule, value, callback) => {
+        // 如果是编辑模式，设备名称必填
+        if (editingDevice.value) {
+          if (!value) {
+            callback(new Error('请输入设备名称'))
+          } else {
+            callback()
+          }
+          return
+        }
+        
+        // 如果是新增模式，激活码和设备名称至少填一个
+        if (!value && !deviceForm.value.device_code) {
+          callback(new Error('激活码和设备名称至少填写一个'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
+  ]
 }
 
 const loadDevices = async () => {
@@ -123,12 +186,37 @@ const loadDevices = async () => {
   }
 }
 
+const openAddDialog = () => {
+  editingDevice.value = null
+  deviceForm.value = {
+    user_id: authStore.user?.id || null,
+    device_code: '',
+    device_name: '',
+    activated: true
+  }
+  showAddDialog.value = true
+}
+
+// 验证激活码是否存在
+const validateDeviceCode = async (deviceCode) => {
+  if (!deviceCode) return null
+  
+  try {
+    const response = await api.get(`/admin/devices/validate-code?code=${deviceCode}`)
+    return response.data.exists
+  } catch (error) {
+    console.error('验证激活码失败:', error)
+    return null
+  }
+}
+
 const editDevice = (device) => {
   editingDevice.value = device
   deviceForm.value = {
     user_id: device.user_id,
     device_code: device.device_code,
-    device_name: device.device_name
+    device_name: device.device_name,
+    activated: device.activated
   }
   showAddDialog.value = true
 }
@@ -145,14 +233,17 @@ const saveDevice = async () => {
       await api.put(`/admin/devices/${editingDevice.value.id}`, deviceForm.value)
       ElMessage.success('设备更新成功')
     } else {
-      await api.post('/admin/devices', deviceForm.value)
-      ElMessage.success('设备添加成功')
+      const response = await api.post('/admin/devices', deviceForm.value)
+      // 根据后端返回的消息显示不同的提示
+      const message = response.data.message || '设备添加成功'
+      ElMessage.success(message)
     }
     showAddDialog.value = false
     resetForm()
     loadDevices()
   } catch (error) {
-    ElMessage.error(editingDevice.value ? '设备更新失败' : '设备添加失败')
+    const errorMessage = error.response?.data?.error || (editingDevice.value ? '设备更新失败' : '设备添加失败')
+    ElMessage.error(errorMessage)
     console.error('Error saving device:', error)
   } finally {
     saving.value = false
@@ -185,9 +276,10 @@ const deleteDevice = async (device) => {
 const resetForm = () => {
   editingDevice.value = null
   deviceForm.value = {
-    user_id: null,
+    user_id: authStore.user?.id || null,
     device_code: '',
-    device_name: ''
+    device_name: '',
+    activated: true
   }
   if (deviceFormRef.value) {
     deviceFormRef.value.resetFields()

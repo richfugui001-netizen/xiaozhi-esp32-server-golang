@@ -27,31 +27,51 @@
           <span>智能体管理</span>
         </el-menu-item>
         
-        <el-sub-menu v-if="authStore.isAdmin" index="/admin">
+        <!-- 服务配置 -->
+        <el-sub-menu v-if="authStore.isAdmin" index="/admin/service-config">
           <template #title>
-            <el-icon><Setting /></el-icon>
-            <span>系统管理</span>
+            <el-icon><Tools /></el-icon>
+            <span>服务配置</span>
           </template>
-          <el-sub-menu index="/admin/service-config">
-            <template #title>服务配置</template>
-            <el-menu-item index="/admin/ota-config">OTA配置</el-menu-item>
-            <el-menu-item index="/admin/mqtt-config">MQTT配置</el-menu-item>
-            <el-menu-item index="/admin/mqtt-server-config">MQTT Server配置</el-menu-item>
-            <el-menu-item index="/admin/udp-config">UDP配置</el-menu-item>
-          </el-sub-menu>
-          <el-sub-menu index="/admin/ai-config">
-            <template #title>AI配置</template>
-            <el-menu-item index="/admin/vad-config">VAD配置</el-menu-item>
-            <el-menu-item index="/admin/asr-config">ASR配置</el-menu-item>
-            <el-menu-item index="/admin/llm-config">LLM配置</el-menu-item>
-            <el-menu-item index="/admin/tts-config">TTS配置</el-menu-item>
-            <el-menu-item index="/admin/vllm-config">VLLM配置</el-menu-item>
-          </el-sub-menu>
-          <el-menu-item index="/admin/global-roles">全局角色</el-menu-item>
-          <el-menu-item index="/admin/users">用户管理</el-menu-item>
-          <el-menu-item index="/admin/devices">设备管理</el-menu-item>
-          <el-menu-item index="/admin/agents">智能体管理</el-menu-item>
+          <el-menu-item index="/admin/ota-config">OTA配置</el-menu-item>
+          <el-menu-item index="/admin/mqtt-config">MQTT配置</el-menu-item>
+          <el-menu-item index="/admin/mqtt-server-config">MQTT Server配置</el-menu-item>
+          <el-menu-item index="/admin/udp-config">UDP配置</el-menu-item>
         </el-sub-menu>
+        
+        <!-- AI配置 -->
+        <el-sub-menu v-if="authStore.isAdmin" index="/admin/ai-config">
+          <template #title>
+            <el-icon><Cpu /></el-icon>
+            <span>AI配置</span>
+          </template>
+          <el-menu-item index="/admin/vad-config">VAD配置</el-menu-item>
+          <el-menu-item index="/admin/asr-config">ASR配置</el-menu-item>
+          <el-menu-item index="/admin/llm-config">LLM配置</el-menu-item>
+          <el-menu-item index="/admin/tts-config">TTS配置</el-menu-item>
+          <el-menu-item index="/admin/vllm-config">VLLM配置</el-menu-item>
+        </el-sub-menu>
+        
+        <!-- 系统管理 -->
+        <el-menu-item v-if="authStore.isAdmin" index="/admin/global-roles">
+          <el-icon><Setting /></el-icon>
+          <span>全局角色</span>
+        </el-menu-item>
+        
+        <el-menu-item v-if="authStore.isAdmin" index="/admin/users">
+          <el-icon><UserFilled /></el-icon>
+          <span>用户管理</span>
+        </el-menu-item>
+        
+        <el-menu-item v-if="authStore.isAdmin" index="/admin/devices">
+          <el-icon><Iphone /></el-icon>
+          <span>设备管理</span>
+        </el-menu-item>
+        
+        <el-menu-item v-if="authStore.isAdmin" index="/admin/agents">
+          <el-icon><Connection /></el-icon>
+          <span>智能体管理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     
@@ -93,7 +113,12 @@ import {
   Monitor,
   Setting,
   User,
-  ArrowDown
+  ArrowDown,
+  Tools,
+  Cpu,
+  UserFilled,
+  Iphone,
+  Connection
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

@@ -625,15 +625,41 @@ func (ac *AdminController) GetDevices(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": devices})
 }
 
+// 验证设备代码是否存在
+func (ac *AdminController) ValidateDeviceCode(c *gin.Context) {
+	deviceCode := c.Query("code")
+	if deviceCode == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "激活码不能为空"})
+		return
+	}
+
+	var device models.Device
+	err := ac.DB.Where("device_code = ?", deviceCode).First(&device).Error
+
+	if err == gorm.ErrRecordNotFound {
+		c.JSON(http.StatusOK, gin.H{"exists": false})
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询设备失败"})
+	} else {
+		c.JSON(http.StatusOK, gin.H{"exists": true, "device": device})
+	}
+}
+
 func (ac *AdminController) CreateDevice(c *gin.Context) {
 	var req struct {
 		UserID     uint   `json:"user_id" binding:"required"`
-		DeviceCode string `json:"device_code" binding:"required"`
-		DeviceName string `json:"device_name" binding:"required"`
+		DeviceCode string `json:"device_code"`
+		DeviceName string `json:"device_name"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	// 验证激活码和设备名称至少填一个
+	if req.DeviceCode == "" && req.DeviceName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "激活码和设备名称至少填写一个"})
 		return
 	}
 
@@ -644,11 +670,33 @@ func (ac *AdminController) CreateDevice(c *gin.Context) {
 		return
 	}
 
-	// 检查设备代码是否已存在
-	var existingDevice models.Device
-	if err := ac.DB.Where("device_code = ?", req.DeviceCode).First(&existingDevice).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "设备代码已存在"})
-		return
+	// 如果提供了激活码，先查找现有设备
+	if req.DeviceCode != "" {
+		var existingDevice models.Device
+		if err := ac.DB.Where("device_code = ?", req.DeviceCode).First(&existingDevice).Error; err == nil {
+			// 设备代码已存在，更新设备信息
+			existingDevice.UserID = req.UserID
+			if req.DeviceName != "" {
+				existingDevice.DeviceName = req.DeviceName
+			}
+			existingDevice.Activated = true // 激活设备
+
+			if err := ac.DB.Save(&existingDevice).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新设备失败"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"message": "设备激活成功",
+				"data":    existingDevice,
+			})
+			return
+		} else if err != gorm.ErrRecordNotFound {
+			// 数据库查询出错
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询设备失败"})
+			return
+		}
+		// 如果激活码不存在，继续创建新设备
 	}
 
 	// 创建设备
@@ -656,8 +704,8 @@ func (ac *AdminController) CreateDevice(c *gin.Context) {
 		UserID:     req.UserID,
 		DeviceCode: req.DeviceCode,
 		DeviceName: req.DeviceName,
-		AgentID:    0,     // 新创建的设备暂不绑定智能体
-		Activated:  false, // 新创建的设备默认未激活
+		AgentID:    0,    // 新创建的设备暂不绑定智能体
+		Activated:  true, // 管理员创建的设备默认已激活
 	}
 
 	if err := ac.DB.Create(&device).Error; err != nil {
@@ -665,7 +713,10 @@ func (ac *AdminController) CreateDevice(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": device})
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "设备创建成功",
+		"data":    device,
+	})
 }
 
 func (ac *AdminController) UpdateDevice(c *gin.Context) {
@@ -677,10 +728,23 @@ func (ac *AdminController) UpdateDevice(c *gin.Context) {
 		return
 	}
 
-	if err := c.ShouldBindJSON(&device); err != nil {
+	var updateData struct {
+		UserID     uint   `json:"user_id"`
+		DeviceCode string `json:"device_code"`
+		DeviceName string `json:"device_name"`
+		Activated  bool   `json:"activated"`
+	}
+
+	if err := c.ShouldBindJSON(&updateData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 更新设备信息
+	device.UserID = updateData.UserID
+	device.DeviceCode = updateData.DeviceCode
+	device.DeviceName = updateData.DeviceName
+	device.Activated = updateData.Activated
 
 	if err := ac.DB.Save(&device).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新设备失败"})

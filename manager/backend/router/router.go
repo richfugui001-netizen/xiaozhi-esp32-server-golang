@@ -144,6 +144,7 @@ func Setup(db *gorm.DB) *gin.Engine {
 
 				// 设备管理
 				admin.GET("/devices", adminController.GetDevices)
+				admin.GET("/devices/validate-code", adminController.ValidateDeviceCode)
 				admin.POST("/devices", adminController.CreateDevice)
 				admin.PUT("/devices/:id", adminController.UpdateDevice)
 				admin.DELETE("/devices/:id", adminController.DeleteDevice)
