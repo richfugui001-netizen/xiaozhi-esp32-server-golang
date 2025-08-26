@@ -39,7 +39,7 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deviceId = strings.ReplaceAll(deviceId, ":", "_")
+	//deviceId = strings.ReplaceAll(deviceId, ":", "_")
 
 	//根据ip选择不同的配置
 	clientIp := r.Header.Get("X-Real-IP")
@@ -52,8 +52,9 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 
 	var activationInfo *ActivationInfo
 	authEnable := viper.GetBool("auth.enable")
+	log.Debugf("authEnable: %v", authEnable)
 	if authEnable {
-		configProvider, err := user_config.GetProvider()
+		configProvider, err := user_config.GetProvider(viper.GetString("config_provider.type"))
 		//检查此deviceId是否已认证
 		isActivited, err := configProvider.IsDeviceActivated(r.Context(), deviceId, clientId)
 		if err != nil {
@@ -63,12 +64,15 @@ func (s *WebSocketServer) handleOta(w http.ResponseWriter, r *http.Request) {
 		}
 		if !isActivited {
 			code, challenge, msg, timeoutMs := configProvider.GetActivationInfo(r.Context(), deviceId, clientId)
+			// code现在返回的是int类型，但实际上后端API返回字符串
+			// 为了保持兼容性，这里仍然格式化为字符串
 			activationInfo = &ActivationInfo{
 				Code:      fmt.Sprintf("%d", code),
 				Message:   msg,
 				Challenge: challenge,
 				TimeoutMs: timeoutMs,
 			}
+			log.Infof("激活信息: &{Code:%d Message:%s Challenge:%s TimeoutMs:%d}", code, msg, challenge, timeoutMs)
 		}
 	}
 
@@ -153,7 +157,7 @@ func (s *WebSocketServer) handleOtaActivate(w http.ResponseWriter, r *http.Reque
 	}
 
 	// 调用配置Provider进行绑定校验
-	configProvider, err := user_config.GetProvider()
+	configProvider, err := user_config.GetProvider(viper.GetString("config_provider.type"))
 	if err != nil {
 		log.Errorf("获取配置Provider失败: %v", err)
 		http.Error(w, "内部服务器错误", http.StatusInternalServerError)
@@ -167,7 +171,7 @@ func (s *WebSocketServer) handleOtaActivate(w http.ResponseWriter, r *http.Reque
 	}
 	if !ok {
 		log.Warnf("设备激活校验未通过: deviceId=%s, clientId=%s", deviceId, clientId)
-		http.Error(w, "设备激活校验未通过", http.StatusUnauthorized)
+		http.Error(w, "设备激活校验未通过", http.StatusAccepted)
 		return
 	}
 	// 激活成功，返回200

@@ -1,0 +1,75 @@
+# 构建阶段
+FROM docker.jsdelivr.fyi/golang:1.23 AS builder
+
+# 设置非交互式安装环境变量
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装构建依赖
+RUN apt-get update && apt-get install -y libopus-dev libopusfile-dev pkg-config
+
+# 安装ONNX Runtime
+COPY docker/lib/onnxruntime-linux-x64-1.21.0.tgz /tmp/
+RUN cd /tmp && \
+    tar -xzf onnxruntime-linux-x64-1.21.0.tgz && \
+    mkdir -p /usr/local/include/onnxruntime && \
+    cp -r onnxruntime-linux-x64-1.21.0/include/* /usr/local/include/onnxruntime/ && \
+    cp -r onnxruntime-linux-x64-1.21.0/lib/* /usr/local/lib/ && \
+    rm -rf onnxruntime-linux-x64-1.21.0* && \
+    ldconfig
+
+# 设置Go环境变量
+ENV ONNXRUNTIME_DIR=/usr/local
+ENV CGO_CFLAGS="-I${ONNXRUNTIME_DIR}/include/onnxruntime" 
+ENV CGO_LDFLAGS="-L${ONNXRUNTIME_DIR}/lib -lonnxruntime"
+ENV GOPROXY=https://goproxy.cn,direct
+ENV CGO_ENABLED=1
+
+# 创建工作目录并复制源代码
+WORKDIR /app
+COPY . .
+
+# 构建主程序
+RUN go build -o /app/xiaozhi_server ./cmd/server/
+
+# 运行阶段
+FROM docker.jsdelivr.fyi/ubuntu:22.04
+
+# 设置非交互式安装环境变量
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装运行时依赖（最小化安装）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libopus0 \
+    libopusfile0 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装ONNX Runtime运行时
+COPY docker/lib/onnxruntime-linux-x64-1.21.0.tgz /tmp/
+RUN cd /tmp && \
+    tar -xzf onnxruntime-linux-x64-1.21.0.tgz && \
+    mkdir -p /usr/local/include/onnxruntime && \
+    cp -r onnxruntime-linux-x64-1.21.0/include/* /usr/local/include/onnxruntime/ && \
+    cp -r onnxruntime-linux-x64-1.21.0/lib/* /usr/local/lib/ && \
+    rm -rf onnxruntime-linux-x64-1.21.0* && \
+    ldconfig
+
+# 设置ONNX Runtime环境变量
+ENV ONNXRUNTIME_DIR=/usr/local
+ENV CGO_CFLAGS="-I${ONNXRUNTIME_DIR}/include/onnxruntime" 
+ENV CGO_LDFLAGS="-L${ONNXRUNTIME_DIR}/lib -lonnxruntime"
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 从构建阶段复制编译后的二进制文件
+COPY --from=builder /app/xiaozhi_server /workspace/bin/xiaozhi_server
+
+# 创建必要的目录
+RUN mkdir -p /workspace/logs /workspace/config
+
+# 暴露端口: http/websocket:8989, udp:8990, mqtt: 1883,2883,8883
+EXPOSE 8989 8990 1883 2883 8883
+
+# 启动命令
+CMD ["bin/xiaozhi_server", "-c", "config/config.yaml"]

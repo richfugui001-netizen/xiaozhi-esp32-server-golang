@@ -2,8 +2,12 @@ package user_config
 
 import (
 	"fmt"
+	"os"
 
+	"xiaozhi-esp32-server-golang/internal/domain/config/manager"
 	userconfig_redis "xiaozhi-esp32-server-golang/internal/domain/config/redis"
+
+	"github.com/spf13/viper"
 )
 
 // Config 用户配置提供者配置结构
@@ -12,8 +16,20 @@ type Config struct {
 	Parameters map[string]interface{} `json:"parameters"` // 存储相关配置参数
 }
 
-func GetProvider() (UserConfigProvider, error) {
-	provider, err := GetUserConfigProvider("redis", map[string]interface{}{})
+func GetProvider(sType string) (UserConfigProvider, error) {
+	config := make(map[string]interface{})
+	if sType == "manager" {
+		// 优先从环境变量获取backend地址
+		backendUrl := os.Getenv("BACKEND_URL")
+		if backendUrl == "" {
+			backendUrl = viper.GetString("manager.backend_url")
+		}
+		config = map[string]interface{}{
+			"backend_url": backendUrl,
+		}
+	}
+
+	provider, err := GetUserConfigProvider(sType, config)
 	if err != nil {
 		return nil, err
 	}
@@ -38,9 +54,13 @@ func GetUserConfigProvider(providerType string, config map[string]interface{}) (
 			return nil, fmt.Errorf("创建Redis用户配置提供者失败: %v", err)
 		}
 		return provider, nil
-	case "file":
-		// TODO: 创建文件用户配置提供者
-		return nil, fmt.Errorf("文件用户配置提供者暂未实现")
+	case "manager":
+		// 创建后端管理系统用户配置提供者
+		provider, err := manager.NewManagerUserConfigProvider(config)
+		if err != nil {
+			return nil, fmt.Errorf("创建后端管理系统用户配置提供者失败: %v", err)
+		}
+		return provider, nil
 	default:
 		return nil, fmt.Errorf("不支持的用户配置提供者: %s", providerType)
 	}

@@ -175,3 +175,9 @@ func (u *UserConfig) getSystemPrompt(ctx context.Context, deviceID string) strin
 	}
 	return configPrompt
 }
+
+// 获取 mqtt, mqtt_server, udp, ota, vision配置
+func (u *UserConfig) GetSystemConfig(ctx context.Context) (string, error) {
+	//默认不覆盖
+	return "", nil
+}

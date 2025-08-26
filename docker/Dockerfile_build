@@ -36,4 +36,4 @@ RUN mkdir -p /workspace/logs /workspace/config
 EXPOSE 8989 8990 1883 2883 8883
 
 # 启动命令
-CMD ["bin/xiaozhi_server", "-c", "config/config.json"]
+CMD ["bin/xiaozhi_server", "-c", "config/config.yaml"]

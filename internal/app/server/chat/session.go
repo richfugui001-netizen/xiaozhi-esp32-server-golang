@@ -17,6 +17,7 @@ import (
 	types_conn "xiaozhi-esp32-server-golang/internal/app/server/types"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/msg"
+	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
@@ -144,6 +145,13 @@ func (c *ChatSession) AudioMessageLoop(ctx context.Context) {
 			return
 		}
 		log.Debugf("收到音频数据，大小: %d 字节", len(message))
+		isAuth := viper.GetBool("auth.enable")
+		if isAuth {
+			if !c.clientState.IsActivated {
+				log.Debugf("设备 %s 未激活, 跳过音频数据", c.clientState.DeviceID)
+				continue
+			}
+		}
 		if c.clientState.GetClientVoiceStop() {
 			//log.Debug("客户端停止说话, 跳过音频数据")
 			continue
@@ -297,6 +305,15 @@ func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 
 	// 如果有文本，处理唤醒词
 	if msg.Text != "" {
+		isActivated, err := s.CheckDeviceActivated()
+		if err != nil {
+			log.Errorf("检查设备激活状态失败: %v", err)
+			return err
+		}
+		if !isActivated {
+			return nil
+		}
+
 		text := msg.Text
 		// 移除标点符号和处理长度
 		text = removePunctuation(text)
@@ -325,6 +342,30 @@ func (s *ChatSession) HandleListenDetect(msg *ClientMessage) error {
 		}
 	}
 	return nil
+}
+
+func (s *ChatSession) HandleNotActivated() {
+	configProvider, err := user_config.GetProvider(viper.GetString("config_provider.type"))
+	if err != nil {
+		log.Errorf("获取配置提供者失败: %v", err)
+		return
+	}
+
+	code, challenge, message, timeoutMs := configProvider.GetActivationInfo(s.clientState.Ctx, s.clientState.DeviceID, "client_id")
+	if code == 0 {
+		log.Errorf("获取激活信息失败: %v", err)
+		return
+	}
+
+	log.Infof("激活码: %d, 挑战码: %s, 消息: %s, 超时时间: %d", code, challenge, message, timeoutMs)
+
+	s.serverTransport.SendTtsStart()
+	defer s.serverTransport.SendTtsStop()
+
+	s.ttsManager.handleTts(s.clientState.GetSessionCtx(), llm_common.LLMResponseStruct{
+		Text: fmt.Sprintf("请在后台添加设备，激活码: %d", code),
+	})
+
 }
 
 func (s *ChatSession) HandleWelcome() {
@@ -405,7 +446,41 @@ func (s *ChatSession) HandleGoodByeMessage(msg *ClientMessage) error {
 	return nil
 }
 
+func (s *ChatSession) CheckDeviceActivated() (bool, error) {
+	if viper.GetBool("auth.enable") {
+		if !s.clientState.IsActivated {
+			configProvider, err := user_config.GetProvider(viper.GetString("config_provider.type"))
+			if err != nil {
+				log.Errorf("获取配置提供者失败: %v", err)
+				return false, err
+			}
+			//调用接口再次确认激活状态
+			isActivated, err := configProvider.IsDeviceActivated(s.clientState.Ctx, s.clientState.DeviceID, "client_id")
+			if err != nil {
+				log.Errorf("获取激活状态失败: %v", err)
+				return false, err
+			}
+			if isActivated {
+				s.clientState.IsActivated = true
+			} else {
+				s.HandleNotActivated()
+				return false, nil
+			}
+		}
+	}
+	return true, nil
+}
+
 func (s *ChatSession) HandleListenStart(msg *ClientMessage) error {
+	isActivated, err := s.CheckDeviceActivated()
+	if err != nil {
+		log.Errorf("检查设备激活状态失败: %v", err)
+		return err
+	}
+	if !isActivated {
+		return nil
+	}
+
 	// 处理拾音模式
 	if msg.Mode != "" {
 		s.clientState.ListenMode = msg.Mode
