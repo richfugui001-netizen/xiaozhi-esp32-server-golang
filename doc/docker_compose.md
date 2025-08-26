@@ -29,10 +29,10 @@
 ### 2. 主程序服务 (xiaozhi-main-server)
 
 **配置信息：**
-- 镜像：`docker.jsdelivr.fyi/hackers365/xiaozhi_golang:latest`
+- 镜像：`docker.jsdelivr.fyi/hackers365/xiaozhi_server:0.5`
 - 端口映射：
-  - `18989:8989` - 主服务端口
-  - `12883:2883` - MQTT 服务端口
+  - `8989:8989` - WebSocket 服务端口
+  - `2882:2883` - MQTT 服务端口
   - `8888:8888/udp` - UDP 服务端口
 
 **依赖关系：**
@@ -43,11 +43,15 @@
 - 数据库连接配置
 - 后端服务地址配置
 
+**配置文件支持：**
+- 支持通过卷挂载导入自定义配置文件
+- 配置文件路径：`../../config:/workspace/config`
+
 ### 3. 后端管理服务 (xiaozhi-backend)
 
 **配置信息：**
-- 镜像：`docker.jsdelivr.fyi/hackers365/xiaozhi_manager_backend:latest`
-- 端口映射：`28080:8080`
+- 镜像：`docker.jsdelivr.fyi/hackers365/xiaozhi_manager_backend:0.5`
+- 端口映射：`8081:8080`
 
 **依赖关系：**
 - 依赖 MySQL 服务健康状态
@@ -57,17 +61,21 @@
 - 设备管理功能
 - 用户管理功能
 
+**配置文件支持：**
+- 支持通过卷挂载导入自定义配置文件
+- 配置文件路径：`../../manager/backend/config:/root/config`
+
 ### 4. 前端管理服务 (xiaozhi-frontend)
 
 **配置信息：**
-- 镜像：`docker.jsdelivr.fyi/hackers365/xiaozhi_manager_frontend:latest`
-- 端口映射：`18080:80`
+- 镜像：`docker.jsdelivr.fyi/hackers365/xiaozhi_manager_frontend:0.5`
+- 端口映射：`8080:80`
 
 **依赖关系：**
 - 依赖后端服务
 
 **功能：**
-- Web 管理界面
+- Web 管理界面（内控入口）
 - 设备状态监控
 - 系统配置管理
 
@@ -94,18 +102,29 @@ xiaozhi-esp32-server-golang/
 ├── docker/docker-composer/
 │   └── docker-compose.yml
 ├── config/
-│   └── (配置文件)
+│   ├── config.yaml          # 主程序配置文件
+│   ├── config.json          # 其他配置文件
+│   └── (其他配置文件)
 ├── logs/
 │   └── (日志目录)
 └── manager/backend/config/
-    └── (后端配置)
+    ├── config.yaml          # 后端配置文件
+    └── (其他后端配置)
 ```
+
+**配置文件导入说明：**
+- 主程序配置文件通过卷挂载 `../../config:/workspace/config` 导入
+- 后端配置文件通过卷挂载 `../../manager/backend/config:/root/config` 导入
+- 修改宿主机配置文件后，重启对应服务即可生效
 
 ### 3. 启动服务
 
-在 `docker/docker-composer/` 目录下执行：
+**重要：必须先进入 `docker/docker-composer/` 目录再执行命令**
 
 ```bash
+# 进入 docker-compose 目录
+cd docker/docker-composer/
+
 # 启动所有服务
 docker-compose up -d
 
@@ -120,10 +139,11 @@ docker-compose logs -f
 
 启动成功后，可通过以下地址访问各服务：
 
-- **前端管理界面**：http://localhost:18080
-- **后端 API**：http://localhost:28080
-- **主服务**：http://localhost:18989
-- **MQTT 服务**：localhost:12883
+- **前端管理界面（内控入口）**：http://localhost:8080
+- **后端 API**：http://localhost:8081
+- **WebSocket 服务**：ws://localhost:8989
+- **MQTT 服务**：localhost:2882
+- **UDP 服务**：localhost:8888
 - **MySQL 数据库**：localhost:23306
 
 ## 常用操作
@@ -131,6 +151,9 @@ docker-compose logs -f
 ### 查看服务状态
 
 ```bash
+# 进入 docker-compose 目录
+cd docker/docker-composer/
+
 # 查看所有服务状态
 docker-compose ps
 
@@ -141,6 +164,9 @@ docker-compose ps main-server
 ### 查看服务日志
 
 ```bash
+# 进入 docker-compose 目录
+cd docker/docker-composer/
+
 # 查看所有服务日志
 docker-compose logs
 
@@ -154,6 +180,9 @@ docker-compose logs -f main-server
 ### 重启服务
 
 ```bash
+# 进入 docker-compose 目录
+cd docker/docker-composer/
+
 # 重启所有服务
 docker-compose restart
 
@@ -164,6 +193,9 @@ docker-compose restart main-server
 ### 停止服务
 
 ```bash
+# 进入 docker-compose 目录
+cd docker/docker-composer/
+
 # 停止所有服务
 docker-compose down
 
@@ -174,6 +206,9 @@ docker-compose down -v
 ### 更新服务
 
 ```bash
+# 进入 docker-compose 目录
+cd docker/docker-composer/
+
 # 拉取最新镜像并重启服务
 docker-compose pull
 docker-compose up -d
@@ -186,6 +221,15 @@ docker-compose up -d
 - MySQL 服务：`mysql:3306`
 - 后端服务：`backend:8080`
 - 前端服务：`frontend:80`
+- 主程序服务：`main-server:8989` (WebSocket)、`main-server:2883` (MQTT)、`main-server:8888` (UDP)
+
+**端口映射总结：**
+- 宿主机 8080 → 前端管理界面（内控入口）
+- 宿主机 8081 → 后端 API 服务
+- 宿主机 8989 → WebSocket 服务
+- 宿主机 2882 → MQTT 服务
+- 宿主机 8888 → UDP 服务
+- 宿主机 23306 → MySQL 数据库
 
 ## 数据持久化
 
@@ -198,7 +242,63 @@ MySQL 数据通过 Docker 卷 `mysql_data` 进行持久化存储，数据不会�
 主程序和后端服务的配置文件通过卷挂载方式映射到容器内：
 
 - 主程序配置：`../../config:/workspace/config`
+  - 支持 `config.yaml`、`config.json` 等配置文件
+  - 修改宿主机配置文件后重启服务即可生效
 - 后端配置：`../../manager/backend/config:/root/config`
+  - 支持 `config.yaml` 等配置文件
+  - 修改宿主机配置文件后重启服务即可生效
+
+## 配置文件导入方法
+
+### 1. 主程序配置文件
+
+**配置文件位置：**
+```
+xiaozhi-esp32-server-golang/config/
+├── config.yaml          # 主配置文件
+├── config.json          # JSON格式配置
+├── mqtt_config.json     # MQTT配置
+└── (其他配置文件)
+```
+
+**导入方法：**
+1. 将配置文件放置在 `config/` 目录下
+2. 启动服务时自动挂载到容器内 `/workspace/config/` 目录
+3. 修改配置文件后重启主程序服务：
+   ```bash
+   cd docker/docker-composer/
+   docker-compose restart main-server
+   ```
+
+### 2. 后端管理配置文件
+
+**配置文件位置：**
+```
+xiaozhi-esp32-server-golang/manager/backend/config/
+├── config.yaml          # 后端配置文件
+└── (其他配置文件)
+```
+
+**导入方法：**
+1. 将配置文件放置在 `manager/backend/config/` 目录下
+2. 启动服务时自动挂载到容器内 `/root/config/` 目录
+3. 修改配置文件后重启后端服务：
+   ```bash
+   cd docker/docker-composer/
+   docker-compose restart backend
+   ```
+
+### 3. 配置文件热更新
+
+**注意事项：**
+- 某些配置修改后需要重启服务才能生效
+- 建议在修改配置文件前先备份原文件
+- 可以通过查看服务日志确认配置是否正确加载：
+  ```bash
+  cd docker/docker-composer/
+  查看主程序日志：docker-compose logs main-server
+  查看后端日志：docker-compose logs backend
+  ```
 
 ### 日志文件
 
@@ -226,6 +326,9 @@ healthcheck:
 ### 1. 服务启动失败
 
 ```bash
+# 进入 docker-compose 目录
+cd docker/docker-composer/
+
 # 查看详细错误信息
 docker-compose logs [服务名]
 
@@ -236,6 +339,9 @@ netstat -tulpn | grep [端口号]
 ### 2. 数据库连接失败
 
 ```bash
+# 进入 docker-compose 目录
+cd docker/docker-composer/
+
 # 检查 MySQL 服务状态
 docker-compose ps mysql
 
@@ -249,6 +355,9 @@ docker-compose exec mysql mysql -u root -ppassword
 ### 3. 网络连接问题
 
 ```bash
+# 进入 docker-compose 目录
+cd docker/docker-composer/
+
 # 检查网络配置
 docker network ls
 docker network inspect xiaozhi-network

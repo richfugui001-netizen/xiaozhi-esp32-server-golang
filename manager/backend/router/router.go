@@ -116,6 +116,10 @@ func Setup(db *gorm.DB) *gin.Engine {
 				admin.PUT("/vision-configs/:id", adminController.UpdateVisionConfig)
 				admin.DELETE("/vision-configs/:id", adminController.DeleteVisionConfig)
 
+				// Vision基础配置
+				admin.GET("/vision-base-config", adminController.GetVisionBaseConfig)
+				admin.PUT("/vision-base-config", adminController.UpdateVisionBaseConfig)
+
 				admin.GET("/ota-configs", adminController.GetOTAConfigs)
 				admin.POST("/ota-configs", adminController.CreateOTAConfig)
 				admin.PUT("/ota-configs/:id", adminController.UpdateOTAConfig)

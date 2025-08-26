@@ -4,53 +4,97 @@
       <div class="header-left">
         <h2>Vision配置管理</h2>
       </div>
-      <div class="header-right">
-        <el-button type="primary" @click="showDialog = true">
-          <el-icon><Plus /></el-icon>
-          添加配置
-        </el-button>
-      </div>
     </div>
 
-    <el-table :data="configs" style="width: 100%" v-loading="loading">
-      <el-table-column prop="id" label="ID" width="80" />
-      <el-table-column prop="name" label="配置名称" />
-      <el-table-column prop="provider" label="提供商" />
-      <el-table-column prop="enabled" label="启用状态" width="80" align="center">
-        <template #default="scope">
-          <el-switch 
-            v-model="scope.row.enabled" 
-            @change="toggleEnable(scope.row)"
+    <!-- 基础配置部分 -->
+    <el-card class="base-config-card" style="margin-bottom: 20px;">
+      <template #header>
+        <div class="card-header">
+          <span>基础配置</span>
+        </div>
+      </template>
+      
+      <el-form
+        ref="baseFormRef"
+        :model="baseForm"
+        :rules="baseRules"
+        label-width="120px"
+        style="max-width: 600px;"
+      >
+        <el-form-item label="启用认证" prop="enable_auth">
+          <el-switch v-model="baseForm.enable_auth" />
+          <div class="form-tip">是否启用视觉识别接口的鉴权</div>
+        </el-form-item>
+        
+        <el-form-item label="Vision URL" prop="vision_url">
+          <el-input 
+            v-model="baseForm.vision_url" 
+            placeholder="请输入Vision API地址"
+            style="width: 100%;"
           />
-        </template>
-      </el-table-column>
-      <el-table-column prop="is_default" label="默认配置" width="80" align="center">
-        <template #default="scope">
-          <el-switch 
-            v-model="scope.row.is_default" 
-            @change="toggleDefault(scope.row)"
-            :disabled="scope.row.is_default && getEnabledConfigs().length === 1"
-          />
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="180">
-        <template #default="scope">
-          {{ formatDate(scope.row.created_at) }}
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="180">
-        <template #default="scope">
-          <el-button size="small" @click="editConfig(scope.row)">编辑</el-button>
-          <el-button
-            size="small"
-            type="danger"
-            @click="deleteConfig(scope.row.id)"
-          >
-            删除
+          <div class="form-tip">返回给客户端用于图片识别的HTTP请求地址</div>
+        </el-form-item>
+        
+        <el-form-item>
+          <el-button type="primary" @click="saveBaseConfig" :loading="baseSaving">
+            保存基础配置
           </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <!-- 配置列表部分 -->
+    <el-card>
+      <template #header>
+        <div class="card-header">
+          <span>模型配置列表</span>
+          <el-button type="primary" @click="showDialog = true">
+            <el-icon><Plus /></el-icon>
+            添加配置
+          </el-button>
+        </div>
+      </template>
+
+      <el-table :data="configs" style="width: 100%" v-loading="loading">
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="name" label="配置名称" />
+        <el-table-column prop="provider" label="提供商" />
+        <el-table-column prop="enabled" label="启用状态" width="80" align="center">
+          <template #default="scope">
+            <el-switch 
+              v-model="scope.row.enabled" 
+              @change="toggleEnable(scope.row)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column prop="is_default" label="默认配置" width="80" align="center">
+          <template #default="scope">
+            <el-switch 
+              v-model="scope.row.is_default" 
+              @change="toggleDefault(scope.row)"
+              :disabled="scope.row.is_default && getEnabledConfigs().length === 1"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" width="180">
+          <template #default="scope">
+            {{ formatDate(scope.row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180">
+          <template #default="scope">
+            <el-button size="small" @click="editConfig(scope.row)">编辑</el-button>
+            <el-button
+              size="small"
+              type="danger"
+              @click="deleteConfig(scope.row.id)"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
 
     <!-- 添加/编辑配置弹窗 -->
     <el-dialog
@@ -128,9 +172,25 @@ import api from '../../utils/api'
 const configs = ref([])
 const loading = ref(false)
 const saving = ref(false)
+const baseSaving = ref(false)
 const showDialog = ref(false)
 const editingConfig = ref(null)
 const formRef = ref()
+const baseFormRef = ref()
+
+// 基础配置表单
+const baseForm = reactive({
+  enable_auth: false,
+  vision_url: ''
+})
+
+// 基础配置验证规则
+const baseRules = {
+  vision_url: [
+    { required: true, message: '请输入Vision URL', trigger: 'blur' },
+    { type: 'url', message: '请输入有效的URL', trigger: 'blur' }
+  ]
+}
 
 const form = reactive({
   name: '',
@@ -174,11 +234,47 @@ const rules = {
   timeout: [{ required: true, message: '请输入超时时间', trigger: 'blur' }]
 }
 
+// 加载基础配置
+const loadBaseConfig = async () => {
+  try {
+    const response = await api.get('/admin/vision-base-config')
+    const data = response.data.data || {}
+    baseForm.enable_auth = data.enable_auth || false
+    baseForm.vision_url = data.vision_url || ''
+  } catch (error) {
+    console.error('加载基础配置失败:', error)
+  }
+}
+
+// 保存基础配置
+const saveBaseConfig = async () => {
+  if (!baseFormRef.value) return
+  
+  await baseFormRef.value.validate(async (valid) => {
+    if (valid) {
+      baseSaving.value = true
+      try {
+        await api.put('/admin/vision-base-config', {
+          enable_auth: baseForm.enable_auth,
+          vision_url: baseForm.vision_url
+        })
+        ElMessage.success('基础配置保存成功')
+      } catch (error) {
+        ElMessage.error('保存失败，请检查网络连接和输入内容')
+      } finally {
+        baseSaving.value = false
+      }
+    }
+  })
+}
+
 const loadConfigs = async () => {
   loading.value = true
   try {
     const response = await api.get('/admin/vision-configs')
-    configs.value = response.data.data || []
+    // 过滤掉vision_base配置，确保不在列表中显示
+    const allConfigs = response.data.data || []
+    configs.value = allConfigs.filter(config => config.config_id !== 'vision_base')
   } catch (error) {
     ElMessage.error('加载配置失败')
   } finally {
@@ -336,6 +432,7 @@ const formatDate = (dateString) => {
 }
 
 onMounted(() => {
+  loadBaseConfig()
   loadConfigs()
 })
 </script>
@@ -358,5 +455,24 @@ onMounted(() => {
 .header-left h2 {
   margin: 0;
   color: #333;
+}
+
+.base-config-card {
+  background: #f8f9fa;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  color: #333;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+  line-height: 1.4;
 }
 </style>

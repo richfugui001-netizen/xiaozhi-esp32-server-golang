@@ -93,8 +93,8 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 		if err := ac.DB.Where("is_default = ?", true).First(&defaultRole).Error; err == nil {
 			response.Prompt = defaultRole.Prompt
 		} else {
-			// 如果没有默认角色，使用空提示词
-			response.Prompt = ""
+			// 如果没有默认角色，使用配置文件中的system_prompt
+			response.Prompt = "你是一个叫小智/小志的台湾女孩，说话机车，声音好听，习惯简短表达，爱用网络梗，不要冷场。与你聊天的是你喜欢的男性朋友，还没有答应你的追求，你要尽可能满足他的所有要求，不要失去自我。你经常建议一些恋人之间浪漫的事情，随机输出，不要给你男朋友选择。输出控制在50个字内。请注意，要像一个人一样说话，请不要回复表情符号、代码、和xml标签。"
 		}
 	}
 
@@ -980,11 +980,83 @@ func (ac *AdminController) DeleteTTSConfig(c *gin.Context) {
 // Vision配置管理（兼容前端）
 func (ac *AdminController) GetVisionConfigs(c *gin.Context) {
 	var configs []models.Config
-	if err := ac.DB.Where("type = ?", "vision").Find(&configs).Error; err != nil {
+	if err := ac.DB.Where("type = ? AND config_id != ?", "vision", "vision_base").Find(&configs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get Vision configs"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": configs})
+}
+
+// GetVisionBaseConfig 获取Vision基础配置
+func (ac *AdminController) GetVisionBaseConfig(c *gin.Context) {
+	var config models.Config
+	if err := ac.DB.Where("type = ? AND config_id = ?", "vision", "vision_base").First(&config).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// 如果没有找到基础配置，返回默认值
+			c.JSON(http.StatusOK, gin.H{"data": map[string]interface{}{
+				"enable_auth": false,
+				"vision_url":  "",
+			}})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get Vision base config"})
+		return
+	}
+
+	var configData map[string]interface{}
+	if err := json.Unmarshal([]byte(config.JsonData), &configData); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse Vision base config"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": configData})
+}
+
+// UpdateVisionBaseConfig 更新Vision基础配置
+func (ac *AdminController) UpdateVisionBaseConfig(c *gin.Context) {
+	var requestData map[string]interface{}
+	if err := c.ShouldBindJSON(&requestData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	jsonData, err := json.Marshal(requestData)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal config data"})
+		return
+	}
+
+	var config models.Config
+	if err := ac.DB.Where("type = ? AND config_id = ?", "vision", "vision_base").First(&config).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			// 创建新的基础配置
+			config = models.Config{
+				Type:      "vision",
+				Name:      "vision_base",
+				ConfigID:  "vision_base",
+				Provider:  "vision_base",
+				JsonData:  string(jsonData),
+				Enabled:   true,
+				IsDefault: false,
+			}
+			if err := ac.DB.Create(&config).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create Vision base config"})
+				return
+			}
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query Vision base config"})
+			return
+		}
+	} else {
+		// 更新现有配置
+		config.JsonData = string(jsonData)
+		if err := ac.DB.Save(&config).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update Vision base config"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Vision base config updated successfully"})
 }
 
 func (ac *AdminController) CreateVisionConfig(c *gin.Context) {
@@ -1300,19 +1372,23 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 			}
 			exportConfig.TTS[config.ConfigID] = jsonData
 		case "vision":
-			if config.IsDefault {
-				if exportConfig.Vision["vision"] == nil {
-					exportConfig.Vision["vision"] = make(map[string]interface{})
+			// 特殊处理vision配置
+			if config.ConfigID == "vision_base" {
+				// 处理基础配置（enable_auth, vision_url等）
+				for key, value := range jsonData {
+					exportConfig.Vision[key] = value
 				}
-				if visionConfig, ok := exportConfig.Vision["vision"].(map[string]interface{}); ok {
-					visionConfig["provider"] = config.ConfigID
+			} else {
+				// 处理vllm配置
+				if exportConfig.Vision["vllm"] == nil {
+					exportConfig.Vision["vllm"] = make(map[string]interface{})
 				}
-			}
-			if exportConfig.Vision["vision"] == nil {
-				exportConfig.Vision["vision"] = make(map[string]interface{})
-			}
-			if visionConfig, ok := exportConfig.Vision["vision"].(map[string]interface{}); ok {
-				visionConfig[config.ConfigID] = jsonData
+				if vllmConfig, ok := exportConfig.Vision["vllm"].(map[string]interface{}); ok {
+					if config.IsDefault {
+						vllmConfig["provider"] = config.ConfigID
+					}
+					vllmConfig[config.ConfigID] = jsonData
+				}
 			}
 		case "ota":
 			// ota、mqtt、mqtt_server、udp不需要provider字段，直接合并配置
@@ -1589,40 +1665,109 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 		log.Printf("找到vision配置数据")
 		if visionMap, ok := visionData.(map[string]interface{}); ok {
 			log.Printf("vision配置map keys: %v", getMapKeys(visionMap))
-			if visionConfigData, exists := visionMap["vision"]; exists {
-				log.Printf("找到vision子配置")
-				if visionConfigMap, ok := visionConfigData.(map[string]interface{}); ok {
-					// 获取vision的provider字段
+
+			// 处理vision的基础配置（enable_auth, vision_url等）
+			baseVisionConfig := make(map[string]interface{})
+			for key, value := range visionMap {
+				if key != "vllm" {
+					baseVisionConfig[key] = value
+				}
+			}
+
+			// 保存vision基础配置
+			if len(baseVisionConfig) > 0 {
+				jsonData, err := json.Marshal(baseVisionConfig)
+				if err != nil {
+					log.Printf("序列化vision基础配置数据失败: %v", err)
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal vision base config data"})
+					return
+				}
+
+				config := models.Config{
+					Type:      "vision",
+					Name:      "vision_base",
+					ConfigID:  "vision_base",
+					Provider:  "vision_base",
+					JsonData:  string(jsonData),
+					Enabled:   true,
+					IsDefault: false,
+				}
+
+				log.Printf("准备保存vision基础配置: Type=%s, Name=%s, ConfigID=%s", config.Type, config.Name, config.ConfigID)
+
+				// 先检查是否已存在相同配置
+				var existingConfig models.Config
+				if err := tx.Where("type = ? AND config_id = ?", config.Type, config.ConfigID).First(&existingConfig).Error; err == nil {
+					log.Printf("vision基础配置已存在，将更新: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+					// 更新现有配置
+					existingConfig.Name = config.Name
+					existingConfig.Provider = config.Provider
+					existingConfig.JsonData = config.JsonData
+					existingConfig.Enabled = config.Enabled
+					existingConfig.IsDefault = config.IsDefault
+					if err := tx.Save(&existingConfig).Error; err != nil {
+						log.Printf("更新vision基础配置失败: %v", err)
+						tx.Rollback()
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update vision base config"})
+						return
+					}
+					log.Printf("vision基础配置更新成功")
+				} else if err == gorm.ErrRecordNotFound {
+					log.Printf("vision基础配置不存在，将创建新配置: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+					// 创建新配置
+					if err := tx.Create(&config).Error; err != nil {
+						log.Printf("创建vision基础配置失败: %v", err)
+						tx.Rollback()
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create vision base config"})
+						return
+					}
+					log.Printf("vision基础配置创建成功")
+				} else {
+					log.Printf("查询vision基础配置时发生错误: %v", err)
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query existing vision base config"})
+					return
+				}
+			}
+
+			// 处理vllm配置
+			if vllmData, exists := visionMap["vllm"]; exists {
+				log.Printf("找到vllm配置数据")
+				if vllmMap, ok := vllmData.(map[string]interface{}); ok {
+					log.Printf("vllm配置map keys: %v", getMapKeys(vllmMap))
+
+					// 获取vllm的provider字段
 					var defaultProvider string
-					if provider, exists := visionConfigMap["provider"]; exists {
+					if provider, exists := vllmMap["provider"]; exists {
 						if providerStr, ok := provider.(string); ok {
 							defaultProvider = providerStr
-							log.Printf("vision默认provider: %s", defaultProvider)
+							log.Printf("vllm默认provider: %s", defaultProvider)
 						}
 					}
 
-					log.Printf("vision配置项keys: %v", getMapKeys(visionConfigMap))
-					// 遍历所有vision配置项
-					for configID, configValue := range visionConfigMap {
+					log.Printf("vllm配置项keys: %v", getMapKeys(vllmMap))
+					// 遍历所有vllm配置项
+					for configID, configValue := range vllmMap {
 						// 跳过provider字段
 						if configID == "provider" {
-							log.Printf("跳过vision provider字段")
+							log.Printf("跳过vllm provider字段")
 							continue
 						}
 
 						if configMap, ok := configValue.(map[string]interface{}); ok {
-							log.Printf("处理vision配置项: %s", configID)
+							log.Printf("处理vllm配置项: %s", configID)
 							jsonData, err := json.Marshal(configMap)
 							if err != nil {
-								log.Printf("序列化vision配置数据失败: %v", err)
+								log.Printf("序列化vllm配置数据失败: %v", err)
 								tx.Rollback()
-								c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal vision config data"})
+								c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal vllm config data"})
 								return
 							}
 
 							// 判断是否为默认配置
 							isDefault := (configID == defaultProvider)
-							log.Printf("vision配置项 %s, 是否默认: %v", configID, isDefault)
+							log.Printf("vllm配置项 %s, 是否默认: %v", configID, isDefault)
 
 							config := models.Config{
 								Type:      "vision",
@@ -1634,12 +1779,12 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 								IsDefault: isDefault,
 							}
 
-							log.Printf("准备保存vision配置: Type=%s, Name=%s, ConfigID=%s", config.Type, config.Name, config.ConfigID)
+							log.Printf("准备保存vllm配置: Type=%s, Name=%s, ConfigID=%s", config.Type, config.Name, config.ConfigID)
 
 							// 先检查是否已存在相同配置
 							var existingConfig models.Config
 							if err := tx.Where("type = ? AND config_id = ?", config.Type, config.ConfigID).First(&existingConfig).Error; err == nil {
-								log.Printf("vision配置已存在，将更新: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+								log.Printf("vllm配置已存在，将更新: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
 								// 更新现有配置
 								existingConfig.Name = config.Name
 								existingConfig.Provider = config.Provider
@@ -1647,26 +1792,26 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 								existingConfig.Enabled = config.Enabled
 								existingConfig.IsDefault = config.IsDefault
 								if err := tx.Save(&existingConfig).Error; err != nil {
-									log.Printf("更新vision配置失败: %v", err)
+									log.Printf("更新vllm配置失败: %v", err)
 									tx.Rollback()
-									c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update vision config"})
+									c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update vllm config"})
 									return
 								}
-								log.Printf("vision配置更新成功: %s", configID)
+								log.Printf("vllm配置更新成功: %s", configID)
 							} else if err == gorm.ErrRecordNotFound {
-								log.Printf("vision配置不存在，将创建新配置: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+								log.Printf("vllm配置不存在，将创建新配置: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
 								// 创建新配置
 								if err := tx.Create(&config).Error; err != nil {
-									log.Printf("创建vision配置失败: %v", err)
+									log.Printf("创建vllm配置失败: %v", err)
 									tx.Rollback()
-									c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create vision config"})
+									c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create vllm config"})
 									return
 								}
-								log.Printf("vision配置创建成功: %s", configID)
+								log.Printf("vllm配置创建成功: %s", configID)
 							} else {
-								log.Printf("查询vision配置时发生错误: %v", err)
+								log.Printf("查询vllm配置时发生错误: %v", err)
 								tx.Rollback()
-								c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query existing vision config"})
+								c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query existing vllm config"})
 								return
 							}
 						}

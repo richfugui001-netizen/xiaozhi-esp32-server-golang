@@ -8,16 +8,20 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: xiaozhi_admin
-      MYSQL_USER: xiaozhi
-      MYSQL_PASSWORD: xiaozhi123
     ports:
-      - "23306:3306"
+      - "23306:3306"        #可以不进行映射
     volumes:
       - mysql_data:/var/lib/mysql
-    command: --default-authentication-plugin=mysql_native_password
+    command: --default-authentication-plugin=mysql_native_password --skip-ssl
     networks:
       - xiaozhi-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      timeout: 20s
+      retries: 10
+      interval: 10s
+      start_period: 30s
 
   # 主程序服务
   main-server:
@@ -34,8 +38,8 @@ services:
     environment:
       - DB_HOST=mysql
       - DB_PORT=3306
-      - DB_USER=xiaozhi
-      - DB_PASSWORD=xiaozhi123
+      - DB_USER=root
+      - DB_PASSWORD=password
       - DB_NAME=xiaozhi_admin
       - BACKEND_URL=http://backend:8080
     volumes:
@@ -54,12 +58,13 @@ services:
     ports:
       - "28080:8080"
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     environment:
       - DB_HOST=mysql
       - DB_PORT=3306
-      - DB_USER=xiaozhi
-      - DB_PASSWORD=xiaozhi123
+      - DB_USER=root
+      - DB_PASSWORD=password
       - DB_NAME=xiaozhi_admin
     volumes:
       - ../manager/backend/config:/root/config
