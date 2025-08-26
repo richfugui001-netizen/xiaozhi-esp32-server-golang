@@ -134,7 +134,7 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 	return config, nil
 }
 
-// 获取 mqtt, mqtt_server, udp, ota, vllm配置
+// 获取 mqtt, mqtt_server, udp, ota, vision配置
 func (c *ConfigManager) GetSystemConfig(ctx context.Context) (string, error) {
 	// 构建backend API URL
 	apiURL := fmt.Sprintf("%s/api/system/configs", c.baseURL)

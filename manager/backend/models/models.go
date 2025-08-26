@@ -47,11 +47,11 @@ type Agent struct {
 // 通用配置模型
 type Config struct {
 	ID        uint      `json:"id" gorm:"primarykey"`
-	Type      string    `json:"type" gorm:"type:varchar(50);not null;index"` // vad, asr, llm, tts, ota, mqtt, udp, mqtt_server, vllm
+	Type      string    `json:"type" gorm:"type:varchar(50);not null;uniqueIndex:type_config_id,priority:1"` // vad, asr, llm, tts, ota, mqtt, udp, mqtt_server, vision
 	Name      string    `json:"name" gorm:"type:varchar(100);not null"`
-	ConfigID  string    `json:"config_id" gorm:"type:varchar(100);not null;uniqueIndex:idx_configs_type_config_id"` // 配置ID，用于关联
-	Provider  string    `json:"provider" gorm:"type:varchar(50)"`                                                   // 某些配置类型需要provider字段
-	JsonData  string    `json:"json_data" gorm:"type:text"`                                                         // JSON配置数据
+	ConfigID  string    `json:"config_id" gorm:"type:varchar(100);not null;uniqueIndex:type_config_id,priority:2"` // 配置ID，用于关联
+	Provider  string    `json:"provider" gorm:"type:varchar(50)"`                                                  // 某些配置类型需要provider字段
+	JsonData  string    `json:"json_data" gorm:"type:text"`                                                        // JSON配置数据
 	Enabled   bool      `json:"enabled" gorm:"default:true"`
 	IsDefault bool      `json:"is_default" gorm:"default:false"`
 	CreatedAt time.Time `json:"created_at"`

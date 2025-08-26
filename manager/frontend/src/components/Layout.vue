@@ -49,7 +49,7 @@
           <el-menu-item index="/admin/asr-config">ASR配置</el-menu-item>
           <el-menu-item index="/admin/llm-config">LLM配置</el-menu-item>
           <el-menu-item index="/admin/tts-config">TTS配置</el-menu-item>
-          <el-menu-item index="/admin/vllm-config">VLLM配置</el-menu-item>
+          					<el-menu-item index="/admin/vision-config">Vision配置</el-menu-item>
         </el-sub-menu>
         
         <!-- 系统管理 -->

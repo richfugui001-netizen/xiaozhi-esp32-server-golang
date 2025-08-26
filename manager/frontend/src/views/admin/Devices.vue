@@ -90,6 +90,17 @@
         <el-form-item label="激活状态" prop="activated">
           <el-switch v-model="deviceForm.activated" />
         </el-form-item>
+        <el-form-item label="关联智能体" prop="agent_id">
+          <el-select v-model="deviceForm.agent_id" placeholder="请选择智能体" style="width: 100%" clearable>
+            <el-option label="不关联智能体" :value="0" />
+            <el-option 
+              v-for="agent in agents" 
+              :key="agent.id" 
+              :label="`${agent.name} (用户${agent.user_id})`" 
+              :value="agent.id" 
+            />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showAddDialog = false">取消</el-button>
@@ -109,6 +120,7 @@ import api from '../../utils/api'
 import { useAuthStore } from '../../stores/auth'
 
 const devices = ref([])
+const agents = ref([])
 const loading = ref(false)
 const showAddDialog = ref(false)
 const editingDevice = ref(null)
@@ -120,7 +132,8 @@ const deviceForm = ref({
   user_id: authStore.user?.id || null,
   device_code: '',
   device_name: '',
-  activated: true
+  activated: true,
+  agent_id: 0
 })
 
 const deviceRules = {
@@ -186,13 +199,24 @@ const loadDevices = async () => {
   }
 }
 
+const loadAgents = async () => {
+  try {
+    const response = await api.get('/admin/agents')
+    agents.value = response.data.data || []
+  } catch (error) {
+    ElMessage.error('加载智能体列表失败')
+    console.error('Error loading agents:', error)
+  }
+}
+
 const openAddDialog = () => {
   editingDevice.value = null
   deviceForm.value = {
     user_id: authStore.user?.id || null,
     device_code: '',
     device_name: '',
-    activated: true
+    activated: true,
+    agent_id: 0
   }
   showAddDialog.value = true
 }
@@ -216,7 +240,8 @@ const editDevice = (device) => {
     user_id: device.user_id,
     device_code: device.device_code,
     device_name: device.device_name,
-    activated: device.activated
+    activated: device.activated,
+    agent_id: device.agent_id || 0
   }
   showAddDialog.value = true
 }
@@ -279,7 +304,8 @@ const resetForm = () => {
     user_id: authStore.user?.id || null,
     device_code: '',
     device_name: '',
-    activated: true
+    activated: true,
+    agent_id: 0
   }
   if (deviceFormRef.value) {
     deviceFormRef.value.resetFields()
@@ -297,6 +323,7 @@ const isDeviceOnline = (lastActiveAt) => {
 
 onMounted(() => {
   loadDevices()
+  loadAgents()
 })
 </script>
 

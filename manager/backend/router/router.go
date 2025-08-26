@@ -111,10 +111,10 @@ func Setup(db *gorm.DB) *gin.Engine {
 				admin.PUT("/tts-configs/:id", adminController.UpdateTTSConfig)
 				admin.DELETE("/tts-configs/:id", adminController.DeleteTTSConfig)
 
-				admin.GET("/vllm-configs", adminController.GetVLLMConfigs)
-				admin.POST("/vllm-configs", adminController.CreateVLLMConfig)
-				admin.PUT("/vllm-configs/:id", adminController.UpdateVLLMConfig)
-				admin.DELETE("/vllm-configs/:id", adminController.DeleteVLLMConfig)
+				admin.GET("/vision-configs", adminController.GetVisionConfigs)
+				admin.POST("/vision-configs", adminController.CreateVisionConfig)
+				admin.PUT("/vision-configs/:id", adminController.UpdateVisionConfig)
+				admin.DELETE("/vision-configs/:id", adminController.DeleteVisionConfig)
 
 				admin.GET("/ota-configs", adminController.GetOTAConfigs)
 				admin.POST("/ota-configs", adminController.CreateOTAConfig)
@@ -161,6 +161,10 @@ func Setup(db *gorm.DB) *gin.Engine {
 				admin.PUT("/users/:id", adminController.UpdateUser)
 				admin.DELETE("/users/:id", adminController.DeleteUser)
 				admin.POST("/users/:id/reset-password", adminController.ResetUserPassword)
+
+				// 配置导入导出
+				admin.GET("/configs/export", adminController.ExportConfigs)
+				admin.POST("/configs/import", adminController.ImportConfigs)
 			}
 		}
 	}

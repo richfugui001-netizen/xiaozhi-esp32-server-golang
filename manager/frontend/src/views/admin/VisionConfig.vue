@@ -2,7 +2,7 @@
   <div class="config-page">
     <div class="page-header">
       <div class="header-left">
-        <h2>VLLM配置管理</h2>
+        <h2>Vision配置管理</h2>
       </div>
       <div class="header-right">
         <el-button type="primary" @click="showDialog = true">
@@ -55,7 +55,7 @@
     <!-- 添加/编辑配置弹窗 -->
     <el-dialog
       v-model="showDialog"
-      :title="editingConfig ? '编辑VLLM配置' : '添加VLLM配置'"
+      :title="editingConfig ? '编辑Vision配置' : '添加Vision配置'"
       width="700px"
       @close="handleDialogClose"
     >
@@ -75,8 +75,6 @@
         <el-form-item label="配置名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入配置名称" />
         </el-form-item>
-        
-        <!-- 移除是否默认开关，现在在列表页操作 -->
         
         <el-form-item label="类型" prop="type">
           <el-input v-model="form.type" placeholder="请输入类型" />
@@ -122,7 +120,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import api from '../../utils/api'
@@ -139,7 +137,7 @@ const form = reactive({
   provider: 'aliyun_vision',
   is_default: false,
   enabled: true,
-  type: 'vllm',
+  type: 'vision',
   model_name: 'qwen-vl-max',
   api_key: '',
   base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -179,7 +177,7 @@ const rules = {
 const loadConfigs = async () => {
   loading.value = true
   try {
-    const response = await api.get('/admin/vllm-configs')
+    const response = await api.get('/admin/vision-configs')
     configs.value = response.data.data || []
   } catch (error) {
     ElMessage.error('加载配置失败')
@@ -220,22 +218,21 @@ const handleSave = async () => {
     if (valid) {
       saving.value = true
       try {
-        // 检查是否是首次添加配置
         const isFirstConfig = !editingConfig.value && configs.value.length === 0
         
         const configData = {
           name: form.name,
           provider: form.provider,
-          is_default: isFirstConfig || form.is_default, // 首次添加自动设为默认
+          is_default: isFirstConfig || form.is_default,
           enabled: form.enabled !== undefined ? form.enabled : true,
           json_data: generateConfig()
         }
         
         if (editingConfig.value) {
-          await api.put(`/admin/vllm-configs/${editingConfig.value.id}`, configData)
+          await api.put(`/admin/vision-configs/${editingConfig.value.id}`, configData)
           ElMessage.success('更新成功')
         } else {
-          await api.post('/admin/vllm-configs', configData)
+          await api.post('/admin/vision-configs', configData)
           ElMessage.success('添加成功')
         }
         
@@ -255,7 +252,6 @@ const toggleEnable = async (config) => {
     await api.post(`/admin/configs/${config.id}/toggle`)
     ElMessage.success(`${config.enabled ? '启用' : '禁用'}成功`)
   } catch (error) {
-    // 恢复开关状态
     config.enabled = !config.enabled
     ElMessage.error('操作失败')
   }
@@ -277,13 +273,10 @@ const toggleDefault = async (config) => {
       json_data: config.json_data
     }
     
-    await api.put(`/admin/vllm-configs/${config.id}`, configData)
+    await api.put(`/admin/vision-configs/${config.id}`, configData)
     ElMessage.success(config.is_default ? '设为默认成功' : '取消默认成功')
-    
-    // 刷新列表以更新其他配置的默认状态
     loadConfigs()
   } catch (error) {
-    // 恢复开关状态
     config.is_default = !config.is_default
     ElMessage.error('操作失败')
   }
@@ -301,7 +294,7 @@ const deleteConfig = async (id) => {
       type: 'warning'
     })
     
-    await api.delete(`/admin/vllm-configs/${id}`)
+    await api.delete(`/admin/vision-configs/${id}`)
     ElMessage.success('删除成功')
     loadConfigs()
   } catch (error) {
@@ -318,7 +311,7 @@ const resetForm = () => {
     provider: 'aliyun_vision',
     is_default: false,
     enabled: true,
-    type: 'vllm',
+    type: 'vision',
     model_name: 'qwen-vl-max',
     api_key: '',
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -365,9 +358,5 @@ onMounted(() => {
 .header-left h2 {
   margin: 0;
   color: #333;
-}
-
-.config-example {
-  margin-top: 8px;
 }
 </style>

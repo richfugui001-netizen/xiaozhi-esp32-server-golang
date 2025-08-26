@@ -19,6 +19,6 @@ type UserConfigProvider interface {
 	// GetUserConfig 获取用户配置（兼容原有接口）
 	GetUserConfig(ctx context.Context, userID string) (types.UConfig, error)
 
-	// 获取 mqtt, mqtt_server, udp, ota, vllm配置
+	// 获取 mqtt, mqtt_server, udp, ota, vision配置
 	GetSystemConfig(ctx context.Context) (string, error)
 }

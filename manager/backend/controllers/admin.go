@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -14,8 +15,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
+
+// 辅助函数：获取map的keys
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
 
 type AdminController struct {
 	DB *gorm.DB
@@ -650,6 +661,7 @@ func (ac *AdminController) CreateDevice(c *gin.Context) {
 		UserID     uint   `json:"user_id" binding:"required"`
 		DeviceCode string `json:"device_code"`
 		DeviceName string `json:"device_name"`
+		AgentID    uint   `json:"agent_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -679,7 +691,8 @@ func (ac *AdminController) CreateDevice(c *gin.Context) {
 			if req.DeviceName != "" {
 				existingDevice.DeviceName = req.DeviceName
 			}
-			existingDevice.Activated = true // 激活设备
+			existingDevice.AgentID = req.AgentID // 更新智能体ID
+			existingDevice.Activated = true      // 激活设备
 
 			if err := ac.DB.Save(&existingDevice).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新设备失败"})
@@ -704,8 +717,8 @@ func (ac *AdminController) CreateDevice(c *gin.Context) {
 		UserID:     req.UserID,
 		DeviceCode: req.DeviceCode,
 		DeviceName: req.DeviceName,
-		AgentID:    0,    // 新创建的设备暂不绑定智能体
-		Activated:  true, // 管理员创建的设备默认已激活
+		AgentID:    req.AgentID, // 使用请求中的智能体ID
+		Activated:  true,        // 管理员创建的设备默认已激活
 	}
 
 	if err := ac.DB.Create(&device).Error; err != nil {
@@ -733,6 +746,7 @@ func (ac *AdminController) UpdateDevice(c *gin.Context) {
 		DeviceCode string `json:"device_code"`
 		DeviceName string `json:"device_name"`
 		Activated  bool   `json:"activated"`
+		AgentID    uint   `json:"agent_id"`
 	}
 
 	if err := c.ShouldBindJSON(&updateData); err != nil {
@@ -745,6 +759,7 @@ func (ac *AdminController) UpdateDevice(c *gin.Context) {
 	device.DeviceCode = updateData.DeviceCode
 	device.DeviceName = updateData.DeviceName
 	device.Activated = updateData.Activated
+	device.AgentID = updateData.AgentID
 
 	if err := ac.DB.Save(&device).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新设备失败"})
@@ -962,32 +977,32 @@ func (ac *AdminController) DeleteTTSConfig(c *gin.Context) {
 	ac.deleteConfigWithType(c, "tts")
 }
 
-// VLLM配置管理（兼容前端）
-func (ac *AdminController) GetVLLMConfigs(c *gin.Context) {
+// Vision配置管理（兼容前端）
+func (ac *AdminController) GetVisionConfigs(c *gin.Context) {
 	var configs []models.Config
-	if err := ac.DB.Where("type = ?", "vllm").Find(&configs).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get VLLM configs"})
+	if err := ac.DB.Where("type = ?", "vision").Find(&configs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get Vision configs"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": configs})
 }
 
-func (ac *AdminController) CreateVLLMConfig(c *gin.Context) {
+func (ac *AdminController) CreateVisionConfig(c *gin.Context) {
 	var config models.Config
 	if err := c.ShouldBindJSON(&config); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	config.Type = "vllm"
+	config.Type = "vision"
 	ac.createConfigWithType(c, &config)
 }
 
-func (ac *AdminController) UpdateVLLMConfig(c *gin.Context) {
-	ac.updateConfigWithType(c, "vllm")
+func (ac *AdminController) UpdateVisionConfig(c *gin.Context) {
+	ac.updateConfigWithType(c, "vision")
 }
 
-func (ac *AdminController) DeleteVLLMConfig(c *gin.Context) {
-	ac.deleteConfigWithType(c, "vllm")
+func (ac *AdminController) DeleteVisionConfig(c *gin.Context) {
+	ac.deleteConfigWithType(c, "vision")
 }
 
 // OTA配置管理（兼容前端）
@@ -1208,4 +1223,467 @@ func (ac *AdminController) deleteConfigWithType(c *gin.Context, configType strin
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+}
+
+// 导入导出配置相关方法
+// ExportConfigs 导出所有配置为YAML格式
+func (ac *AdminController) ExportConfigs(c *gin.Context) {
+	// 构建导出配置结构 - 只包含实际存在的模块
+	type ExportConfig struct {
+		VAD        map[string]interface{} `yaml:"vad,omitempty"`
+		ASR        map[string]interface{} `yaml:"asr,omitempty"`
+		LLM        map[string]interface{} `yaml:"llm,omitempty"`
+		TTS        map[string]interface{} `yaml:"tts,omitempty"`
+		Vision     map[string]interface{} `yaml:"vision,omitempty"`
+		MQTT       map[string]interface{} `yaml:"mqtt,omitempty"`
+		MQTTServer map[string]interface{} `yaml:"mqtt_server,omitempty"`
+		UDP        map[string]interface{} `yaml:"udp,omitempty"`
+		OTA        map[string]interface{} `yaml:"ota,omitempty"`
+	}
+
+	exportConfig := ExportConfig{
+		VAD:        make(map[string]interface{}),
+		ASR:        make(map[string]interface{}),
+		LLM:        make(map[string]interface{}),
+		TTS:        make(map[string]interface{}),
+		Vision:     make(map[string]interface{}),
+		MQTT:       make(map[string]interface{}),
+		MQTTServer: make(map[string]interface{}),
+		UDP:        make(map[string]interface{}),
+		OTA:        make(map[string]interface{}),
+	}
+
+	// 获取所有配置
+	var configs []models.Config
+	if err := ac.DB.Find(&configs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get configs"})
+		return
+	}
+
+	// 获取全局角色
+	var globalRoles []models.GlobalRole
+	if err := ac.DB.Find(&globalRoles).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get global roles"})
+		return
+	}
+
+	// 处理配置数据 - provider字段与is_default对应，key与ConfigID对应
+	for _, config := range configs {
+		var jsonData map[string]interface{}
+		if err := json.Unmarshal([]byte(config.JsonData), &jsonData); err != nil {
+			log.Printf("Failed to unmarshal config %s: %v", config.ConfigID, err)
+			continue
+		}
+
+		// 根据配置类型组织数据
+		switch config.Type {
+		case "vad":
+			// 如果是默认配置，设置provider字段
+			if config.IsDefault {
+				exportConfig.VAD["provider"] = config.ConfigID
+			}
+			// 使用ConfigID作为key
+			exportConfig.VAD[config.ConfigID] = jsonData
+		case "asr":
+			if config.IsDefault {
+				exportConfig.ASR["provider"] = config.ConfigID
+			}
+			exportConfig.ASR[config.ConfigID] = jsonData
+		case "llm":
+			if config.IsDefault {
+				exportConfig.LLM["provider"] = config.ConfigID
+			}
+			exportConfig.LLM[config.ConfigID] = jsonData
+		case "tts":
+			if config.IsDefault {
+				exportConfig.TTS["provider"] = config.ConfigID
+			}
+			exportConfig.TTS[config.ConfigID] = jsonData
+		case "vision":
+			if config.IsDefault {
+				if exportConfig.Vision["vision"] == nil {
+					exportConfig.Vision["vision"] = make(map[string]interface{})
+				}
+				if visionConfig, ok := exportConfig.Vision["vision"].(map[string]interface{}); ok {
+					visionConfig["provider"] = config.ConfigID
+				}
+			}
+			if exportConfig.Vision["vision"] == nil {
+				exportConfig.Vision["vision"] = make(map[string]interface{})
+			}
+			if visionConfig, ok := exportConfig.Vision["vision"].(map[string]interface{}); ok {
+				visionConfig[config.ConfigID] = jsonData
+			}
+		case "ota":
+			// ota、mqtt、mqtt_server、udp不需要provider字段，直接合并配置
+			for key, value := range jsonData {
+				exportConfig.OTA[key] = value
+			}
+		case "mqtt":
+			// ota、mqtt、mqtt_server、udp不需要provider字段，直接合并配置
+			for key, value := range jsonData {
+				exportConfig.MQTT[key] = value
+			}
+		case "mqtt_server":
+			// ota、mqtt、mqtt_server、udp不需要provider字段，直接合并配置
+			for key, value := range jsonData {
+				exportConfig.MQTTServer[key] = value
+			}
+		case "udp":
+			// ota、mqtt、mqtt_server、udp不需要provider字段，直接合并配置
+			for key, value := range jsonData {
+				exportConfig.UDP[key] = value
+			}
+		}
+	}
+
+	// 只处理数据库中的实际配置，不设置默认值
+
+	// 转换为YAML
+	yamlData, err := yaml.Marshal(exportConfig)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal YAML"})
+		return
+	}
+
+	// 设置响应头
+	c.Header("Content-Type", "application/x-yaml")
+	c.Header("Content-Disposition", "attachment; filename=config.yaml")
+	c.Data(http.StatusOK, "application/x-yaml", yamlData)
+}
+
+// ImportConfigs 从YAML文件导入配置
+func (ac *AdminController) ImportConfigs(c *gin.Context) {
+	log.Printf("开始导入配置")
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		log.Printf("获取上传文件失败: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
+		return
+	}
+
+	log.Printf("文件信息: filename=%s, size=%d", file.Filename, file.Size)
+
+	if file.Size == 0 {
+		log.Printf("文件为空")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File is empty"})
+		return
+	}
+
+	// 读取文件内容
+	src, err := file.Open()
+	if err != nil {
+		log.Printf("打开文件失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
+		return
+	}
+	defer src.Close()
+
+	content, err := io.ReadAll(src)
+	if err != nil {
+		log.Printf("读取文件内容失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
+		return
+	}
+
+	log.Printf("文件内容长度: %d", len(content))
+
+	// 解析YAML
+	var importConfig map[string]interface{}
+	if err := yaml.Unmarshal(content, &importConfig); err != nil {
+		log.Printf("解析YAML失败: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid YAML format"})
+		return
+	}
+
+	log.Printf("YAML解析成功，配置键: %v", getMapKeys(importConfig))
+
+	// 开始事务
+	log.Printf("开始数据库事务")
+	tx := ac.DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("发生panic，回滚事务: %v", r)
+			tx.Rollback()
+		}
+	}()
+
+	// 清空现有配置
+	log.Printf("清空现有配置")
+	result := tx.Exec("DELETE FROM configs")
+	if result.Error != nil {
+		log.Printf("清空配置失败: %v", result.Error)
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear existing configs"})
+		return
+	}
+	log.Printf("配置清空成功，删除了 %d 条记录", result.RowsAffected)
+
+	// 清空全局角色
+	log.Printf("清空全局角色")
+	result2 := tx.Exec("DELETE FROM global_roles")
+	if result2.Error != nil {
+		log.Printf("清空全局角色失败: %v", result2.Error)
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear existing global roles"})
+		return
+	}
+	log.Printf("全局角色清空成功，删除了 %d 条记录", result2.RowsAffected)
+
+	// 导入配置 - 只处理实际存在的模块
+	configTypes := []string{"vad", "asr", "llm", "tts", "ota", "mqtt", "mqtt_server", "udp"}
+	log.Printf("开始导入配置，配置类型: %v", configTypes)
+
+	for _, configType := range configTypes {
+		log.Printf("处理配置类型: %s", configType)
+		if configData, exists := importConfig[configType]; exists {
+			log.Printf("找到配置类型 %s 的数据", configType)
+			if configMap, ok := configData.(map[string]interface{}); ok {
+				// 对于需要provider的模块（vad, asr, llm, tts），处理provider字段
+				if configType == "vad" || configType == "asr" || configType == "llm" || configType == "tts" {
+					log.Printf("处理需要provider的配置类型: %s", configType)
+					// 获取provider字段
+					var defaultProvider string
+					if provider, exists := configMap["provider"]; exists {
+						if providerStr, ok := provider.(string); ok {
+							defaultProvider = providerStr
+							log.Printf("默认provider: %s", defaultProvider)
+						}
+					}
+
+					log.Printf("配置项keys: %v", getMapKeys(configMap))
+					// 遍历所有配置项
+					for configID, configValue := range configMap {
+						// 跳过provider字段
+						if configID == "provider" {
+							log.Printf("跳过provider字段")
+							continue
+						}
+
+						if configMap, ok := configValue.(map[string]interface{}); ok {
+							log.Printf("处理配置项: %s", configID)
+							jsonData, err := json.Marshal(configMap)
+							if err != nil {
+								log.Printf("序列化配置数据失败: %v", err)
+								tx.Rollback()
+								c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal config data"})
+								return
+							}
+
+							// 判断是否为默认配置
+							isDefault := (configID == defaultProvider)
+							log.Printf("配置项 %s, 是否默认: %v", configID, isDefault)
+
+							config := models.Config{
+								Type:      configType,
+								Name:      configID,
+								ConfigID:  configID,
+								Provider:  configID,
+								JsonData:  string(jsonData),
+								Enabled:   true,
+								IsDefault: isDefault,
+							}
+
+							log.Printf("准备保存配置: Type=%s, Name=%s, ConfigID=%s", config.Type, config.Name, config.ConfigID)
+
+							// 先检查是否已存在相同配置
+							var existingConfig models.Config
+							if err := tx.Where("type = ? AND config_id = ?", config.Type, config.ConfigID).First(&existingConfig).Error; err == nil {
+								log.Printf("配置已存在，将更新: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+								// 更新现有配置
+								existingConfig.Name = config.Name
+								existingConfig.Provider = config.Provider
+								existingConfig.JsonData = config.JsonData
+								existingConfig.Enabled = config.Enabled
+								existingConfig.IsDefault = config.IsDefault
+								if err := tx.Save(&existingConfig).Error; err != nil {
+									log.Printf("更新配置失败: %v", err)
+									tx.Rollback()
+									c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update config"})
+									return
+								}
+								log.Printf("配置更新成功: %s", configID)
+							} else if err == gorm.ErrRecordNotFound {
+								log.Printf("配置不存在，将创建新配置: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+								// 创建新配置
+								if err := tx.Create(&config).Error; err != nil {
+									log.Printf("创建配置失败: %v", err)
+									tx.Rollback()
+									c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create config"})
+									return
+								}
+								log.Printf("配置创建成功: %s", configID)
+							} else {
+								log.Printf("查询配置时发生错误: %v", err)
+								tx.Rollback()
+								c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query existing config"})
+								return
+							}
+						}
+					}
+				} else {
+					// 对于不需要provider的模块（ota, mqtt, mqtt_server, udp），直接创建配置
+					log.Printf("处理不需要provider的配置类型: %s", configType)
+					jsonData, err := json.Marshal(configMap)
+					if err != nil {
+						log.Printf("序列化配置数据失败: %v", err)
+						tx.Rollback()
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal config data"})
+						return
+					}
+
+					config := models.Config{
+						Type:      configType,
+						Name:      configType,
+						ConfigID:  configType,
+						Provider:  "",
+						JsonData:  string(jsonData),
+						Enabled:   true,
+						IsDefault: true,
+					}
+
+					log.Printf("准备保存配置: Type=%s, Name=%s, ConfigID=%s", config.Type, config.Name, config.ConfigID)
+
+					// 先检查是否已存在相同配置
+					var existingConfig models.Config
+					if err := tx.Where("type = ? AND config_id = ?", config.Type, config.ConfigID).First(&existingConfig).Error; err == nil {
+						log.Printf("配置已存在，将更新: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+						// 更新现有配置
+						existingConfig.Name = config.Name
+						existingConfig.Provider = config.Provider
+						existingConfig.JsonData = config.JsonData
+						existingConfig.Enabled = config.Enabled
+						existingConfig.IsDefault = config.IsDefault
+						if err := tx.Save(&existingConfig).Error; err != nil {
+							log.Printf("更新配置失败: %v", err)
+							tx.Rollback()
+							c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update config"})
+							return
+						}
+						log.Printf("配置更新成功: %s", configType)
+					} else if err == gorm.ErrRecordNotFound {
+						log.Printf("配置不存在，将创建新配置: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+						// 创建新配置
+						if err := tx.Create(&config).Error; err != nil {
+							log.Printf("创建配置失败: %v", err)
+							tx.Rollback()
+							c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create config"})
+							return
+						}
+						log.Printf("配置创建成功: %s", configType)
+					} else {
+						log.Printf("查询配置时发生错误: %v", err)
+						tx.Rollback()
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query existing config"})
+						return
+					}
+				}
+			}
+		}
+	}
+
+	// 特殊处理vision配置
+	log.Printf("开始处理vision配置")
+	if visionData, exists := importConfig["vision"]; exists {
+		log.Printf("找到vision配置数据")
+		if visionMap, ok := visionData.(map[string]interface{}); ok {
+			log.Printf("vision配置map keys: %v", getMapKeys(visionMap))
+			if visionConfigData, exists := visionMap["vision"]; exists {
+				log.Printf("找到vision子配置")
+				if visionConfigMap, ok := visionConfigData.(map[string]interface{}); ok {
+					// 获取vision的provider字段
+					var defaultProvider string
+					if provider, exists := visionConfigMap["provider"]; exists {
+						if providerStr, ok := provider.(string); ok {
+							defaultProvider = providerStr
+							log.Printf("vision默认provider: %s", defaultProvider)
+						}
+					}
+
+					log.Printf("vision配置项keys: %v", getMapKeys(visionConfigMap))
+					// 遍历所有vision配置项
+					for configID, configValue := range visionConfigMap {
+						// 跳过provider字段
+						if configID == "provider" {
+							log.Printf("跳过vision provider字段")
+							continue
+						}
+
+						if configMap, ok := configValue.(map[string]interface{}); ok {
+							log.Printf("处理vision配置项: %s", configID)
+							jsonData, err := json.Marshal(configMap)
+							if err != nil {
+								log.Printf("序列化vision配置数据失败: %v", err)
+								tx.Rollback()
+								c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal vision config data"})
+								return
+							}
+
+							// 判断是否为默认配置
+							isDefault := (configID == defaultProvider)
+							log.Printf("vision配置项 %s, 是否默认: %v", configID, isDefault)
+
+							config := models.Config{
+								Type:      "vision",
+								Name:      configID,
+								ConfigID:  configID,
+								Provider:  configID,
+								JsonData:  string(jsonData),
+								Enabled:   true,
+								IsDefault: isDefault,
+							}
+
+							log.Printf("准备保存vision配置: Type=%s, Name=%s, ConfigID=%s", config.Type, config.Name, config.ConfigID)
+
+							// 先检查是否已存在相同配置
+							var existingConfig models.Config
+							if err := tx.Where("type = ? AND config_id = ?", config.Type, config.ConfigID).First(&existingConfig).Error; err == nil {
+								log.Printf("vision配置已存在，将更新: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+								// 更新现有配置
+								existingConfig.Name = config.Name
+								existingConfig.Provider = config.Provider
+								existingConfig.JsonData = config.JsonData
+								existingConfig.Enabled = config.Enabled
+								existingConfig.IsDefault = config.IsDefault
+								if err := tx.Save(&existingConfig).Error; err != nil {
+									log.Printf("更新vision配置失败: %v", err)
+									tx.Rollback()
+									c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update vision config"})
+									return
+								}
+								log.Printf("vision配置更新成功: %s", configID)
+							} else if err == gorm.ErrRecordNotFound {
+								log.Printf("vision配置不存在，将创建新配置: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+								// 创建新配置
+								if err := tx.Create(&config).Error; err != nil {
+									log.Printf("创建vision配置失败: %v", err)
+									tx.Rollback()
+									c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create vision config"})
+									return
+								}
+								log.Printf("vision配置创建成功: %s", configID)
+							} else {
+								log.Printf("查询vision配置时发生错误: %v", err)
+								tx.Rollback()
+								c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query existing vision config"})
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 提交事务
+	log.Printf("提交事务")
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("提交事务失败: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		return
+	}
+
+	log.Printf("配置导入成功")
+	c.JSON(http.StatusOK, gin.H{"message": "Configuration imported successfully"})
 }

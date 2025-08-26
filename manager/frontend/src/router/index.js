@@ -94,12 +94,12 @@ const routes = [
             component: () => import('../views/admin/MQTTServerConfig.vue'),
             meta: { title: 'MQTT Server配置管理' }
           },
-          {
-            path: 'vllm-config',
-            name: 'VLLMConfig',
-            component: () => import('../views/admin/VLLMConfig.vue'),
-            meta: { title: 'VLLM配置管理' }
-          },
+          		{
+			path: 'vision-config',
+			name: 'VisionConfig',
+			component: () => import('../views/admin/VisionConfig.vue'),
+			meta: { title: 'Vision配置管理' }
+		},
           {
             path: 'global-roles',
             name: 'GlobalRoles',
