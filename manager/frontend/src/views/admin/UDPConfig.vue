@@ -9,8 +9,18 @@
           </el-icon>
           <h1 class="page-title">UDP配置管理</h1>
         </div>
-        <p class="page-description">配置UDP连接参数和网络设置</p>
       </div>
+    </div>
+
+    <!-- 配置说明 -->
+    <div class="config-description">
+      <el-alert
+        title="配置说明"
+        description="配置UDP连接参数和网络设置。此配置页面是主程序自带的udp server配置项"
+        type="info"
+        :closable="false"
+        show-icon
+      />
     </div>
 
     <!-- 表单容器 -->
@@ -56,6 +66,9 @@
                 <Link />
               </el-icon>
               <span class="card-title">外部连接配置</span>
+              <el-tooltip content="在hello协议下发给终端的 ip和端口，所以需要终端可访问" placement="top">
+                <el-icon class="help-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
             </div>
           </template>
           
@@ -90,7 +103,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Setting, Link } from '@element-plus/icons-vue'
+import { Connection, Setting, Link, QuestionFilled } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const loading = ref(false)
@@ -224,7 +237,7 @@ onMounted(() => {
 
 /* 页面头部 */
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 
 .header-content {
@@ -255,11 +268,10 @@ onMounted(() => {
   background-clip: text;
 }
 
-.page-description {
-  font-size: 16px;
-  color: #6b7280;
-  margin: 0;
-  margin-left: 48px;
+/* 配置说明 */
+.config-description {
+  max-width: 1200px;
+  margin: 0 auto 24px;
 }
 
 /* 表单容器 */
@@ -318,6 +330,16 @@ onMounted(() => {
   font-size: 18px;
   font-weight: 600;
   color: #1f2937;
+}
+
+.help-icon {
+  color: #9ca3af;
+  cursor: help;
+  font-size: 0.875rem;
+}
+
+.help-icon:hover {
+  color: #6366f1;
 }
 
 /* 表单网格 */
@@ -413,37 +435,7 @@ onMounted(() => {
   }
   
   .page-title {
-    font-size: 24px;
-  }
-  
-  .title-icon {
-    font-size: 28px;
-  }
-  
-  .form-grid {
-    grid-template-columns: 1fr;
-    gap: 16px;
-    padding: 16px;
-  }
-  
-  .page-description {
-    margin-left: 44px;
-  }
-}
-
-@media (max-width: 480px) {
-  .title-section {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-  
-  .page-title {
     font-size: 20px;
-  }
-  
-  .page-description {
-    margin-left: 0;
   }
 }
 </style>

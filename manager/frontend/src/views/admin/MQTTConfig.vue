@@ -9,8 +9,18 @@
           </el-icon>
           <h1 class="page-title">MQTT配置管理</h1>
         </div>
-        <p class="page-description">配置MQTT连接参数和认证信息</p>
       </div>
+    </div>
+
+    <!-- 配置说明 -->
+    <div class="config-description">
+      <el-alert
+        title="配置说明"
+        description="配置MQTT连接参数和认证信息。此配置页面是主程序以mqtt client角色连接mqtt server的配置信息，可以是程序自带的mqtt server，也可以配置连接外部emqx"
+        type="info"
+        :closable="false"
+        show-icon
+      />
     </div>
 
     <!-- 表单容器 -->
@@ -56,10 +66,6 @@
               <el-input v-model="form.name" placeholder="请输入配置名称" />
             </el-form-item>
             
-            <el-form-item label="是否默认" prop="is_default" class="form-item">
-              <el-switch v-model="form.is_default" />
-            </el-form-item>
-            
             <el-form-item label="Broker地址" prop="broker" class="form-item">
               <el-input v-model="form.broker" placeholder="请输入MQTT Broker地址" />
             </el-form-item>
@@ -90,6 +96,9 @@
                 <User />
               </el-icon>
               <span class="card-title">认证配置</span>
+              <el-tooltip content="连接mqtt server的用户名密码，需要具有任意订阅权限" placement="top">
+                <el-icon class="help-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
             </div>
           </template>
           
@@ -118,7 +127,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Setting, Link, User } from '@element-plus/icons-vue'
+import { Connection, Setting, Link, User, QuestionFilled } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 
 const loading = ref(false)
@@ -216,7 +225,7 @@ const handleSave = async () => {
         const configData = {
           name: form.name,
           config_id: generatedConfigId,
-          is_default: form.is_default,
+          is_default: true,
           json_data: generateConfig()
         }
         
@@ -253,7 +262,7 @@ onMounted(() => {
 
 /* 页面头部 */
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 
 .header-content {
@@ -284,11 +293,10 @@ onMounted(() => {
   background-clip: text;
 }
 
-.page-description {
-  font-size: 16px;
-  color: #6b7280;
-  margin: 0;
-  margin-left: 48px;
+/* 配置说明 */
+.config-description {
+  max-width: 1200px;
+  margin: 0 auto 24px;
 }
 
 /* 表单容器 */
@@ -355,6 +363,16 @@ onMounted(() => {
   font-size: 18px;
   font-weight: 600;
   color: #1f2937;
+}
+
+.help-icon {
+  color: #9ca3af;
+  cursor: help;
+  font-size: 0.875rem;
+}
+
+.help-icon:hover {
+  color: #6366f1;
 }
 
 /* 表单网格 */
@@ -454,10 +472,6 @@ onMounted(() => {
     gap: 16px;
     padding: 16px;
   }
-  
-  .page-description {
-    margin-left: 44px;
-  }
 }
 
 @media (max-width: 480px) {
@@ -469,10 +483,6 @@ onMounted(() => {
   
   .page-title {
     font-size: 20px;
-  }
-  
-  .page-description {
-    margin-left: 0;
   }
 }
 </style>

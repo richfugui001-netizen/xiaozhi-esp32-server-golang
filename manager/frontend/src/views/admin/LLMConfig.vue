@@ -67,11 +67,15 @@
         label-width="120px"
       >
         <el-form-item label="提供商" prop="provider">
-          <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%">
+          <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%" @change="handleProviderChange">
             <el-option label="OpenAI" value="openai" />
-            <el-option label="Ollama" value="ollama" />
-            <el-option label="Eino LLM" value="eino_llm" />
-            <el-option label="Eino" value="eino" />
+            <el-option label="Azure OpenAI" value="azure" />
+            <el-option label="Anthropic" value="anthropic" />
+            <el-option label="智谱AI" value="zhipu" />
+            <el-option label="阿里云" value="aliyun" />
+            <el-option label="豆包" value="doubao" />
+            <el-option label="SiliconFlow" value="siliconflow" />
+            <el-option label="DeepSeek" value="deepseek" />
           </el-select>
         </el-form-item>
         
@@ -105,26 +109,6 @@
           <el-input v-model="form.base_url" placeholder="请输入基础URL" style="width: 100%;" />
         </el-form-item>
         
-        <el-form-item label="">
-          <el-dropdown @command="fillQuickUrl" trigger="click" style="width: 100%;">
-            <el-button type="primary" plain style="width: 100%;">
-              快捷URL填写 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="openai">OpenAI</el-dropdown-item>
-                <el-dropdown-item command="azure">Azure OpenAI</el-dropdown-item>
-                <el-dropdown-item command="anthropic">Anthropic</el-dropdown-item>
-                <el-dropdown-item command="zhipu">智谱AI</el-dropdown-item>
-                <el-dropdown-item command="aliyun">阿里云</el-dropdown-item>
-                <el-dropdown-item command="doubao">豆包</el-dropdown-item>
-                <el-dropdown-item command="siliconflow">SiliconFlow</el-dropdown-item>
-                <el-dropdown-item command="deepseek">DeepSeek</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </el-form-item>
-        
         <el-form-item label="max_tokens" prop="max_tokens">
           <el-input-number v-model="form.max_tokens" :min="1" :max="100000" placeholder="max_tokens" style="width: 100%" />
         </el-form-item>
@@ -152,7 +136,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, ArrowDown } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const configs = ref([])
@@ -189,9 +173,9 @@ const quickUrls = {
   deepseek: 'https://api.deepseek.com/v1'
 }
 
-const fillQuickUrl = (command) => {
-  if (quickUrls[command]) {
-    form.base_url = quickUrls[command]
+const handleProviderChange = (value) => {
+  if (quickUrls[value]) {
+    form.base_url = quickUrls[value]
   }
 }
 
@@ -219,7 +203,7 @@ const generateConfig = () => {
 const rules = {
   name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
   config_id: [{ required: true, message: '请输入配置ID', trigger: 'blur' }],
-  provider: [{ required: false, message: '请选择类型', trigger: 'change' }],
+  provider: [{ required: false, message: '请选择提供商', trigger: 'change' }],
   type: [{ required: true, message: '请选择模型类型', trigger: 'change' }],
   model_name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
   api_key: [{ required: true, message: '请输入API密钥', trigger: 'blur' }],

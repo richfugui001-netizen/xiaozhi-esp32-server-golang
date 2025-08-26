@@ -9,8 +9,18 @@
           </el-icon>
           <h1 class="page-title">MQTT Server配置管理</h1>
         </div>
-        <p class="page-description">配置MQTT服务器参数和安全设置</p>
       </div>
+    </div>
+
+    <!-- 配置说明 -->
+    <div class="config-description">
+      <el-alert
+        title="配置说明"
+        description="配置MQTT服务器参数和安全设置。自带的mqtt server配置项"
+        type="info"
+        :closable="false"
+        show-icon
+      />
     </div>
 
     <!-- 表单容器 -->
@@ -69,7 +79,12 @@
           
           <div class="form-grid auth-form-grid">
             <el-form-item label="启用认证" prop="enable_auth" class="form-item">
-              <el-switch v-model="form.enable_auth" />
+              <div class="form-item-with-help">
+                <el-switch v-model="form.enable_auth" />
+                <el-tooltip content="将校验mqtt客户连接用户名密码" placement="top">
+                  <el-icon class="help-icon"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
             </el-form-item>
             
             <div class="form-row">
@@ -96,6 +111,9 @@
                 <Lock />
               </el-icon>
               <span class="card-title">TLS配置</span>
+              <el-tooltip content="mqtt server启用mqtts进行连接" placement="top">
+                <el-icon class="help-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
             </div>
           </template>
           
@@ -134,7 +152,7 @@
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Monitor, Setting, Platform, User, Lock, InfoFilled } from '@element-plus/icons-vue'
+import { Monitor, Setting, Platform, User, Lock, InfoFilled, QuestionFilled } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const loading = ref(false)
@@ -343,7 +361,7 @@ onMounted(() => {
 
 /* 页面头部 */
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 
 .header-content {
@@ -374,11 +392,10 @@ onMounted(() => {
   background-clip: text;
 }
 
-.page-description {
-  font-size: 16px;
-  color: #6b7280;
-  margin: 0;
-  margin-left: 48px;
+/* 配置说明 */
+.config-description {
+  max-width: 1200px;
+  margin: 0 auto 24px;
 }
 
 /* 表单容器 */
@@ -455,6 +472,16 @@ onMounted(() => {
   color: #1f2937;
 }
 
+.help-icon {
+  color: #9ca3af;
+  cursor: help;
+  font-size: 0.875rem;
+}
+
+.help-icon:hover {
+  color: #6366f1;
+}
+
 /* 配置提示 */
 .config-tip {
   display: flex;
@@ -514,6 +541,12 @@ onMounted(() => {
 
 .form-item {
   margin-bottom: 0;
+}
+
+.form-item-with-help {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Element Plus 组件深度样式 */
@@ -589,42 +622,7 @@ onMounted(() => {
   }
   
   .page-title {
-    font-size: 24px;
-  }
-  
-  .title-icon {
-    font-size: 28px;
-  }
-  
-  .form-grid {
-    grid-template-columns: 1fr;
-    gap: 16px;
-    padding: 16px;
-  }
-  
-  .form-row {
-    flex-direction: column;
-    gap: 16px;
-  }
-  
-  .page-description {
-    margin-left: 44px;
-  }
-}
-
-@media (max-width: 480px) {
-  .title-section {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-  
-  .page-title {
     font-size: 20px;
-  }
-  
-  .page-description {
-    margin-left: 0;
   }
 }
 </style>

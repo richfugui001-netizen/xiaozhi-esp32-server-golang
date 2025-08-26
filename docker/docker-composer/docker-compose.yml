@@ -27,7 +27,7 @@ services:
   main-server:
     image: docker.jsdelivr.fyi/hackers365/xiaozhi_golang:latest
     container_name: xiaozhi-main-server
-    command: ["./xiaozhi_server", "--config", "/workspace/config/config.yaml"]
+    command: ["/workspace/bin/xiaozhi_server", "-c", "/workspace/config/config.yaml"]
     ports:
       - "18989:8989"        # websocket服务 端口 18989端口
       - "12883:2883"        # mqtt server 12883
