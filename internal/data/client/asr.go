@@ -61,6 +61,15 @@ func (a *Asr) Stop() {
 	}
 }
 
+func (a *Asr) AddAudioData(pcmFrameData []float32) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+	if a.AsrAudioChannel != nil {
+		a.AsrAudioChannel <- pcmFrameData
+	}
+	return nil
+}
+
 type AsrAudioBuffer struct {
 	PcmData          []float32
 	AudioBufferMutex sync.RWMutex
