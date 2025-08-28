@@ -140,9 +140,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 				if clientHaveVoice {
 					//vad识别成功, 往asr音频通道里发送数据
 					log.Infof("vad识别成功, 往asr音频通道里发送数据, len: %d", len(pcmData))
-					if state.AsrAudioChannel != nil {
-						state.AsrAudioChannel <- pcmData
-					}
+					state.Asr.AddAudioData(pcmData)
 				}
 
 				//已经有语音了, 但本次没有检测到语音, 则需要判断是否已经停止说话
