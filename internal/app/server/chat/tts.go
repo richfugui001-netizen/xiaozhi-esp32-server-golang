@@ -105,6 +105,7 @@ func (t *TTSManager) handleTextResponse(ctx context.Context, llmResponse llm_com
 
 // 同步 TTS 处理
 func (t *TTSManager) handleTts(ctx context.Context, llmResponse llm_common.LLMResponseStruct) error {
+	log.Debugf("handleTts start, text: %s", llmResponse.Text)
 	if llmResponse.Text == "" {
 		return nil
 	}

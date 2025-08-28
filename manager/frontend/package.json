@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev2": "vite --mode dev2",
     "build": "vite build && cp diagnose.js dist/",
     "preview": "vite preview"
   },
