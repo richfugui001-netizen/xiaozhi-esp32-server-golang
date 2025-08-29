@@ -97,6 +97,7 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 		Abort:        false,
 		ListenMode:   "auto",
 		DeviceID:     deviceID,
+		AgentID:      deviceConfig.AgentId,
 		Ctx:          ctx,
 		Cancel:       cancel,
 		SystemPrompt: deviceConfig.SystemPrompt,

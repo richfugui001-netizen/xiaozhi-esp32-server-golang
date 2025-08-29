@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"xiaozhi/manager/backend/models"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
@@ -44,11 +46,12 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 
 	// 构建配置响应
 	type ConfigResponse struct {
-		VAD    models.Config `json:"vad"`
-		ASR    models.Config `json:"asr"`
-		LLM    models.Config `json:"llm"`
-		TTS    models.Config `json:"tts"`
-		Prompt string        `json:"prompt"`
+		VAD     models.Config `json:"vad"`
+		ASR     models.Config `json:"asr"`
+		LLM     models.Config `json:"llm"`
+		TTS     models.Config `json:"tts"`
+		Prompt  string        `json:"prompt"`
+		AgentID string        `json:"agent_id"`
 	}
 
 	var response ConfigResponse
@@ -62,6 +65,7 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 		if err == gorm.ErrRecordNotFound {
 			// 设备不存在，使用全局默认配置
 			deviceFound = false
+			response.AgentID = ""
 			log.Printf("设备 %s 不存在，使用全局默认配置", deviceID)
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query device"})
@@ -70,6 +74,7 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 	} else {
 		// 设备存在，查找智能体
 		deviceFound = true
+		response.AgentID = fmt.Sprintf("%d", device.AgentID)
 		log.Printf("设备 %s 存在，AgentID: %d", deviceID, device.AgentID)
 		if err := ac.DB.First(&agent, device.AgentID).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
@@ -149,11 +154,11 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
-// GetSystemConfigs 获取系统配置信息，包括mqtt, mqtt_server, udp, ota
+// GetSystemConfigs 获取系统配置信息，包括mqtt, mqtt_server, udp, ota, mcp, local_mcp
 func (ac *AdminController) GetSystemConfigs(c *gin.Context) {
 	// 一次性获取所有相关配置（包括启用和未启用的）
 	var allConfigs []models.Config
-	if err := ac.DB.Where("type IN (?)", []string{"mqtt", "mqtt_server", "udp", "ota"}).Find(&allConfigs).Error; err != nil {
+	if err := ac.DB.Where("type IN (?)", []string{"mqtt", "mqtt_server", "udp", "ota", "mcp", "local_mcp"}).Find(&allConfigs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get system configs"})
 		return
 	}
@@ -219,6 +224,91 @@ func (ac *AdminController) GetSystemConfigs(c *gin.Context) {
 		}
 	}
 
+	// 特殊处理MCP配置，将mcp和local_mcp分开
+	selectAndParseMCPConfig := func(configs []models.Config) (interface{}, interface{}) {
+		var selectedConfig models.Config
+		// 优先选择默认配置
+		for _, config := range configs {
+			if config.IsDefault {
+				selectedConfig = config
+				break
+			}
+		}
+
+		// 如果没有默认配置，选择第一个配置
+		if selectedConfig.ID == 0 {
+			selectedConfig = configs[0]
+		}
+
+		// 解析json_data
+		if selectedConfig.JsonData != "" {
+			var parsedData interface{}
+			if err := json.Unmarshal([]byte(selectedConfig.JsonData), &parsedData); err != nil {
+				// 如果解析失败，返回原始json_data字符串
+				result := gin.H{
+					"name": selectedConfig.Name,
+					"type": selectedConfig.Type,
+					"data": selectedConfig.JsonData,
+				}
+				return result, nil
+			}
+
+			// 将解析后的数据包装在正确的格式中
+			result := gin.H{
+				"name": selectedConfig.Name,
+				"type": selectedConfig.Type,
+			}
+
+			var mcpData interface{}
+			var localMcpData interface{}
+
+			if parsedData != nil {
+				// 如果解析的数据是map类型，分离mcp和local_mcp
+				if dataMap, ok := parsedData.(map[string]interface{}); ok {
+					// 处理mcp部分
+					if mcp, exists := dataMap["mcp"]; exists {
+						mcpData = mcp
+					} else {
+						// 兼容旧格式：如果直接有global字段
+						if global, exists := dataMap["global"]; exists {
+							mcpData = gin.H{"global": global}
+						} else {
+							// 如果没有mcp或global字段，将整个数据作为mcp
+							mcpData = dataMap
+						}
+					}
+
+					// 处理local_mcp部分
+					if localMcp, exists := dataMap["local_mcp"]; exists {
+						localMcpData = localMcp
+					}
+
+					// 将其他字段合并到mcp中
+					if mcpMap, ok := mcpData.(map[string]interface{}); ok {
+						for k, v := range dataMap {
+							if k != "mcp" && k != "local_mcp" {
+								mcpMap[k] = v
+							}
+						}
+					}
+				} else {
+					// 否则作为data字段
+					result["data"] = parsedData
+					mcpData = result
+				}
+			}
+
+			return mcpData, localMcpData
+		}
+
+		// 如果没有json_data，返回基本配置信息
+		result := gin.H{
+			"name": selectedConfig.Name,
+			"type": selectedConfig.Type,
+		}
+		return result, nil
+	}
+
 	// 构建响应数据
 	response := gin.H{}
 
@@ -234,6 +324,22 @@ func (ac *AdminController) GetSystemConfigs(c *gin.Context) {
 	}
 	if configs, exists := configsByType["ota"]; exists && len(configs) > 0 {
 		response["ota"] = selectAndParseConfig(configs)
+	}
+
+	// 特殊处理MCP配置，将mcp和local_mcp分开
+	if configs, exists := configsByType["mcp"]; exists && len(configs) > 0 {
+		mcpData, localMcpData := selectAndParseMCPConfig(configs)
+		if mcpData != nil {
+			response["mcp"] = mcpData
+		}
+		if localMcpData != nil {
+			response["local_mcp"] = localMcpData
+		}
+	}
+
+	// 处理独立的local_mcp配置（如果存在）
+	if configs, exists := configsByType["local_mcp"]; exists && len(configs) > 0 {
+		response["local_mcp"] = selectAndParseConfig(configs)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": response})
@@ -819,6 +925,37 @@ func (ac *AdminController) GetAgents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
+// GetAgentMCPEndpoint 获取智能体的MCP接入点URL
+func (ac *AdminController) GetAgentMCPEndpoint(c *gin.Context) {
+	agentID := c.Param("id")
+	if agentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_id parameter is required"})
+		return
+	}
+
+	// 从JWT中间件获取当前用户ID
+	userIDInterface, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户未认证"})
+		return
+	}
+	userID, ok := userIDInterface.(uint)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "用户ID类型错误"})
+		return
+	}
+
+	// 使用公共函数生成MCP接入点
+	endpoint, err := GenerateAgentMCPEndpoint(ac.DB, agentID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 返回单个endpoint字符串
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"endpoint": endpoint}})
+}
+
 func (ac *AdminController) CreateAgent(c *gin.Context) {
 	var agent models.Agent
 	if err := c.ShouldBindJSON(&agent); err != nil {
@@ -1311,6 +1448,8 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 		MQTTServer map[string]interface{} `yaml:"mqtt_server,omitempty"`
 		UDP        map[string]interface{} `yaml:"udp,omitempty"`
 		OTA        map[string]interface{} `yaml:"ota,omitempty"`
+		MCP        map[string]interface{} `yaml:"mcp,omitempty"`
+		LocalMCP   map[string]interface{} `yaml:"local_mcp,omitempty"`
 	}
 
 	exportConfig := ExportConfig{
@@ -1323,6 +1462,8 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 		MQTTServer: make(map[string]interface{}),
 		UDP:        make(map[string]interface{}),
 		OTA:        make(map[string]interface{}),
+		MCP:        make(map[string]interface{}),
+		LocalMCP:   make(map[string]interface{}),
 	}
 
 	// 获取所有配置
@@ -1409,6 +1550,24 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 			// ota、mqtt、mqtt_server、udp不需要provider字段，直接合并配置
 			for key, value := range jsonData {
 				exportConfig.UDP[key] = value
+			}
+		case "mcp":
+			// 处理MCP配置，将mcp和local_mcp分开
+			if mcpData, exists := jsonData["mcp"]; exists {
+				if mcpMap, ok := mcpData.(map[string]interface{}); ok {
+					for key, value := range mcpMap {
+						exportConfig.MCP[key] = value
+					}
+				}
+			}
+			// 兼容旧格式：如果直接有global字段
+			if globalData, exists := jsonData["global"]; exists {
+				exportConfig.MCP["global"] = globalData
+			}
+		case "local_mcp":
+			// 处理local_mcp配置
+			for key, value := range jsonData {
+				exportConfig.LocalMCP[key] = value
 			}
 		}
 	}
@@ -1508,7 +1667,7 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 	log.Printf("全局角色清空成功，删除了 %d 条记录", result2.RowsAffected)
 
 	// 导入配置 - 只处理实际存在的模块
-	configTypes := []string{"vad", "asr", "llm", "tts", "ota", "mqtt", "mqtt_server", "udp"}
+	configTypes := []string{"vad", "asr", "llm", "tts", "ota", "mqtt", "mqtt_server", "udp", "mcp", "local_mcp"}
 	log.Printf("开始导入配置，配置类型: %v", configTypes)
 
 	for _, configType := range configTypes {
@@ -1599,7 +1758,7 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 						}
 					}
 				} else {
-					// 对于不需要provider的模块（ota, mqtt, mqtt_server, udp），直接创建配置
+					// 对于不需要provider的模块（ota, mqtt, mqtt_server, udp, mcp, local_mcp），直接创建配置
 					log.Printf("处理不需要provider的配置类型: %s", configType)
 					jsonData, err := json.Marshal(configMap)
 					if err != nil {
@@ -1821,6 +1980,69 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 		}
 	}
 
+	// 特殊处理local_mcp配置
+	log.Printf("开始处理local_mcp配置")
+	if localMcpData, exists := importConfig["local_mcp"]; exists {
+		log.Printf("找到local_mcp配置数据")
+		if localMcpMap, ok := localMcpData.(map[string]interface{}); ok {
+			log.Printf("local_mcp配置map keys: %v", getMapKeys(localMcpMap))
+
+			jsonData, err := json.Marshal(localMcpMap)
+			if err != nil {
+				log.Printf("序列化local_mcp配置数据失败: %v", err)
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal local_mcp config data"})
+				return
+			}
+
+			config := models.Config{
+				Type:      "local_mcp",
+				Name:      "local_mcp",
+				ConfigID:  "local_mcp",
+				Provider:  "",
+				JsonData:  string(jsonData),
+				Enabled:   true,
+				IsDefault: true,
+			}
+
+			log.Printf("准备保存local_mcp配置: Type=%s, Name=%s, ConfigID=%s", config.Type, config.Name, config.ConfigID)
+
+			// 先检查是否已存在相同配置
+			var existingConfig models.Config
+			if err := tx.Where("type = ? AND config_id = ?", config.Type, config.ConfigID).First(&existingConfig).Error; err == nil {
+				log.Printf("local_mcp配置已存在，将更新: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+				// 更新现有配置
+				existingConfig.Name = config.Name
+				existingConfig.Provider = config.Provider
+				existingConfig.JsonData = config.JsonData
+				existingConfig.Enabled = config.Enabled
+				existingConfig.IsDefault = config.IsDefault
+				if err := tx.Save(&existingConfig).Error; err != nil {
+					log.Printf("更新local_mcp配置失败: %v", err)
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update local_mcp config"})
+					return
+				}
+				log.Printf("local_mcp配置更新成功")
+			} else if err == gorm.ErrRecordNotFound {
+				log.Printf("local_mcp配置不存在，将创建新配置: Type=%s, ConfigID=%s", config.Type, config.ConfigID)
+				// 创建新配置
+				if err := tx.Create(&config).Error; err != nil {
+					log.Printf("创建local_mcp配置失败: %v", err)
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create local_mcp config"})
+					return
+				}
+				log.Printf("local_mcp配置创建成功")
+			} else {
+				log.Printf("查询local_mcp配置时发生错误: %v", err)
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to query existing local_mcp config"})
+				return
+			}
+		}
+	}
+
 	// 提交事务
 	log.Printf("提交事务")
 	if err := tx.Commit().Error; err != nil {
@@ -1831,4 +2053,172 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 
 	log.Printf("配置导入成功")
 	c.JSON(http.StatusOK, gin.H{"message": "Configuration imported successfully"})
+}
+
+// MCP配置相关方法
+func (ac *AdminController) GetMCPConfigs(c *gin.Context) {
+	var configs []models.Config
+	if err := ac.DB.Where("type = ?", "mcp").Find(&configs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取MCP配置列表失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": configs})
+}
+
+func (ac *AdminController) CreateMCPConfig(c *gin.Context) {
+	var config models.Config
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	config.Type = "mcp"
+
+	// 如果设置为默认配置，先取消其他同类型的默认配置
+	if config.IsDefault {
+		ac.DB.Model(&models.Config{}).Where("type = ? AND is_default = ?", config.Type, true).Update("is_default", false)
+	}
+
+	if err := ac.DB.Create(&config).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建MCP配置失败"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"data": config})
+}
+
+func (ac *AdminController) UpdateMCPConfig(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var config models.Config
+
+	if err := ac.DB.First(&config, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "MCP配置不存在"})
+		return
+	}
+
+	var updateData models.Config
+	if err := c.ShouldBindJSON(&updateData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 如果设置为默认配置，先取消其他同类型的默认配置
+	if updateData.IsDefault {
+		ac.DB.Model(&models.Config{}).Where("type = ? AND is_default = ? AND id != ?", config.Type, true, id).Update("is_default", false)
+	}
+
+	updateData.Type = "mcp"
+	if err := ac.DB.Model(&config).Updates(updateData).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新MCP配置失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": config})
+}
+
+func (ac *AdminController) DeleteMCPConfig(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var config models.Config
+
+	if err := ac.DB.First(&config, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "MCP配置不存在"})
+		return
+	}
+
+	if err := ac.DB.Delete(&config).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除MCP配置失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "MCP配置删除成功"})
+}
+
+// GenerateAgentMCPEndpoint 公共的MCP接入点生成函数
+func GenerateAgentMCPEndpoint(db *gorm.DB, agentID string, userID uint) (string, error) {
+	// 获取OTA配置中的外网WebSocket URL
+	var otaConfig models.Config
+	if err := db.Where("type = ? AND is_default = ?", "ota", true).First(&otaConfig).Error; err != nil {
+		return "", fmt.Errorf("failed to get OTA config: %v", err)
+	}
+
+	var otaData map[string]interface{}
+	if err := json.Unmarshal([]byte(otaConfig.JsonData), &otaData); err != nil {
+		return "", fmt.Errorf("failed to parse OTA config: %v", err)
+	}
+
+	// 获取外网WebSocket URL
+	externalURL, ok := otaData["external"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("external config not found in OTA config")
+	}
+
+	websocketConfig, ok := externalURL["websocket"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("websocket config not found in external config")
+	}
+
+	wsURL, ok := websocketConfig["url"].(string)
+	if !ok || wsURL == "" {
+		return "", fmt.Errorf("websocket URL not found in external config")
+	}
+
+	// 解析OTA URL，只取域名部分，保持ws或wss协议不变
+	parsedURL, err := url.Parse(wsURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse WebSocket URL: %v", err)
+	}
+
+	// 构建基础URL（只包含协议和域名）
+	baseURL := fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
+
+	// 生成MCP JWT token
+	token, err := generateMCPToken(agentID, userID)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate MCP token: %v", err)
+	}
+
+	// 构建带token的完整endpoint URL，直接使用/mcp路径
+	endpointWithToken := fmt.Sprintf("%s/mcp?token=%s", baseURL, token)
+
+	return endpointWithToken, nil
+}
+
+// generateMCPToken 生成包含智能体ID、用户ID和签发时间的JWT Token
+func generateMCPToken(agentID string, userID uint) (string, error) {
+	// 创建自定义的JWT Claims
+	type MCPClaims struct {
+		UserID     uint   `json:"userId"`
+		AgentID    string `json:"agentId"`
+		EndpointID string `json:"endpointId"`
+		Purpose    string `json:"purpose"`
+		jwt.RegisteredClaims
+	}
+
+	// 构建endpointId
+	endpointID := fmt.Sprintf("agent_%s", agentID)
+
+	// 创建JWT claims
+	claims := MCPClaims{
+		UserID:     userID,
+		AgentID:    agentID,
+		EndpointID: endpointID,
+		Purpose:    "mcp-endpoint",
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt: jwt.NewNumericDate(time.Now()),
+			// 设置24小时过期时间
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+		},
+	}
+
+	// 使用HS256算法生成JWT token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// 使用与middleware相同的密钥
+	jwtSecret := []byte("xiaozhi_admin_secret_key")
+	tokenString, err := token.SignedString(jwtSecret)
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }

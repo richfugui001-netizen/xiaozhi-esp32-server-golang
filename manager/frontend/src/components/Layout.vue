@@ -37,6 +37,7 @@
           <el-menu-item index="/admin/mqtt-config">MQTT配置</el-menu-item>
           <el-menu-item index="/admin/mqtt-server-config">MQTT Server配置</el-menu-item>
           <el-menu-item index="/admin/udp-config">UDP配置</el-menu-item>
+          <el-menu-item index="/admin/mcp-config">MCP配置</el-menu-item>
         </el-sub-menu>
         
         <!-- AI配置 -->

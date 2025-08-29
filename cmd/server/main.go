@@ -55,6 +55,10 @@ func main() {
 	<-quit
 
 	log.Info("正在关闭服务器...")
+
+	// 停止周期性配置更新服务
+	StopPeriodicConfigUpdate()
+
 	// TODO: 在这里添加清理资源的代码
 	log.Info("服务器已关闭")
 }

@@ -116,9 +116,54 @@
             </el-select>
             <div class="form-help">设置语音识别的响应速度</div>
           </div>
+
+          <div class="form-group">
+            <label class="form-label">MCP接入点</label>
+            <el-button 
+              type="primary" 
+              @click="showMCPEndpoint" 
+              size="large"
+              style="width: 100%"
+            >
+              查看MCP接入点
+            </el-button>
+            <div class="form-help">获取智能体的MCP WebSocket接入点URL，可用于设备连接</div>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- MCP接入点对话框 -->
+    <el-dialog
+      v-model="showMCPDialog"
+      title="MCP接入点"
+      width="600px"
+    >
+      <div v-loading="mcpLoading">
+        <el-alert
+          title="接入点信息"
+          description="这是智能体的MCP WebSocket接入点URL，可用于设备连接"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 20px;"
+        />
+        
+        <div class="mcp-endpoint-display">
+          <div class="endpoint-label">MCP接入点URL：</div>
+          <div class="endpoint-content">
+            {{ mcpEndpointData.endpoint }}
+          </div>
+        </div>
+      </div>
+      
+      <template #footer>
+        <el-button @click="showMCPDialog = false">关闭</el-button>
+        <el-button type="primary" @click="copyMCPEndpoint">
+          复制URL
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -150,6 +195,13 @@ const llmConfigs = ref([])
 
 // TTS配置数据
 const ttsConfigs = ref([])
+
+// MCP接入点相关
+const showMCPDialog = ref(false)
+const mcpLoading = ref(false)
+const mcpEndpointData = ref({
+  endpoint: ''
+})
 
 // 加载LLM配置
 const loadLlmConfigs = async () => {
@@ -347,6 +399,34 @@ const autoSelectDefaultConfigs = () => {
     if (defaultTtsConfig) {
       form.tts_config_id = defaultTtsConfig.config_id
     }
+  }
+}
+
+// 显示MCP接入点
+const showMCPEndpoint = async () => {
+  showMCPDialog.value = true
+  mcpLoading.value = true
+  
+  try {
+    const response = await api.get(`/user/agents/${route.params.id}/mcp-endpoint`)
+    mcpEndpointData.value = response.data.data
+  } catch (error) {
+    ElMessage.error('获取MCP接入点失败')
+    console.error('Error getting MCP endpoint:', error)
+    showMCPDialog.value = false
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+// 复制MCP接入点URL
+const copyMCPEndpoint = async () => {
+  try {
+    await navigator.clipboard.writeText(mcpEndpointData.value.endpoint)
+    ElMessage.success('MCP接入点URL已复制到剪贴板')
+  } catch (error) {
+    ElMessage.error('复制失败')
+    console.error('Error copying to clipboard:', error)
   }
 }
 
@@ -554,6 +634,32 @@ onMounted(async () => {
 .config-desc {
   font-size: 12px;
   color: #6b7280;
+}
+
+.mcp-endpoint-display {
+  margin: 20px 0;
+}
+
+.endpoint-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.endpoint-content {
+  padding: 12px 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+  color: #1e293b;
+  word-break: break-all;
+  line-height: 1.5;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
 }
 
 @media (max-width: 768px) {

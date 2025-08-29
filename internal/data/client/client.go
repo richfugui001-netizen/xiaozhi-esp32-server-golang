@@ -49,6 +49,7 @@ type ClientState struct {
 	ListenMode string
 	// 设备ID
 	DeviceID string
+	AgentID  string
 	// 会话ID
 	SessionID string
 

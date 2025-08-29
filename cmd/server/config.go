@@ -7,14 +7,25 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	redisdb "xiaozhi-esp32-server-golang/internal/db/redis"
 	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
 
+	log "xiaozhi-esp32-server-golang/logger"
+
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	logrus "github.com/sirupsen/logrus"
+
 	"github.com/spf13/viper"
+)
+
+// 全局变量用于控制周期性更新
+var (
+	configUpdateTicker *time.Ticker
+	configUpdateStop   chan struct{}
+	configUpdateWg     sync.WaitGroup
 )
 
 func Init(configFile string) error {
@@ -34,6 +45,9 @@ func Init(configFile string) error {
 		fmt.Printf("从接口获取配置失败，使用本地配置: %v\n", err)
 	}
 
+	// 启动周期性配置更新
+	startPeriodicConfigUpdate()
+
 	//init vad
 	//initVad()
 
@@ -51,6 +65,55 @@ func Init(configFile string) error {
 	return nil
 }
 
+// startPeriodicConfigUpdate 启动周期性配置更新
+func startPeriodicConfigUpdate() {
+	// 从配置中获取更新间隔，默认5分钟
+	updateInterval := viper.GetDuration("config_provider.update_interval")
+	if updateInterval <= 0 {
+		updateInterval = 30 * time.Second
+	}
+
+	// 检查是否启用周期性更新
+	if !viper.GetBool("config_provider.enable_periodic_update") {
+		log.Info("周期性配置更新已禁用")
+		return
+	}
+
+	configUpdateStop = make(chan struct{})
+	configUpdateTicker = time.NewTicker(updateInterval)
+
+	configUpdateWg.Add(1)
+	go func() {
+		defer configUpdateWg.Done()
+		defer configUpdateTicker.Stop()
+
+		for {
+			select {
+			case <-configUpdateTicker.C:
+				if err := updateConfigFromAPI(); err != nil {
+					log.Warnf("周期性配置更新失败: %v", err)
+				} else {
+					log.Debug("周期性配置更新成功")
+				}
+			case <-configUpdateStop:
+				log.Info("周期性配置更新已停止")
+				return
+			}
+		}
+	}()
+
+	log.Infof("周期性配置更新已启动，更新间隔: %v", updateInterval)
+}
+
+// StopPeriodicConfigUpdate 停止周期性配置更新
+func StopPeriodicConfigUpdate() {
+	if configUpdateStop != nil {
+		close(configUpdateStop)
+		configUpdateWg.Wait()
+		logrus.Info("周期性配置更新已停止")
+	}
+}
+
 func initConfig(configFile string) error {
 	viper.SetConfigFile(configFile)
 
@@ -66,7 +129,7 @@ func initConfig(configFile string) error {
 func updateConfigFromAPI() error {
 	configProviderType := viper.GetString("config_provider.type")
 
-	fmt.Printf("获取系统配置, config_provider.type: %s\n", configProviderType)
+	//fmt.Printf("获取系统配置, config_provider.type: %s\n", configProviderType)
 
 	// 从配置文件获取后端管理系统地址
 	configProvider, err := user_config.GetProvider(configProviderType)

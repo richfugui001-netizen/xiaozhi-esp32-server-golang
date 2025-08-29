@@ -6,43 +6,41 @@ import (
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	log "xiaozhi-esp32-server-golang/logger"
 
-	"github.com/spf13/viper"
+	"github.com/golang-jwt/jwt/v4"
 )
+
+// MCPClaims JWT claims结构
+type MCPClaims struct {
+	UserID     uint   `json:"userId"`
+	AgentID    string `json:"agentId"`
+	EndpointID string `json:"endpointId"`
+	Purpose    string `json:"purpose"`
+	jwt.RegisteredClaims
+}
 
 // handleMCPWebSocket 处理MCP WebSocket连接
 func (s *WebSocketServer) handleMCPWebSocket(w http.ResponseWriter, r *http.Request) {
-	// 从URL路径中提取deviceId
-	// URL格式: /xiaozhi/mcp/{deviceId}
-	path := strings.TrimPrefix(r.URL.Path, "/xiaozhi/mcp/")
-	if path == "" || path == r.URL.Path {
-		http.Error(w, "缺少设备ID参数", http.StatusBadRequest)
+	var agentId string
+
+	// 首先尝试从URL参数中获取token
+	token := r.URL.Query().Get("token")
+	if token != "" {
+		// 从token中解析设备ID
+		claims, err := s.parseMCPToken(token)
+		if err != nil {
+			log.Warnf("解析token失败: %v", err)
+			http.Error(w, "无效的token", http.StatusUnauthorized)
+			return
+		}
+		log.Infof("解析token成功: %v", claims)
+
+		agentId = claims.AgentID
+	} else {
+		log.Errorf("缺少token")
 		return
 	}
 
-	deviceID := strings.TrimSuffix(path, "/")
-	if deviceID == "" {
-		http.Error(w, "设备ID不能为空", http.StatusBadRequest)
-		return
-	}
-
-	log.Infof("收到MCP服务器的WebSocket连接请求，设备ID: %s", deviceID)
-
-	// 验证认证（如果启用）
-	isAuth := viper.GetBool("auth.enable")
-	if isAuth {
-		token := r.Header.Get("Authorization")
-		if token == "" {
-			log.Warn("缺少 Authorization 请求头")
-			http.Error(w, "缺少 Authorization 请求头", http.StatusUnauthorized)
-			return
-		}
-
-		if !s.authManager.ValidateToken(token) {
-			log.Warnf("无效的令牌: %s", token)
-			http.Error(w, "无效的令牌", http.StatusUnauthorized)
-			return
-		}
-	}
+	log.Infof("收到MCP服务器的WebSocket连接请求，Agent ID: %s", agentId)
 
 	// 升级WebSocket连接
 	conn, err := s.upgrader.Upgrade(w, r, nil)
@@ -51,29 +49,53 @@ func (s *WebSocketServer) handleMCPWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	mcpClientSession := mcp.GetDeviceMcpClient(deviceID)
+	mcpClientSession := mcp.GetDeviceMcpClient(agentId)
 	if mcpClientSession == nil {
-		mcpClientSession = mcp.NewDeviceMCPSession(deviceID)
-		mcp.AddDeviceMcpClient(deviceID, mcpClientSession)
+		mcpClientSession = mcp.NewDeviceMCPSession(agentId)
+		mcp.AddDeviceMcpClient(agentId, mcpClientSession)
 	}
 
 	// 创建MCP客户端
-	mcpClient := mcp.NewWsEndPointMcpClient(mcpClientSession.Ctx, deviceID, conn)
+	mcpClient := mcp.NewWsEndPointMcpClient(mcpClientSession.Ctx, agentId, conn)
 	if mcpClient == nil {
 		log.Errorf("创建MCP客户端失败")
 		conn.Close()
 		return
 	}
-	mcpClientSession.SetWsEndPointMcp(mcpClient)
+	mcpClientSession.AddWsEndPointMcp(mcpClient)
 
-	// 监听客户端断开连接
+	// 当 mcp server断开时, 清理 ws endpoint mcp client
 	go func() {
-		<-mcpClientSession.Ctx.Done()
-		mcp.RemoveDeviceMcpClient(deviceID)
-		log.Infof("设备 %s 的MCP连接已断开", deviceID)
+		<-mcpClient.Ctx.Done()
+		log.Infof("server %s 的MCP连接已断开", mcpClient.GetServerName())
 	}()
 
-	log.Infof("设备 %s 的MCP连接已建立", deviceID)
+	log.Infof("server %s 的MCP连接已建立", mcpClient.GetServerName()) // todo
+}
+
+// parseMCPToken 解析MCP JWT token
+func (s *WebSocketServer) parseMCPToken(tokenString string) (*MCPClaims, error) {
+	// 移除 "Bearer " 前缀
+	if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+		tokenString = tokenString[7:]
+	}
+
+	// 使用与生成token相同的密钥
+	jwtSecret := []byte("xiaozhi_admin_secret_key")
+
+	token, err := jwt.ParseWithClaims(tokenString, &MCPClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(*MCPClaims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, jwt.ErrInvalidKey
 }
 
 // handleMCPAPI 处理MCP REST API请求

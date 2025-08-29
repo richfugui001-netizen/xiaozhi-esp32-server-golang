@@ -43,7 +43,7 @@ func RemoveDeviceMcpClient(deviceId string) error {
 	return nil
 }
 
-func GetToolsByDeviceId(deviceId string) (map[string]tool.InvokableTool, error) {
+func GetToolsByDeviceId(deviceId string, agentId string) (map[string]tool.InvokableTool, error) {
 	retTools := make(map[string]tool.InvokableTool)
 
 	// 优先从本地管理器获取
@@ -65,7 +65,7 @@ func GetToolsByDeviceId(deviceId string) (map[string]tool.InvokableTool, error) 
 	log.Infof("从全局管理器获取到 %d 个工具", len(globalTools))
 
 	// 最后从MCP客户端池获取
-	deviceTools, err := mcpClientPool.GetAllToolsByDeviceId(deviceId)
+	deviceTools, err := mcpClientPool.GetAllToolsByDeviceIdAndAgentId(deviceId, agentId)
 	if err != nil {
 		log.Errorf("获取设备 %s 的工具失败: %v", deviceId, err)
 		return retTools, nil

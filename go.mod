@@ -5,6 +5,7 @@ go 1.23.9
 require (
 	github.com/ThinkInAIXYZ/go-mcp v0.2.19
 	github.com/antonfisher/nested-logrus-formatter v1.3.1
+	github.com/bytedance/gopkg v0.1.3
 	github.com/bytedance/sonic v1.13.2
 	github.com/cloudwego/eino v0.3.40
 	github.com/cloudwego/eino-ext/components/model/ollama v0.0.0-20250530094010-bd1c4fc20bbe
@@ -14,6 +15,7 @@ require (
 	github.com/getkin/kin-openapi v0.118.0
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
+	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/uuid v1.6.0
 	github.com/gopxl/beep v1.4.1
 	github.com/gorilla/websocket v1.5.3

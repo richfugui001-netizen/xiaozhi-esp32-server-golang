@@ -462,3 +462,30 @@ func (uc *UserController) GetTTSConfigs(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"data": configs})
 }
+
+// GetAgentMCPEndpoint 获取智能体的MCP接入点URL（用户版本）
+func (uc *UserController) GetAgentMCPEndpoint(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	agentID := c.Param("id")
+	if agentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_id parameter is required"})
+		return
+	}
+
+	// 验证智能体是否存在且属于当前用户
+	var agent models.Agent
+	if err := uc.DB.Where("id = ? AND user_id = ?", agentID, userID).First(&agent).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "智能体不存在或不属于当前用户"})
+		return
+	}
+
+	// 使用公共函数生成MCP接入点
+	endpoint, err := GenerateAgentMCPEndpoint(uc.DB, agentID, userID.(uint))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 返回单个endpoint字符串
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"endpoint": endpoint}})
+}

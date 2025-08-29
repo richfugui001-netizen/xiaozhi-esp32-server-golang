@@ -38,6 +38,8 @@ type IotOverMcpTransport struct {
 	conn ConnInterface
 
 	notifyHandler func(notification mcp.JSONRPCNotification)
+	// 添加关闭回调
+	onCloseHandler func(reason string)
 }
 
 func (t *IotOverMcpTransport) Send(ctx context.Context, msg []byte) error {
@@ -87,7 +89,16 @@ func (t *IotOverMcpTransport) SetNotificationHandler(handler func(notification m
 	t.notifyHandler = handler
 }
 
+// SetOnCloseHandler 设置连接关闭回调
+func (t *IotOverMcpTransport) SetOnCloseHandler(handler func(reason string)) {
+	t.onCloseHandler = handler
+}
+
 func (t *IotOverMcpTransport) Close() error {
+	// 通知client层连接即将关闭
+	if t.onCloseHandler != nil {
+		t.onCloseHandler("manual_close")
+	}
 	return nil
 }
 
