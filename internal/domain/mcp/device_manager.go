@@ -357,6 +357,20 @@ func (dc *DeviceMcpSession) GetTools() map[string]tool.InvokableTool {
 	return tools
 }
 
+func (dc *DeviceMcpSession) GetWsEndpointMcpTools() map[string]tool.InvokableTool {
+	dc.lock.RLock()
+	defer dc.lock.RUnlock()
+	tools := make(map[string]tool.InvokableTool)
+	for _, mcpInstance := range dc.wsEndPointMcp {
+		mcpInstance.toolsMux.RLock()
+		for k, v := range mcpInstance.tools {
+			tools[k] = v
+		}
+		mcpInstance.toolsMux.RUnlock()
+	}
+	return tools
+}
+
 func (dc *DeviceMcpSession) GetToolByName(toolName string) (tool.InvokableTool, bool) {
 	dc.lock.RLock()
 	for _, mcpInstance := range dc.wsEndPointMcp {

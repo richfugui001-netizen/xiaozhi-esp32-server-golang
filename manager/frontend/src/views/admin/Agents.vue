@@ -131,7 +131,7 @@
     <el-dialog
       v-model="showMCPDialog"
       title="MCP接入点"
-      width="600px"
+      width="700px"
     >
       <div v-loading="mcpLoading">
         <el-alert
@@ -147,6 +147,39 @@
           <div class="endpoint-label">MCP接入点URL：</div>
           <div class="endpoint-content">
             {{ mcpEndpointData.endpoint }}
+          </div>
+        </div>
+
+        <!-- 工具列表区域 -->
+        <div class="mcp-tools-section">
+          <div class="tools-header">
+            <div class="tools-title">MCP工具列表</div>
+            <el-button 
+              size="small" 
+              type="primary" 
+              @click="refreshMcpTools"
+              :loading="toolsLoading"
+            >
+              <el-icon><Refresh /></el-icon>
+              刷新工具列表
+            </el-button>
+          </div>
+          
+          <div v-if="mcpTools.length === 0" class="tools-empty">
+            <el-empty description="暂无工具数据，点击刷新按钮获取" />
+          </div>
+          
+          <div v-else class="tools-list">
+            <el-table :data="mcpTools" stripe size="small">
+              <el-table-column prop="name" label="工具名称" min-width="150" />
+              <el-table-column prop="description" label="工具描述" min-width="200" show-overflow-tooltip />
+              <el-table-column prop="schema" label="参数结构" width="100">
+                <template #default="{ row }">
+                  <el-tag v-if="row.schema" type="info" size="small">有</el-tag>
+                  <el-tag v-else type="warning" size="small">无</el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
           </div>
         </div>
       </div>
@@ -182,6 +215,11 @@ const mcpLoading = ref(false)
 const mcpEndpointData = ref({
   endpoint: ''
 })
+
+// MCP工具相关
+const toolsLoading = ref(false)
+const mcpTools = ref([])
+const currentAgentId = ref(null)
 
 const agentForm = ref({
   user_id: null,
@@ -354,10 +392,14 @@ const getASRSpeedType = (speed) => {
 const showMCPEndpoint = async (agent) => {
   showMCPDialog.value = true
   mcpLoading.value = true
+  currentAgentId.value = agent.id
   
   try {
     const response = await api.get(`/admin/agents/${agent.id}/mcp-endpoint`)
     mcpEndpointData.value = response.data.data
+    
+    // 自动刷新工具列表
+    await refreshMcpTools()
   } catch (error) {
     ElMessage.error('获取MCP接入点失败')
     console.error('Error getting MCP endpoint:', error)
@@ -366,6 +408,34 @@ const showMCPEndpoint = async (agent) => {
     mcpLoading.value = false
   }
 }
+
+// 刷新MCP工具列表
+const refreshMcpTools = async () => {
+  if (!currentAgentId.value) {
+    ElMessage.warning('未选择智能体')
+    return
+  }
+  
+  toolsLoading.value = true
+  try {
+    const response = await api.get(`/admin/agents/${currentAgentId.value}/mcp-tools`)
+    if (response.data.data && response.data.data.tools) {
+      mcpTools.value = response.data.data.tools
+      ElMessage.success(`成功获取 ${mcpTools.value.length} 个工具`)
+    } else {
+      mcpTools.value = []
+      ElMessage.info('未找到工具数据')
+    }
+  } catch (error) {
+    ElMessage.error('获取工具列表失败: ' + (error.response?.data?.error || error.message))
+    console.error('Error refreshing MCP tools:', error)
+    mcpTools.value = []
+  } finally {
+    toolsLoading.value = false
+  }
+}
+
+
 
 // 复制MCP接入点URL
 const copyMCPEndpoint = async () => {
@@ -436,5 +506,34 @@ onMounted(() => {
   min-height: 60px;
   display: flex;
   align-items: center;
+}
+
+.mcp-tools-section {
+  margin-top: 24px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 20px;
+}
+
+.tools-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.tools-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #374151;
+}
+
+
+
+.tools-empty {
+  margin: 20px 0;
+}
+
+.tools-list {
+  margin-top: 16px;
 }
 </style>

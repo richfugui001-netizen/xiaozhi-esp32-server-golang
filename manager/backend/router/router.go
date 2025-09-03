@@ -21,7 +21,8 @@ func Setup(db *gorm.DB) *gin.Engine {
 
 	// 初始化控制器
 	authController := &controllers.AuthController{DB: db}
-	adminController := &controllers.AdminController{DB: db}
+	webSocketController := controllers.NewWebSocketController(db)
+	adminController := &controllers.AdminController{DB: db, WebSocketController: webSocketController}
 	userController := &controllers.UserController{DB: db}
 	deviceActivationController := &controllers.DeviceActivationController{DB: db}
 	setupController := &controllers.SetupController{DB: db}
@@ -167,6 +168,7 @@ func Setup(db *gorm.DB) *gin.Engine {
 				admin.PUT("/agents/:id", adminController.UpdateAgent)
 				admin.DELETE("/agents/:id", adminController.DeleteAgent)
 				admin.GET("/agents/:id/mcp-endpoint", adminController.GetAgentMCPEndpoint)
+				admin.GET("/agents/:id/mcp-tools", adminController.GetAgentMcpTools)
 
 				// 用户管理
 				admin.GET("/users", adminController.GetUsers)
@@ -181,6 +183,9 @@ func Setup(db *gorm.DB) *gin.Engine {
 			}
 		}
 	}
+
+	// WebSocket路由
+	r.GET("/ws", webSocketController.HandleWebSocket)
 
 	return r
 }

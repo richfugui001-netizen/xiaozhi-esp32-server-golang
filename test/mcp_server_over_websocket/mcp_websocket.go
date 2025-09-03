@@ -11,7 +11,7 @@ import (
 
 func main() {
 	//endPoint := "wss://api.xiaozhi.me/mcp/?token=eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjE0NDQzNSwiYWdlbnRJZCI6MzUxNjQsImVuZHBvaW50SWQiOiJhZ2VudF8zNTE2NCIsInB1cnBvc2UiOiJtY3AtZW5kcG9pbnQiLCJpYXQiOjE3NDk1NDk2MzR9.nPMAHaYyRrxQGqHnzFk-SqLDb61p3YGJqRsQ3TZZEqPxQgef0jg_fTLiZsTNVI34VaNOaOobvKnl55VoIuYx7w"
-	endPoint := "ws://www.tb263.cn:55555/go_ws/mcp/?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImFnZW50SWQiOiIxIiwiZW5kcG9pbnRJZCI6ImFnZW50XzEiLCJwdXJwb3NlIjoibWNwLWVuZHBvaW50IiwiZXhwIjoxNzU2NDY3ODcwLCJpYXQiOjE3NTYzODE0NzB9.UKEDor7JMm52wWhDQLPr_me5-wo4pf2mejWtzhHEfwg"
+	endPoint := "ws://192.168.208.214:8989/mcp/?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsImFnZW50SWQiOiIxIiwiZW5kcG9pbnRJZCI6ImFnZW50XzEiLCJwdXJwb3NlIjoibWNwLWVuZHBvaW50IiwiZXhwIjoxNzU2OTczNDM0LCJpYXQiOjE3NTY4ODcwMzR9.igLC-IFSgaf9maZljD-Tq3tI8nUmhx4vaOBcIsAHrRs"
 	s := server.NewMCPServer("mcp_websocket_server", "1.0.0")
 
 	// Add tool

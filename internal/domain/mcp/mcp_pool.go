@@ -63,6 +63,19 @@ func (p *McpClientPool) GetAllToolsByDeviceIdAndAgentId(deviceId string, agentId
 	return retTools, nil
 }
 
+func (p *McpClientPool) GetWsEndpointMcpTools(agentId string) (map[string]tool.InvokableTool, error) {
+	retTools := make(map[string]tool.InvokableTool)
+	agentClient := p.GetMcpClient(agentId)
+	if agentClient == nil {
+		return retTools, nil
+	}
+	agentTools := agentClient.GetWsEndpointMcpTools()
+	for toolName, tool := range agentTools {
+		retTools[toolName] = tool
+	}
+	return retTools, nil
+}
+
 func (p *McpClientPool) checkOffline() {
 	for _, client := range p.device2McpClient.Items() {
 		// 检查WebSocket端点MCP连接

@@ -82,6 +82,10 @@ func GetToolsByDeviceId(deviceId string, agentId string) (map[string]tool.Invoka
 	return retTools, nil
 }
 
+func GetWsEndpointMcpTools(agentId string) (map[string]tool.InvokableTool, error) {
+	return mcpClientPool.GetWsEndpointMcpTools(agentId)
+}
+
 func GetAudioResourceByTool(tool McpTool, resourceLink mcp_go.ResourceLink) (mcp_go.ReadResourceResult, error) {
 	/*client := tool.GetClient()
 	resourceRequest := mcp_go.ReadResourceRequest{
