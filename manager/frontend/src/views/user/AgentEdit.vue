@@ -137,16 +137,61 @@
     <el-dialog
       v-model="showMCPDialog"
       title="MCP接入点"
-      width="600px"
+      width="700px"
     >
       <div v-loading="mcpLoading">
+        <!-- 工具列表区域 -->
+        <div class="mcp-tools-section">
+          <div class="tools-header">
+            <div class="tools-title">MCP工具列表</div>
+            <el-button 
+              size="small" 
+              type="primary" 
+              @click="refreshMcpTools"
+              :loading="toolsLoading"
+            >
+              <el-icon><Refresh /></el-icon>
+              刷新工具列表
+            </el-button>
+          </div>
+          
+          <div class="tools-list">
+            <div v-if="mcpTools.length === 0" class="tools-empty">
+              <el-tag type="info" size="large" class="tool-tag">
+                暂无工具数据
+              </el-tag>
+            </div>
+            
+            <div v-else class="tools-tags">
+              <el-tag
+                v-for="tool in mcpTools"
+                :key="tool.name"
+                :type="tool.schema ? 'success' : 'info'"
+                size="large"
+                class="tool-tag"
+                :title="tool.description"
+              >
+                {{ tool.name }}
+                <el-tooltip
+                  v-if="tool.description"
+                  :content="tool.description"
+                  placement="top"
+                  :show-after="500"
+                >
+                  <el-icon class="tool-info-icon"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </el-tag>
+            </div>
+          </div>
+        </div>
+
         <el-alert
           title="接入点信息"
           description="这是智能体的MCP WebSocket接入点URL，可用于设备连接"
           type="info"
           :closable="false"
           show-icon
-          style="margin-bottom: 20px;"
+          style="margin-bottom: 20px; margin-top: 24px;"
         />
         
         <div class="mcp-endpoint-display">
@@ -171,7 +216,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, VideoPlay } from '@element-plus/icons-vue'
+import { ArrowLeft, VideoPlay, Refresh, InfoFilled } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 
 const route = useRoute()
@@ -202,6 +247,8 @@ const mcpLoading = ref(false)
 const mcpEndpointData = ref({
   endpoint: ''
 })
+const toolsLoading = ref(false)
+const mcpTools = ref([])
 
 // 加载LLM配置
 const loadLlmConfigs = async () => {
@@ -410,12 +457,29 @@ const showMCPEndpoint = async () => {
   try {
     const response = await api.get(`/user/agents/${route.params.id}/mcp-endpoint`)
     mcpEndpointData.value = response.data.data
+    
+    // 获取工具列表
+    await refreshMcpTools()
   } catch (error) {
     ElMessage.error('获取MCP接入点失败')
     console.error('Error getting MCP endpoint:', error)
     showMCPDialog.value = false
   } finally {
     mcpLoading.value = false
+  }
+}
+
+// 刷新MCP工具列表
+const refreshMcpTools = async () => {
+  toolsLoading.value = true
+  try {
+    const response = await api.get(`/user/agents/${route.params.id}/mcp-tools`)
+    mcpTools.value = response.data.data.tools || []
+  } catch (error) {
+    console.error('获取MCP工具列表失败:', error)
+    mcpTools.value = []
+  } finally {
+    toolsLoading.value = false
   }
 }
 
@@ -634,6 +698,56 @@ onMounted(async () => {
 .config-desc {
   font-size: 12px;
   color: #6b7280;
+}
+
+/* MCP工具列表相关样式 */
+.mcp-tools-section {
+  margin-bottom: 24px;
+}
+
+.tools-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.tools-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.tools-list {
+  min-height: 60px;
+}
+
+.tools-empty {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.tools-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tool-tag {
+  position: relative;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: default;
+}
+
+.tool-info-icon {
+  margin-left: 6px;
+  font-size: 12px;
+  color: #6b7280;
+  cursor: help;
 }
 
 .mcp-endpoint-display {

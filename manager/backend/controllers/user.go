@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -13,7 +14,10 @@ import (
 )
 
 type UserController struct {
-	DB *gorm.DB
+	DB                  *gorm.DB
+	WebSocketController interface {
+		RequestMcpToolsFromClient(ctx context.Context, agentID string) ([]string, error)
+	}
 }
 
 // 用户直接创建设备（无需验证码）
@@ -488,4 +492,22 @@ func (uc *UserController) GetAgentMCPEndpoint(c *gin.Context) {
 
 	// 返回单个endpoint字符串
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"endpoint": endpoint}})
+}
+
+// GetAgentMcpTools 获取智能体的MCP工具列表（用户版本）
+func (uc *UserController) GetAgentMcpTools(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	agentID := c.Param("id")
+
+	// 用户验证函数：验证智能体是否存在且属于当前用户
+	userAgentValidator := func(agentID string) error {
+		var agent models.Agent
+		if err := uc.DB.Where("id = ? AND user_id = ?", agentID, userID).First(&agent).Error; err != nil {
+			return fmt.Errorf("智能体不存在或不属于当前用户")
+		}
+		return nil
+	}
+
+	// 使用公共函数
+	GetAgentMcpToolsCommon(c, agentID, uc.WebSocketController, userAgentValidator)
 }

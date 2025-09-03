@@ -134,22 +134,6 @@
       width="700px"
     >
       <div v-loading="mcpLoading">
-        <el-alert
-          title="接入点信息"
-          description="这是智能体的MCP WebSocket接入点URL，可用于设备连接"
-          type="info"
-          :closable="false"
-          show-icon
-          style="margin-bottom: 20px;"
-        />
-        
-        <div class="mcp-endpoint-display">
-          <div class="endpoint-label">MCP接入点URL：</div>
-          <div class="endpoint-content">
-            {{ mcpEndpointData.endpoint }}
-          </div>
-        </div>
-
         <!-- 工具列表区域 -->
         <div class="mcp-tools-section">
           <div class="tools-header">
@@ -165,21 +149,49 @@
             </el-button>
           </div>
           
-          <div v-if="mcpTools.length === 0" class="tools-empty">
-            <el-empty description="暂无工具数据，点击刷新按钮获取" />
+          <div class="tools-list">
+            <div v-if="mcpTools.length === 0" class="tools-empty">
+              <el-tag type="info" size="large" class="tool-tag">
+                暂无工具数据
+              </el-tag>
+            </div>
+            
+            <div v-else class="tools-tags">
+              <el-tag
+                v-for="tool in mcpTools"
+                :key="tool.name"
+                :type="tool.schema ? 'success' : 'info'"
+                size="large"
+                class="tool-tag"
+                :title="tool.description"
+              >
+                {{ tool.name }}
+                <el-tooltip
+                  v-if="tool.description"
+                  :content="tool.description"
+                  placement="top"
+                  :show-after="500"
+                >
+                  <el-icon class="tool-info-icon"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </el-tag>
+            </div>
           </div>
-          
-          <div v-else class="tools-list">
-            <el-table :data="mcpTools" stripe size="small">
-              <el-table-column prop="name" label="工具名称" min-width="150" />
-              <el-table-column prop="description" label="工具描述" min-width="200" show-overflow-tooltip />
-              <el-table-column prop="schema" label="参数结构" width="100">
-                <template #default="{ row }">
-                  <el-tag v-if="row.schema" type="info" size="small">有</el-tag>
-                  <el-tag v-else type="warning" size="small">无</el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
+        </div>
+
+        <el-alert
+          title="接入点信息"
+          description="这是智能体的MCP WebSocket接入点URL，可用于设备连接"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 20px; margin-top: 24px;"
+        />
+        
+        <div class="mcp-endpoint-display">
+          <div class="endpoint-label">MCP接入点URL：</div>
+          <div class="endpoint-content">
+            {{ mcpEndpointData.endpoint }}
           </div>
         </div>
       </div>
@@ -197,7 +209,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { Plus, Refresh, InfoFilled } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const agents = ref([])
@@ -531,9 +543,41 @@ onMounted(() => {
 
 .tools-empty {
   margin: 20px 0;
+  text-align: center;
 }
 
 .tools-list {
   margin-top: 16px;
+}
+
+.tools-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tool-tag {
+  position: relative;
+  padding: 8px 16px;
+  font-size: 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.tool-tag:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.tool-info-icon {
+  margin-left: 6px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.tool-tag:hover .tool-info-icon {
+  opacity: 1;
 }
 </style>

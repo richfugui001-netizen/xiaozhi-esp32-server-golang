@@ -91,7 +91,7 @@ func (s *WebSocketServer) Start() error {
 	http.HandleFunc("/xiaozhi/v1/", s.handleChat)
 	http.HandleFunc("/xiaozhi/ota/", s.handleOta)
 	http.HandleFunc("/xiaozhi/ota/activate", s.handleOtaActivate)
-	http.HandleFunc("/mcp/", s.handleMCPWebSocket)
+	http.HandleFunc("/mcp", s.handleMCPWebSocket)
 	http.HandleFunc("/xiaozhi/api/mcp/tools/", s.handleMCPAPI)
 	http.HandleFunc("/xiaozhi/api/vision", s.handleVisionAPI) //图片识别API
 

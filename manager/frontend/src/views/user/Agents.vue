@@ -75,6 +75,7 @@
                 <el-icon><Monitor /></el-icon>
                 设备
               </el-button>
+
             </div>
           </div>
         </el-col>
@@ -196,6 +197,83 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- MCP接入点对话框 -->
+    <el-dialog
+      v-model="showMCPDialog"
+      title="MCP接入点"
+      width="700px"
+    >
+      <div v-loading="mcpLoading">
+        <!-- 工具列表区域 -->
+        <div class="mcp-tools-section">
+          <div class="tools-header">
+            <div class="tools-title">MCP工具列表</div>
+            <el-button 
+              size="small" 
+              type="primary" 
+              @click="refreshMcpTools"
+              :loading="toolsLoading"
+            >
+              <el-icon><Refresh /></el-icon>
+              刷新工具列表
+            </el-button>
+          </div>
+          
+          <div class="tools-list">
+            <div v-if="mcpTools.length === 0" class="tools-empty">
+              <el-tag type="info" size="large" class="tool-tag">
+                暂无工具数据
+              </el-tag>
+            </div>
+            
+            <div v-else class="tools-tags">
+              <el-tag
+                v-for="tool in mcpTools"
+                :key="tool.name"
+                :type="tool.schema ? 'success' : 'info'"
+                size="large"
+                class="tool-tag"
+                :title="tool.description"
+              >
+                {{ tool.name }}
+                <el-tooltip
+                  v-if="tool.description"
+                  :content="tool.description"
+                  placement="top"
+                  :show-after="500"
+                >
+                  <el-icon class="tool-info-icon"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </el-tag>
+            </div>
+          </div>
+        </div>
+
+        <el-alert
+          title="接入点信息"
+          description="这是智能体的MCP WebSocket接入点URL，可用于设备连接"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 20px; margin-top: 24px;"
+        />
+        
+        <div class="mcp-endpoint-display">
+          <div class="endpoint-label">MCP接入点URL：</div>
+          <div class="endpoint-content">
+            {{ mcpEndpointData.endpoint }}
+          </div>
+        </div>
+      </div>
+      
+      <template #footer>
+        <el-button @click="showMCPDialog = false">关闭</el-button>
+        <el-button type="primary" @click="copyMCPEndpoint">
+          复制URL
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -203,7 +281,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Setting, Microphone, ChatDotRound, Monitor } from '@element-plus/icons-vue'
+import { Plus, Setting, Microphone, ChatDotRound, Monitor, Refresh, InfoFilled } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 
 const router = useRouter()
@@ -216,6 +294,18 @@ const adding = ref(false)
 const addingDevice = ref(false)
 const agentFormRef = ref()
 const deviceFormRef = ref()
+
+// MCP接入点相关
+const showMCPDialog = ref(false)
+const mcpLoading = ref(false)
+const mcpEndpointData = ref({
+  endpoint: ''
+})
+
+// MCP工具相关
+const toolsLoading = ref(false)
+const mcpTools = ref([])
+const currentAgentId = ref(null)
 
 const deviceForm = reactive({
   code: ''
@@ -382,6 +472,64 @@ const getLLMProvider = (agent) => {
 
 const formatDate = (dateString) => {
   return new Date(dateString).toLocaleString('zh-CN')
+}
+
+// 显示MCP接入点
+const showMCPEndpoint = async (agent) => {
+  showMCPDialog.value = true
+  mcpLoading.value = true
+  currentAgentId.value = agent.id
+  
+  try {
+    const response = await api.get(`/user/agents/${agent.id}/mcp-endpoint`)
+    mcpEndpointData.value = response.data.data
+    
+    // 自动刷新工具列表
+    await refreshMcpTools()
+  } catch (error) {
+    ElMessage.error('获取MCP接入点失败')
+    console.error('Error getting MCP endpoint:', error)
+    showMCPDialog.value = false
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+// 刷新MCP工具列表
+const refreshMcpTools = async () => {
+  if (!currentAgentId.value) {
+    ElMessage.warning('未选择智能体')
+    return
+  }
+  
+  toolsLoading.value = true
+  try {
+    const response = await api.get(`/user/agents/${currentAgentId.value}/mcp-tools`)
+    if (response.data.data && response.data.data.tools) {
+      mcpTools.value = response.data.data.tools
+      ElMessage.success(`成功获取 ${mcpTools.value.length} 个工具`)
+    } else {
+      mcpTools.value = []
+      ElMessage.info('未找到工具数据')
+    }
+  } catch (error) {
+    ElMessage.error('获取工具列表失败: ' + (error.response?.data?.error || error.message))
+    console.error('Error refreshing MCP tools:', error)
+    mcpTools.value = []
+  } finally {
+    toolsLoading.value = false
+  }
+}
+
+// 复制MCP接入点URL
+const copyMCPEndpoint = async () => {
+  try {
+    await navigator.clipboard.writeText(mcpEndpointData.value.endpoint)
+    ElMessage.success('MCP接入点URL已复制到剪贴板')
+  } catch (error) {
+    ElMessage.error('复制失败')
+    console.error('Error copying to clipboard:', error)
+  }
 }
 
 onMounted(() => {
@@ -627,5 +775,91 @@ onMounted(() => {
   display: flex;
   gap: 15px;
   justify-content: center;
+}
+
+/* MCP接入点相关样式 */
+.mcp-endpoint-display {
+  margin: 20px 0;
+}
+
+.endpoint-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.endpoint-content {
+  padding: 12px 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+  color: #1e293b;
+  word-break: break-all;
+  line-height: 1.5;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+}
+
+.mcp-tools-section {
+  margin-top: 24px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 20px;
+}
+
+.tools-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.tools-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.tools-empty {
+  margin: 20px 0;
+  text-align: center;
+}
+
+.tools-list {
+  margin-top: 16px;
+}
+
+.tools-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tool-tag {
+  position: relative;
+  padding: 8px 16px;
+  font-size: 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.tool-tag:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.tool-info-icon {
+  margin-left: 6px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.tool-tag:hover .tool-info-icon {
+  opacity: 1;
 }
 </style>

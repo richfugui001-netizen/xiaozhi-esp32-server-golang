@@ -23,7 +23,7 @@ func Setup(db *gorm.DB) *gin.Engine {
 	authController := &controllers.AuthController{DB: db}
 	webSocketController := controllers.NewWebSocketController(db)
 	adminController := &controllers.AdminController{DB: db, WebSocketController: webSocketController}
-	userController := &controllers.UserController{DB: db}
+	userController := &controllers.UserController{DB: db, WebSocketController: webSocketController}
 	deviceActivationController := &controllers.DeviceActivationController{DB: db}
 	setupController := &controllers.SetupController{DB: db}
 
@@ -80,6 +80,7 @@ func Setup(db *gorm.DB) *gin.Engine {
 
 				// MCP接入点
 				user.GET("/agents/:id/mcp-endpoint", userController.GetAgentMCPEndpoint)
+				user.GET("/agents/:id/mcp-tools", userController.GetAgentMcpTools)
 			}
 
 			// 管理员路由

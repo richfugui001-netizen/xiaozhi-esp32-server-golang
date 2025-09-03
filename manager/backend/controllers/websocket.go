@@ -461,31 +461,55 @@ func (ctrl *WebSocketController) SendRequestToClient(ctx context.Context, method
 
 // 请求客户端MCP工具列表
 func (ctrl *WebSocketController) RequestMcpToolsFromClient(ctx context.Context, agentID string) ([]string, error) {
+	log.Printf("开始请求客户端MCP工具列表，agentID: %s", agentID)
+
+	// 检查客户端连接状态
+	ctrl.clientMutex.RLock()
+	client := ctrl.currentClient
+	isConnected := client != nil && client.isConnected
+	ctrl.clientMutex.RUnlock()
+
+	log.Printf("客户端连接状态: connected=%v, client=%v", isConnected, client != nil)
+
+	if !isConnected {
+		return nil, fmt.Errorf("没有连接的客户端")
+	}
+
 	body := map[string]interface{}{
 		"agent_id": agentID,
 	}
 
+	log.Printf("向客户端发送MCP工具列表请求: %s /api/mcp/tools", "GET")
+
 	// 发送请求到客户端
 	response, err := ctrl.SendRequestToClient(ctx, "GET", "/api/mcp/tools", body)
 	if err != nil {
+		log.Printf("请求客户端MCP工具列表失败: %v", err)
 		return nil, fmt.Errorf("请求客户端MCP工具列表失败: %v", err)
 	}
 
+	log.Printf("收到客户端响应: status=%d, body=%+v", response.Status, response.Body)
+
 	// 检查响应状态
 	if response.Status != http.StatusOK {
+		log.Printf("客户端返回错误状态: %d", response.Status)
 		return nil, fmt.Errorf("客户端返回错误状态: %d", response.Status)
 	}
 
 	// 解析响应体中的工具列表
 	if response.Body == nil {
+		log.Printf("客户端响应体为空")
 		return []string{}, nil
 	}
 
 	// 尝试从响应体中提取工具列表
 	toolsData, ok := response.Body["tools"]
 	if !ok {
+		log.Printf("客户端响应体中未找到tools字段")
 		return []string{}, nil
 	}
+
+	log.Printf("找到tools数据: %+v (类型: %T)", toolsData, toolsData)
 
 	// 将工具数据转换为字符串切片
 	var tools []string
@@ -504,9 +528,11 @@ func (ctrl *WebSocketController) RequestMcpToolsFromClient(ctx context.Context, 
 	case []string:
 		tools = v
 	default:
+		log.Printf("无法解析工具列表格式: %T", toolsData)
 		return nil, fmt.Errorf("无法解析工具列表格式: %T", toolsData)
 	}
 
+	log.Printf("成功解析工具列表: %v", tools)
 	return tools, nil
 }
 

@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -961,59 +960,18 @@ func (ac *AdminController) GetAgentMCPEndpoint(c *gin.Context) {
 // GetAgentMcpTools 获取智能体的MCP工具列表
 func (ac *AdminController) GetAgentMcpTools(c *gin.Context) {
 	agentID := c.Param("id")
-	if agentID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_id parameter is required"})
-		return
+
+	// 管理员验证函数：验证智能体是否存在（管理员可以查看任意用户的智能体）
+	adminAgentValidator := func(agentID string) error {
+		var agent models.Agent
+		if err := ac.DB.Where("id = ?", agentID).First(&agent).Error; err != nil {
+			return fmt.Errorf("智能体不存在")
+		}
+		return nil
 	}
 
-	// 从JWT中间件获取当前用户ID
-	userIDInterface, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户未认证"})
-		return
-	}
-	userID, ok := userIDInterface.(uint)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "用户ID类型错误"})
-		return
-	}
-
-	// 验证智能体是否存在且属于当前用户
-	var agent models.Agent
-	if err := ac.DB.Where("id = ? AND user_id = ?", agentID, userID).First(&agent).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "智能体不存在或无权限访问"})
-		return
-	}
-
-	// 调用WebSocket控制器获取MCP工具列表
-	if ac.WebSocketController == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "WebSocket控制器未初始化"})
-		return
-	}
-
-	// 创建上下文
-	ctx := context.Background()
-
-	// 调用RequestMcpToolsFromClient获取工具列表
-	toolNames, err := ac.WebSocketController.RequestMcpToolsFromClient(ctx, agentID)
-	if err != nil {
-		log.Printf("获取MCP工具列表失败: %v", err)
-		// 如果获取失败，返回空列表而不是错误
-		c.JSON(http.StatusOK, gin.H{"data": gin.H{"tools": []string{}}})
-		return
-	}
-
-	// 将工具名称转换为前端期望的格式
-	var tools []gin.H
-	for _, toolName := range toolNames {
-		tools = append(tools, gin.H{
-			"name":        toolName,
-			"description": fmt.Sprintf("MCP工具: %s", toolName),
-			"schema":      true,
-		})
-	}
-
-	c.JSON(http.StatusOK, gin.H{"data": gin.H{"tools": tools}})
+	// 使用公共函数
+	GetAgentMcpToolsCommon(c, agentID, ac.WebSocketController, adminAgentValidator)
 }
 
 func (ac *AdminController) CreateAgent(c *gin.Context) {
