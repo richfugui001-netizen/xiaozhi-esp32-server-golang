@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard">
     <el-row :gutter="20">
-      <el-col :span="6">
+      <el-col :span="6" v-if="authStore.isAdmin">
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-icon">
@@ -15,7 +15,7 @@
         </el-card>
       </el-col>
       
-      <el-col :span="6">
+      <el-col :span="authStore.isAdmin ? 6 : 8">
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-icon">
@@ -23,13 +23,13 @@
             </div>
             <div class="stat-info">
               <div class="stat-number">{{ stats.totalDevices }}</div>
-              <div class="stat-label">设备总数</div>
+              <div class="stat-label">{{ authStore.isAdmin ? '设备总数' : '我的设备' }}</div>
             </div>
           </div>
         </el-card>
       </el-col>
       
-      <el-col :span="6">
+      <el-col :span="authStore.isAdmin ? 6 : 8">
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-icon">
@@ -37,13 +37,13 @@
             </div>
             <div class="stat-info">
               <div class="stat-number">{{ stats.totalAgents }}</div>
-              <div class="stat-label">智能体数量</div>
+              <div class="stat-label">{{ authStore.isAdmin ? '智能体数量' : '我的智能体' }}</div>
             </div>
           </div>
         </el-card>
       </el-col>
       
-      <el-col :span="6">
+      <el-col :span="authStore.isAdmin ? 6 : 8">
         <el-card class="stat-card">
           <div class="stat-content">
             <div class="stat-icon">
@@ -165,7 +165,8 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useAuthStore } from '../stores/auth'
+import { useAuthStore } from '@/stores/auth'
+import api from '@/utils/api'
 import { ElMessage } from 'element-plus'
 import {
   User,
@@ -190,14 +191,8 @@ const stats = ref({
 const uptime = ref('0天 0小时 0分钟')
 const fileInput = ref(null)
 
-onMounted(() => {
-  // 模拟数据，实际应该从API获取
-  stats.value = {
-    totalUsers: 156,
-    totalDevices: 89,
-    totalAgents: 234,
-    onlineDevices: 67
-  }
+onMounted(async () => {
+  await loadStats()
   
   // 模拟运行时间
   const startTime = new Date('2024-01-01')
@@ -208,6 +203,28 @@ onMounted(() => {
   const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
   uptime.value = `${days}天 ${hours}小时 ${minutes}分钟`
 })
+
+// 加载统计数据
+const loadStats = async () => {
+  try {
+    const response = await api.get('/dashboard/stats')
+    stats.value = {
+      totalUsers: response.data.totalUsers || 0,
+      totalDevices: response.data.totalDevices || 0,
+      totalAgents: response.data.totalAgents || 0,
+      onlineDevices: response.data.onlineDevices || 0
+    }
+  } catch (error) {
+    console.error('加载统计数据失败:', error)
+    // 使用默认值
+    stats.value = {
+      totalUsers: 0,
+      totalDevices: 0,
+      totalAgents: 0,
+      onlineDevices: 0
+    }
+  }
+}
 
 // 导出配置
 const exportConfig = async () => {

@@ -52,6 +52,8 @@ func Setup(db *gorm.DB) *gin.Engine {
 		auth.Use(middleware.JWTAuth())
 		{
 			auth.GET("/profile", authController.GetProfile)
+			// 通用接口，获取系统中的设备信息
+			auth.GET("/dashboard/stats", userController.GetDashboardStats)
 
 			// 用户路由
 			user := auth.Group("/user")

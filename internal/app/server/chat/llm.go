@@ -214,15 +214,17 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, userMessage *schema.
 				}
 
 				if llmResponse.IsEnd {
-					//写到redis中
-					if userMessage != nil {
-						if userMessage.Role == schema.User {
-							l.AddLlmMessage(ctx, userMessage)
+					if len(toolCalls) == 0 {
+						//写到redis中
+						if userMessage != nil {
+							if userMessage.Role == schema.User {
+								l.AddLlmMessage(ctx, userMessage)
+							}
 						}
-					}
-					strFullText := fullText.String()
-					if strFullText != "" || len(toolCalls) > 0 {
-						l.AddLlmMessage(ctx, schema.AssistantMessage(strFullText, toolCalls))
+						strFullText := fullText.String()
+						if strFullText != "" || len(toolCalls) > 0 {
+							l.AddLlmMessage(ctx, schema.AssistantMessage(strFullText, toolCalls))
+						}
 					}
 					if len(toolCalls) > 0 {
 						/*
@@ -234,7 +236,7 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, userMessage *schema.
 							}*/
 
 						lctx := context.WithValue(ctx, "nest", 2)
-						invokeToolSuccess, err := l.handleToolCallResponse(lctx, toolCalls)
+						invokeToolSuccess, err := l.handleToolCallResponse(lctx, userMessage, schema.AssistantMessage(fullText.String(), toolCalls), toolCalls)
 						if err != nil {
 							log.Errorf("处理工具调用响应失败: %v", err)
 							return true, fmt.Errorf("处理工具调用响应失败: %v", err)
@@ -264,7 +266,7 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, userMessage *schema.
 }
 
 // handleToolCallResponse 处理工具调用响应
-func (l *LLMManager) handleToolCallResponse(ctx context.Context, tools []schema.ToolCall) (bool, error) {
+func (l *LLMManager) handleToolCallResponse(ctx context.Context, userMessage *schema.Message, respMsg *schema.Message, tools []schema.ToolCall) (bool, error) {
 	if len(tools) == 0 {
 		return false, nil
 	}
@@ -287,14 +289,17 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, tools []schema.
 
 	var wg sync.WaitGroup
 
+	var messageList []*schema.Message
+
+	messageList = append(messageList, userMessage, respMsg)
+
 	addMessageFunc := func(toolCall schema.ToolCall, result string) {
 		toolResultMsg := &schema.Message{
 			Role:       schema.Tool,
 			ToolCallID: toolCall.ID,
 			Content:    result,
 		}
-
-		l.AddLlmMessage(ctx, toolResultMsg)
+		messageList = append(messageList, toolResultMsg)
 	}
 
 	for _, toolCall := range tools {
@@ -372,6 +377,12 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, tools []schema.
 			}
 		}
 		addMessageFunc(toolCall, result)
+	}
+
+	if len(messageList) > 0 {
+		for _, msg := range messageList {
+			l.AddLlmMessage(ctx, msg)
+		}
 	}
 
 	wg.Wait()
