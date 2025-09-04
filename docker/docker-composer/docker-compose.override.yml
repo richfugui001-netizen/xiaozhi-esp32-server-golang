@@ -1,0 +1,7 @@
+version: '3.8'
+
+services:
+  main-server:
+    command: ["/workspace/bin/xiaozhi_server", "-c", "/workspace/config/config.personal.yaml"]
+    volumes:
+      - ../../config.personal.yaml:/workspace/config/config.personal.yaml
