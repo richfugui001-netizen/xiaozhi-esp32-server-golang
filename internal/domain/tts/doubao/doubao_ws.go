@@ -370,13 +370,6 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 		chunkCount := 0
 		//var allAudio []byte
 		for {
-			select {
-			case <-ctx.Done():
-				log.Debugf("DoubaoWs TextToSpeechStream context done, exit")
-				p.returnWSConnection(conn)
-				return
-			default:
-			}
 			_, message, err := conn.ReadMessage()
 			if err != nil {
 				p.removeWSConnection(conn)
@@ -390,6 +383,19 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 				p.removeWSConnection(conn)
 				log.Errorf("解析响应失败: %v", err)
 				return
+			}
+
+			select {
+			case <-ctx.Done():
+				if resp.IsLast {
+					log.Debugf("DoubaoWs TextToSpeechStream context done, already read all data, exit")
+					p.returnWSConnection(conn)
+					return
+				} else {
+					log.Debugf("DoubaoWs TextToSpeechStream context done, need to read more data, continue")
+					continue
+				}
+			default:
 			}
 
 			if len(resp.Audio) > 0 {
