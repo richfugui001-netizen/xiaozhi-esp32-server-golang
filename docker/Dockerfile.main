@@ -1,20 +1,32 @@
 # 构建阶段
-FROM docker.jsdelivr.fyi/golang:1.23 AS builder
+FROM golang:1.23 AS builder
 
 # 设置非交互式安装环境变量
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 安装构建依赖
-RUN apt-get update && apt-get install -y libopus-dev libopusfile-dev pkg-config
+# 获取构建参数
+ARG TARGETARCH
 
-# 安装ONNX Runtime
-COPY docker/lib/onnxruntime-linux-x64-1.21.0.tgz /tmp/
-RUN cd /tmp && \
-    tar -xzf onnxruntime-linux-x64-1.21.0.tgz && \
+# 安装构建依赖
+RUN apt-get update && apt-get install -y libopus-dev libopusfile-dev pkg-config wget
+
+# 根据架构下载并安装ONNX Runtime
+RUN ONNX_ARCH=$(case ${TARGETARCH} in \
+        amd64) echo "x64" ;; \
+        arm64) echo "aarch64" ;; \
+        *) echo "x64" ;; \
+    esac) && \
+    ONNX_VERSION="1.21.0" && \
+    ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-${ONNX_ARCH}-${ONNX_VERSION}.tgz" && \
+    echo "Downloading ONNX Runtime for ${ONNX_ARCH} architecture from ${ONNX_URL}" && \
+    wget -O /tmp/onnxruntime.tgz "${ONNX_URL}" && \
+    cd /tmp && \
+    tar -xzf onnxruntime.tgz && \
+    ONNX_DIR=$(ls -d onnxruntime-linux-*/) && \
     mkdir -p /usr/local/include/onnxruntime && \
-    cp -r onnxruntime-linux-x64-1.21.0/include/* /usr/local/include/onnxruntime/ && \
-    cp -r onnxruntime-linux-x64-1.21.0/lib/* /usr/local/lib/ && \
-    rm -rf onnxruntime-linux-x64-1.21.0* && \
+    cp -r ${ONNX_DIR}include/* /usr/local/include/onnxruntime/ && \
+    cp -r ${ONNX_DIR}lib/* /usr/local/lib/ && \
+    rm -rf /tmp/onnxruntime* && \
     ldconfig
 
 # 设置Go环境变量
@@ -32,7 +44,7 @@ COPY . .
 RUN go build -o /app/xiaozhi_server ./cmd/server/
 
 # 运行阶段
-FROM docker.jsdelivr.fyi/ubuntu:22.04
+FROM ubuntu:22.04
 
 # 设置非交互式安装环境变量
 ENV DEBIAN_FRONTEND=noninteractive
@@ -44,14 +56,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装ONNX Runtime运行时
-COPY docker/lib/onnxruntime-linux-x64-1.21.0.tgz /tmp/
-RUN cd /tmp && \
-    tar -xzf onnxruntime-linux-x64-1.21.0.tgz && \
+# 获取构建参数
+ARG TARGETARCH
+
+# 安装wget用于下载
+RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
+
+# 根据架构下载并安装ONNX Runtime运行时
+RUN ONNX_ARCH=$(case ${TARGETARCH} in \
+        amd64) echo "x64" ;; \
+        arm64) echo "aarch64" ;; \
+        *) echo "x64" ;; \
+    esac) && \
+    ONNX_VERSION="1.21.0" && \
+    ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-${ONNX_ARCH}-${ONNX_VERSION}.tgz" && \
+    echo "Downloading ONNX Runtime for ${ONNX_ARCH} architecture from ${ONNX_URL}" && \
+    wget -O /tmp/onnxruntime.tgz "${ONNX_URL}" && \
+    cd /tmp && \
+    tar -xzf onnxruntime.tgz && \
+    ONNX_DIR=$(ls -d onnxruntime-linux-*/) && \
     mkdir -p /usr/local/include/onnxruntime && \
-    cp -r onnxruntime-linux-x64-1.21.0/include/* /usr/local/include/onnxruntime/ && \
-    cp -r onnxruntime-linux-x64-1.21.0/lib/* /usr/local/lib/ && \
-    rm -rf onnxruntime-linux-x64-1.21.0* && \
+    cp -r ${ONNX_DIR}include/* /usr/local/include/onnxruntime/ && \
+    cp -r ${ONNX_DIR}lib/* /usr/local/lib/ && \
+    rm -rf /tmp/onnxruntime* && \
     ldconfig
 
 # 设置ONNX Runtime环境变量
