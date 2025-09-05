@@ -16,6 +16,8 @@ chat:
 
 config_provider:          #对应domain/config/中的provider
   type: "manager"         #现在可以是 manager, redis
+  enable_periodic_update: true  #是否启用周期性配置更新
+  update_interval: "5m"   #配置更新间隔，支持时间单位如 "5m", "1h", "30s"
 
 manager:                  #内控管理配置, 对应domain/config/manager/manager.go
   backend_url: "http://127.0.0.1:8080" #内控地址
@@ -278,11 +280,6 @@ mcp:
         enabled: true                         # 是否启用
     reconnect_interval: 300      # 重连间隔（秒）
     max_reconnect_attempts: 10   # 最大重连尝试次数
-  # 设备级MCP配置
-  device:
-    enabled: true                           # 是否启用设备MCP
-    websocket_path: "/xiaozhi/mcp/"         # WebSocket路径
-    max_connections_per_device: 5           # 每个设备最大连接数
 
 # 本地MCP工具配置
 local_mcp:

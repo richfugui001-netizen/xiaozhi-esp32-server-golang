@@ -21,8 +21,9 @@ func Setup(db *gorm.DB) *gin.Engine {
 
 	// 初始化控制器
 	authController := &controllers.AuthController{DB: db}
-	adminController := &controllers.AdminController{DB: db}
-	userController := &controllers.UserController{DB: db}
+	webSocketController := controllers.NewWebSocketController(db)
+	adminController := &controllers.AdminController{DB: db, WebSocketController: webSocketController}
+	userController := &controllers.UserController{DB: db, WebSocketController: webSocketController}
 	deviceActivationController := &controllers.DeviceActivationController{DB: db}
 	setupController := &controllers.SetupController{DB: db}
 
@@ -78,6 +79,10 @@ func Setup(db *gorm.DB) *gin.Engine {
 				// 配置列表
 				user.GET("/llm-configs", userController.GetLLMConfigs)
 				user.GET("/tts-configs", userController.GetTTSConfigs)
+
+				// MCP接入点
+				user.GET("/agents/:id/mcp-endpoint", userController.GetAgentMCPEndpoint)
+				user.GET("/agents/:id/mcp-tools", userController.GetAgentMcpTools)
 			}
 
 			// 管理员路由
@@ -142,6 +147,11 @@ func Setup(db *gorm.DB) *gin.Engine {
 				admin.PUT("/udp-configs/:id", adminController.UpdateUDPConfig)
 				admin.DELETE("/udp-configs/:id", adminController.DeleteUDPConfig)
 
+				admin.GET("/mcp-configs", adminController.GetMCPConfigs)
+				admin.POST("/mcp-configs", adminController.CreateMCPConfig)
+				admin.PUT("/mcp-configs/:id", adminController.UpdateMCPConfig)
+				admin.DELETE("/mcp-configs/:id", adminController.DeleteMCPConfig)
+
 				// 全局角色管理
 				admin.GET("/global-roles", adminController.GetGlobalRoles)
 				admin.POST("/global-roles", adminController.CreateGlobalRole)
@@ -160,6 +170,8 @@ func Setup(db *gorm.DB) *gin.Engine {
 				admin.POST("/agents", adminController.CreateAgent)
 				admin.PUT("/agents/:id", adminController.UpdateAgent)
 				admin.DELETE("/agents/:id", adminController.DeleteAgent)
+				admin.GET("/agents/:id/mcp-endpoint", adminController.GetAgentMCPEndpoint)
+				admin.GET("/agents/:id/mcp-tools", adminController.GetAgentMcpTools)
 
 				// 用户管理
 				admin.GET("/users", adminController.GetUsers)
@@ -174,6 +186,9 @@ func Setup(db *gorm.DB) *gin.Engine {
 			}
 		}
 	}
+
+	// WebSocket路由
+	r.GET("/ws", webSocketController.HandleWebSocket)
 
 	return r
 }

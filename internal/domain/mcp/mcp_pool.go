@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -45,25 +44,66 @@ func (p *McpClientPool) GetToolByDeviceId(deviceId string, toolsName string) (to
 	return client.GetToolByName(toolsName)
 }
 
-func (p *McpClientPool) GetAllToolsByDeviceId(deviceId string) (map[string]tool.InvokableTool, error) {
-	client := p.GetMcpClient(deviceId)
-	if client == nil {
-		return nil, fmt.Errorf("client not found")
+func (p *McpClientPool) GetAllToolsByDeviceIdAndAgentId(deviceId string, agentId string) (map[string]tool.InvokableTool, error) {
+	retTools := make(map[string]tool.InvokableTool)
+	deviceClient := p.GetMcpClient(deviceId)
+	if deviceClient != nil {
+		deviceTools := deviceClient.GetTools()
+		for toolName, tool := range deviceTools {
+			retTools[toolName] = tool
+		}
 	}
-	return client.GetTools(), nil
+	agentClient := p.GetMcpClient(agentId)
+	if agentClient != nil {
+		agentTools := agentClient.GetTools()
+		for toolName, tool := range agentTools {
+			retTools[toolName] = tool
+		}
+	}
+	return retTools, nil
+}
+
+func (p *McpClientPool) GetWsEndpointMcpTools(agentId string) (map[string]tool.InvokableTool, error) {
+	retTools := make(map[string]tool.InvokableTool)
+	agentClient := p.GetMcpClient(agentId)
+	if agentClient == nil {
+		return retTools, nil
+	}
+	agentTools := agentClient.GetWsEndpointMcpTools()
+	for toolName, tool := range agentTools {
+		retTools[toolName] = tool
+	}
+	return retTools, nil
 }
 
 func (p *McpClientPool) checkOffline() {
 	for _, client := range p.device2McpClient.Items() {
-		if time.Since(client.wsEndPointMcp.lastPing) > 2*time.Minute {
-			client.wsEndPointMcp.connected = false
-			client.wsEndPointMcp.cancel()
+		// 检查WebSocket端点MCP连接
+		client.lock.RLock()
+		hasActiveWsConnections := false
+		for _, wsInstance := range client.wsEndPointMcp {
+			if time.Since(wsInstance.lastPing) > 2*time.Minute {
+				wsInstance.connected = false
+				wsInstance.cancel()
+			} else {
+				hasActiveWsConnections = true
+			}
 		}
-		if time.Since(client.iotOverMcp.lastPing) > 2*time.Minute {
-			client.iotOverMcp.connected = false
-			client.iotOverMcp.cancel()
+		client.lock.RUnlock()
+
+		// 检查IoT over MCP连接
+		hasActiveIotConnection := false
+		if client.iotOverMcp != nil {
+			if time.Since(client.iotOverMcp.lastPing) > 2*time.Minute {
+				client.iotOverMcp.connected = false
+				client.iotOverMcp.cancel()
+			} else {
+				hasActiveIotConnection = true
+			}
 		}
-		if !client.wsEndPointMcp.connected && !client.iotOverMcp.connected {
+
+		// 如果没有任何活跃连接，移除客户端
+		if !hasActiveWsConnections && !hasActiveIotConnection {
 			p.RemoveMcpClient(client.deviceID)
 		}
 	}

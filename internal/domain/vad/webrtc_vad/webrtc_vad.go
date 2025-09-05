@@ -8,8 +8,6 @@ import (
 
 	"xiaozhi-esp32-server-golang/internal/domain/vad/inter"
 
-	log "xiaozhi-esp32-server-golang/logger"
-
 	"github.com/hackers365/go-webrtcvad"
 )
 
@@ -135,7 +133,7 @@ func (w *WebRTCVAD) isVad(pcmData []float32, sampleRate int, frameSize int) (boo
 		return false, nil
 	}
 
-	log.Debugf("isVad, pcmData len: %d, frameSize: %d", len(pcmData), frameSize)
+	//log.Debugf("isVad, pcmData len: %d, frameSize: %d", len(pcmData), frameSize)
 
 	// 更新最后使用时间
 	w.lastUsed = time.Now()

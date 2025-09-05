@@ -94,6 +94,12 @@ const routes = [
             component: () => import('../views/admin/MQTTServerConfig.vue'),
             meta: { title: 'MQTT Server配置管理' }
           },
+          {
+            path: 'mcp-config',
+            name: 'MCPConfig',
+            component: () => import('../views/admin/MCPConfig.vue'),
+            meta: { title: 'MCP配置管理' }
+          },
           		{
 			path: 'vision-config',
 			name: 'VisionConfig',

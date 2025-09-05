@@ -90,38 +90,5 @@ func CheckMCPConfig() {
 		log.Warn("⚠️  发现配置问题，请检查上述错误并修复")
 	}
 
-	// 检查设备MCP配置
-	checkDeviceMCPConfig()
-
 	log.Info("=== MCP配置检查完成 ===")
-}
-
-// checkDeviceMCPConfig 检查设备MCP配置
-func checkDeviceMCPConfig() {
-	log.Info("--- 设备MCP配置检查 ---")
-
-	deviceEnabled := viper.GetBool("mcp.device.enabled")
-	log.Infof("设备MCP启用状态: %v", deviceEnabled)
-
-	if !deviceEnabled {
-		log.Info("设备MCP已禁用")
-		return
-	}
-
-	websocketPath := viper.GetString("mcp.device.websocket_path")
-	maxConnections := viper.GetInt("mcp.device.max_connections_per_device")
-
-	log.Infof("WebSocket路径: %s", websocketPath)
-	log.Infof("每设备最大连接数: %d", maxConnections)
-
-	// 检查路径格式
-	if websocketPath == "" {
-		log.Warn("⚠️  WebSocket路径为空")
-	} else if !strings.HasPrefix(websocketPath, "/") {
-		log.Warn("⚠️  WebSocket路径应以'/'开头")
-	}
-
-	if maxConnections <= 0 {
-		log.Warn("⚠️  每设备最大连接数应大于0")
-	}
 }

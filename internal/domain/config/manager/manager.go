@@ -88,7 +88,8 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 				Provider string `json:"provider"`
 				JsonData string `json:"json_data"`
 			} `json:"tts"`
-			Prompt string `json:"prompt"`
+			Prompt  string `json:"prompt"`
+			AgentId string `json:"agent_id"`
 		} `json:"data"`
 	}
 
@@ -128,6 +129,7 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 			Provider: response.Data.VAD.Provider,
 			Config:   parseJsonData(response.Data.VAD.JsonData),
 		},
+		AgentId: response.Data.AgentId,
 	}
 
 	log.Log().Infof("成功获取设备配置: deviceId: %s, config: %+v", deviceID, config)
@@ -171,6 +173,8 @@ func (c *ConfigManager) GetSystemConfig(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("读取响应体失败: %w", err)
 	}
 
+	log.Debugf("从内控获取到系统配置: %s", string(body))
+
 	// 解析响应JSON
 	var apiResponse struct {
 		Data map[string]interface{} `json:"data"`
@@ -185,8 +189,6 @@ func (c *ConfigManager) GetSystemConfig(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("序列化配置失败: %w", err)
 	}
-
-	log.Debugf("从内控获取到系统配置: %s", string(configJSON))
 
 	return string(configJSON), nil
 }

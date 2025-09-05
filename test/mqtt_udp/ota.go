@@ -209,6 +209,7 @@ func activateDevice(deviceID, clientID, serialNumber, hmacKey, challenge string,
 	request := ActivationRequest{
 		Payload: payload,
 	}
+	//request := payload
 
 	jsonData, err := json.Marshal(request)
 	if err != nil {
@@ -227,6 +228,7 @@ func activateDevice(deviceID, clientID, serialNumber, hmacKey, challenge string,
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Device-Id", deviceID)
 		req.Header.Set("Client-Id", clientID)
+		req.Header.Set("Activation-Version", "2")
 
 		client := &http.Client{}
 		resp, err := client.Do(req)

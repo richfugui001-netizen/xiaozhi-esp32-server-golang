@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 	"xiaozhi-esp32-server-golang/internal/app/server"
+	manager_client "xiaozhi-esp32-server-golang/internal/app/server/manager_client"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/spf13/viper"
@@ -55,6 +56,14 @@ func main() {
 	<-quit
 
 	log.Info("正在关闭服务器...")
-	// TODO: 在这里添加清理资源的代码
+
+	// 停止周期性配置更新服务
+	StopPeriodicConfigUpdate()
+
+	// 断开Manager WebSocket连接
+	if err := manager_client.DisconnectManagerWebSocket(); err != nil {
+		log.Warnf("断开Manager WebSocket连接失败: %v", err)
+	}
+
 	log.Info("服务器已关闭")
 }

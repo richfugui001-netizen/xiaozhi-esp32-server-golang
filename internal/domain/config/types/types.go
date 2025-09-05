@@ -31,4 +31,5 @@ type UConfig struct {
 	Tts          TtsConfig `json:"tts"`
 	Llm          LlmConfig `json:"llm"`
 	Vad          VadConfig `json:"vad"`
+	AgentId      string    `json:"agent_id"` //所属agent_id
 }

@@ -1,14 +1,17 @@
 package server
 
 import (
+	"context"
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/mqtt_server"
 	"xiaozhi-esp32-server-golang/internal/app/server/chat"
+	"xiaozhi-esp32-server-golang/internal/app/server/manager_client"
 	"xiaozhi-esp32-server-golang/internal/app/server/mqtt_udp"
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
 	"xiaozhi-esp32-server-golang/internal/app/server/websocket"
 	log "xiaozhi-esp32-server-golang/logger"
 
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"github.com/spf13/viper"
 )
 
@@ -17,11 +20,16 @@ import (
 type App struct {
 	wsServer       *websocket.WebSocketServer
 	mqttUdpAdapter *mqtt_udp.MqttUdpAdapter
+
+	// ChatManager管理 - 使用concurrent map
+	chatManagers cmap.ConcurrentMap[string, *chat.ChatManager]
 }
 
 func NewApp() *App {
 	var err error
-	app := &App{}
+	app := &App{
+		chatManagers: cmap.New[*chat.ChatManager](),
+	}
 	app.wsServer = app.newWebSocketServer()
 	app.mqttUdpAdapter, err = app.newMqttUdpAdapter()
 	if err != nil {
@@ -105,14 +113,86 @@ func (app *App) startMqttServer() error {
 func (a *App) OnNewConnection(transport types.IConn) {
 	deviceID := transport.GetDeviceID()
 
-	//need delete
+	// 检查是否已存在该设备的ChatManager
+	if existingManager, exists := a.chatManagers.Get(deviceID); exists {
+		log.Infof("设备 %s 已存在ChatManager，先关闭旧的连接", deviceID)
+		// 关闭旧的ChatManager
+		existingManager.Close()
+		a.chatManagers.Remove(deviceID)
+	}
+
+	// 创建新的ChatManager
 	chatManager, err := chat.NewChatManager(deviceID, transport)
 	if err != nil {
 		log.Errorf("创建chatManager失败: %v", err)
 		return
 	}
 
-	go chatManager.Start()
+	// 存储ChatManager
+	a.chatManagers.Set(deviceID, chatManager)
+
+	a.DeviceOnline(deviceID)
+
+	log.Infof("设备 %s 的ChatManager已创建并存储", deviceID)
+
+	// 启动ChatManager
+	go func() {
+		defer func() {
+			// ChatManager结束时，从映射中移除
+			if storedManager, exists := a.chatManagers.Get(deviceID); exists && storedManager == chatManager {
+				a.chatManagers.Remove(deviceID)
+				log.Infof("设备 %s 的ChatManager已从映射中移除", deviceID)
+				a.DeviceOffline(deviceID)
+			}
+		}()
+
+		if err := chatManager.Start(); err != nil {
+			log.Errorf("ChatManager启动失败: %v", err)
+		}
+	}()
+}
+
+// GetChatManager 获取指定设备的ChatManager
+func (a *App) GetChatManager(deviceID string) (*chat.ChatManager, bool) {
+	return a.chatManagers.Get(deviceID)
+}
+
+// CloseChatManager 关闭指定设备的ChatManager
+func (a *App) CloseChatManager(deviceID string) bool {
+	if manager, exists := a.chatManagers.Get(deviceID); exists {
+		manager.Close()
+		a.chatManagers.Remove(deviceID)
+		log.Infof("设备 %s 的ChatManager已关闭并移除", deviceID)
+		return true
+	}
+	return false
+}
+
+// GetAllChatManagers 获取所有ChatManager的副本
+func (a *App) GetAllChatManagers() map[string]*chat.ChatManager {
+	// 返回副本以避免并发访问问题
+	managers := make(map[string]*chat.ChatManager)
+	for tuple := range a.chatManagers.IterBuffered() {
+		managers[tuple.Key] = tuple.Val
+	}
+	return managers
+}
+
+// GetChatManagerCount 获取当前活跃的ChatManager数量
+func (a *App) GetChatManagerCount() int {
+	return a.chatManagers.Count()
+}
+
+// CloseAllChatManagers 关闭所有ChatManager
+func (a *App) CloseAllChatManagers() {
+	for tuple := range a.chatManagers.IterBuffered() {
+		tuple.Val.Close()
+		log.Infof("设备 %s 的ChatManager已关闭", tuple.Key)
+	}
+
+	// 清空映射
+	a.chatManagers.Clear()
+	log.Info("所有ChatManager已关闭")
 }
 
 // registerChatMCPTools 注册聊天相关的本地MCP工具
@@ -121,4 +201,12 @@ func (s *App) registerChatMCPTools() {
 	chat.RegisterChatMCPTools()
 
 	log.Info("聊天相关的本地MCP工具注册完成")
+}
+
+func (s *App) DeviceOnline(deviceID string) {
+	manager_client.SendDeviceActiveRequest(context.Background(), deviceID)
+}
+
+func (s *App) DeviceOffline(deviceID string) {
+	manager_client.SendDeviceInactiveRequest(context.Background(), deviceID)
 }
