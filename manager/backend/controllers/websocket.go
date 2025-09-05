@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
+
+	"xiaozhi/manager/backend/models"
 )
 
 type WebSocketController struct {
@@ -291,6 +293,12 @@ func (client *WebSocketClient) processRequest(request *WebSocketRequest) {
 	case "/api/server/ping":
 		client.handlePingRequest(request)
 
+	case "/api/device/active":
+		client.handleDeviceActiveRequest(request)
+
+	case "/api/device/inactive":
+		client.handleDeviceInactiveRequest(request)
+
 	default:
 		log.Printf("未知的请求路径: %s", request.Path)
 		client.sendResponse(request.ID, 404, nil, "Unknown endpoint")
@@ -319,6 +327,99 @@ func (client *WebSocketClient) handlePingRequest(request *WebSocketRequest) {
 	}
 
 	client.sendResponse(request.ID, 200, response, "")
+}
+
+// 处理设备活跃时间更新请求
+func (client *WebSocketClient) handleDeviceActiveRequest(request *WebSocketRequest) {
+	// 从请求体中获取device_id
+	deviceID := ""
+	if request.Body != nil {
+		if id, ok := request.Body["device_id"].(string); ok {
+			deviceID = id
+		}
+	}
+
+	if deviceID == "" {
+		log.Printf("收到设备活跃请求，但缺少device_id")
+		client.sendResponse(request.ID, 400, nil, "缺少device_id参数")
+		return
+	}
+
+	log.Printf("处理设备活跃时间更新请求，device_id: %s", deviceID)
+
+	// 更新设备最后活跃时间
+	now := time.Now()
+	result := client.controller.DB.Model(&models.Device{}).
+		Where("device_name = ?", deviceID).
+		Update("last_active_at", now)
+
+	if result.Error != nil {
+		log.Printf("更新设备活跃时间失败: %v", result.Error)
+		client.sendResponse(request.ID, 500, nil, fmt.Sprintf("更新设备活跃时间失败: %v", result.Error))
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		log.Printf("设备不存在: %s", deviceID)
+		client.sendResponse(request.ID, 404, nil, "设备不存在")
+		return
+	}
+
+	// 构造成功响应
+	response := map[string]interface{}{
+		"device_id":      deviceID,
+		"last_active_at": now.Format(time.RFC3339),
+		"message":        "设备活跃时间更新成功",
+	}
+
+	client.sendResponse(request.ID, 200, response, "")
+	log.Printf("设备 %s 活跃时间已更新为: %s", deviceID, now.Format(time.RFC3339))
+}
+
+// 处理设备离线请求
+func (client *WebSocketClient) handleDeviceInactiveRequest(request *WebSocketRequest) {
+	// 从请求体中获取device_id
+	deviceID := ""
+	if request.Body != nil {
+		if id, ok := request.Body["device_id"].(string); ok {
+			deviceID = id
+		}
+	}
+
+	if deviceID == "" {
+		log.Printf("收到设备离线请求，但缺少device_id")
+		client.sendResponse(request.ID, 400, nil, "缺少device_id参数")
+		return
+	}
+
+	log.Printf("处理设备离线请求，device_id: %s", deviceID)
+
+	// 将设备最后活跃时间设置为0（离线状态）
+	result := client.controller.DB.Model(&models.Device{}).
+		Where("device_name = ?", deviceID).
+		Update("last_active_at", nil) // 设置为NULL表示离线
+
+	if result.Error != nil {
+		log.Printf("更新设备离线状态失败: %v", result.Error)
+		client.sendResponse(request.ID, 500, nil, fmt.Sprintf("更新设备离线状态失败: %v", result.Error))
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		log.Printf("设备不存在: %s", deviceID)
+		client.sendResponse(request.ID, 404, nil, "设备不存在")
+		return
+	}
+
+	// 构造成功响应
+	response := map[string]interface{}{
+		"device_id":      deviceID,
+		"last_active_at": nil, // 离线状态
+		"message":        "设备离线状态更新成功",
+	}
+
+	client.sendResponse(request.ID, 200, response, "")
+	log.Printf("设备 %s 已设置为离线状态", deviceID)
 }
 
 // 发送响应
@@ -539,6 +640,12 @@ func (ctrl *WebSocketController) RequestMcpToolsFromClient(ctx context.Context, 
 // 请求客户端服务器信息
 func (ctrl *WebSocketController) RequestServerInfoFromClient(ctx context.Context) (*WebSocketResponse, error) {
 	return ctrl.SendRequestToClient(ctx, "GET", "/api/server/info", nil)
+}
+
+func (ctrl *WebSocketController) RequestDeviceActivation(ctx context.Context, deviceID string) (*WebSocketResponse, error) {
+	return ctrl.SendRequestToClient(ctx, "GET", "/api/device/activation", map[string]interface{}{
+		"device_id": deviceID,
+	})
 }
 
 // 请求客户端ping

@@ -243,6 +243,18 @@ func IsManagerWebSocketConnected() bool {
 	return GetDefaultClient().IsConnected()
 }
 
+func SendDeviceActiveRequest(ctx context.Context, deviceID string) (*WebSocketResponse, error) {
+	return GetDefaultClient().SendRequest(ctx, "POST", "/api/device/active", map[string]interface{}{
+		"device_id": deviceID,
+	})
+}
+
+func SendDeviceInactiveRequest(ctx context.Context, deviceID string) (*WebSocketResponse, error) {
+	return GetDefaultClient().SendRequest(ctx, "POST", "/api/device/inactive", map[string]interface{}{
+		"device_id": deviceID,
+	})
+}
+
 // startWorkers 启动消息发送工作线程
 func (c *WebSocketClient) startWorkers() {
 	workerCount := 3 // 启动3个工作线程

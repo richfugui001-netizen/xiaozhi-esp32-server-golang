@@ -69,7 +69,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 					continue
 				}
 
-				log.Debugf("clientVoiceStop: %+v, asrDataSize: %d, listenMode: %s, isSkipVad: %v\n", state.GetClientVoiceStop(), state.AsrAudioBuffer.GetAsrDataSize(), state.ListenMode, skipVad)
+				//log.Debugf("clientVoiceStop: %+v, asrDataSize: %d, listenMode: %s, isSkipVad: %v\n", state.GetClientVoiceStop(), state.AsrAudioBuffer.GetAsrDataSize(), state.ListenMode, skipVad)
 
 				n, err := audioProcesser.DecoderFloat32(opusFrame, pcmFrame)
 				if err != nil {
@@ -109,11 +109,11 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 							pcmData = state.AsrAudioBuffer.GetAndClearAllData()
 						}
 					}
-					log.Debugf("isVad, pcmData len: %d, vadPcmData len: %d, haveVoice: %v", len(pcmData), len(vadPcmData), haveVoice)
+					//log.Debugf("isVad, pcmData len: %d, vadPcmData len: %d, haveVoice: %v", len(pcmData), len(vadPcmData), haveVoice)
 				}
 
 				if haveVoice {
-					log.Infof("检测到语音, len: %d", len(pcmData))
+					//log.Infof("检测到语音, len: %d", len(pcmData))
 					state.SetClientHaveVoice(true)
 					state.SetClientHaveVoiceLastTime(time.Now().UnixMilli())
 					state.Vad.ResetIdleDuration()
@@ -139,7 +139,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 
 				if clientHaveVoice {
 					//vad识别成功, 往asr音频通道里发送数据
-					log.Infof("vad识别成功, 往asr音频通道里发送数据, len: %d", len(pcmData))
+					//log.Infof("vad识别成功, 往asr音频通道里发送数据, len: %d", len(pcmData))
 					state.Asr.AddAudioData(pcmData)
 				}
 

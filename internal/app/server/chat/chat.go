@@ -140,7 +140,15 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 }
 
 func (c *ChatManager) Start() error {
-	return c.session.Start(c.ctx)
+	err := c.session.Start(c.ctx)
+	if err != nil {
+		log.Errorf("ChatManager启动失败: %v", err)
+		return err
+	}
+	select {
+	case <-c.ctx.Done():
+	}
+	return nil
 }
 
 // 主动关闭断开连接
